@@ -1,0 +1,42 @@
+PROMPT 25 — PHASE-3A.3 (BATCH-5) | MIGRATE ACCOUNT_ID LOOKUPS TO /api/table-read (NEON) | EVIDENCE | STOP
+
+ROLE: Frontend/Data Layer Engineer
+MODE: FRONTEND ONLY
+SCOPE: src/lib/dataGateway.ts ONLY
+
+GOAL:
+In dataGateway.ts, migrate the "accounting account_id lookups" block (around L570–650) so that:
+- In NEON backend: it uses /api/table-read (allowlist) for reads
+- In SUPABASE backend: it keeps existing supabase.from() logic unchanged
+
+STRICT RULES:
+- Modify ONLY the specific lookup helper(s)/functions in the L570–650 section.
+- Do NOT touch queryTable() generic engine, dashboard, transfers, purchasing embeds, journal_entry_lines, or any other functions.
+- Do NOT change return shapes. Keep current behavior identical.
+- No UI changes, no other file changes.
+
+IMPLEMENTATION REQUIREMENTS:
+1) Identify every lookup in that block (tables + selected columns), typically returning account_id (or similar) by id/branch_id/etc.
+2) For each lookup, implement NEON path via /api/table-read:
+   - table=<table>
+   - select=<needed columns only> (e.g., "account_id")
+   - filters=<same filters as supabase path>
+   - limit=1 when appropriate
+3) Ensure orderBy is omitted unless required (most are single-row by key).
+4) Keep Supabase fallback exactly as-is.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- (show full diff for the modified lookup block only)
+C) Grep proof:
+   rg -n "L570|L571|L572|cash_vaults|gold_vaults|branch_inventory_accounts|payment_account_settings|production_account_settings|purchase_invoice_lines|returns" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\(" src/lib/dataGateway.ts
+   (Explain which supabase.from calls remain in that block and confirm they are only in Supabase fallback branches.)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+E) Runtime verification:
+   - With backend=neon, hit at least 3 representative flows that call these lookups (or curl /api/table-read directly) and show 200 responses.
+   - Provide 3 raw logs/status lines proving /api/table-read was used.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

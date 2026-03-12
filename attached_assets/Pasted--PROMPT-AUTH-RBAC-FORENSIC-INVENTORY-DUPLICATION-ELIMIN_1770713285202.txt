@@ -1,0 +1,156 @@
+✅ PROMPT — AUTH/RBAC FORENSIC INVENTORY + DUPLICATION ELIMINATION DECISION | EVIDENCE ONLY | NO GUESSING | STOP
+
+ROLE: Senior Full-Stack Engineer / Auditor (Express + Postgres/Neon + React/Vite)
+MODE: Read-only audit first. Do NOT change behavior or delete code in this run.
+
+GOAL:
+1) Discover the COMPLETE current auth + permissions implementation as-is (server + UI + DB).
+2) Identify the SINGLE source of truth currently used at runtime (sessions, roles, modules, permissions).
+3) Detect and list ALL duplications (duplicate endpoints, duplicate auth logic, duplicate tables, parallel providers).
+4) Produce a hard decision: (A) Consolidate/reuse existing OR (B) Clean rebuild. Decision must be evidence-backed.
+5) Output next-step plan to implement without duplication (gates), but do NOT implement now.
+
+HARD RULES:
+- NO guessing of table schemas, column names, response shapes.
+- Every claim must include raw command/SQL output.
+- If something cannot be proven, say "UNPROVEN" and show what was attempted.
+- Do NOT modify files. Do NOT add endpoints. Do NOT seed data. Evidence only.
+
+========================
+SECTION 0 — REPO MAP (RAW)
+========================
+S0.1) List key auth/rbac files quickly:
+ls -la server src | sed -n '1,120p' || true
+find server src -maxdepth 4 -type f \( -name "*.ts" -o -name "*.tsx" \) | rg -n "auth|session|role|perm|module|rbac|supabase" || true
+
+==================================
+SECTION 1 — SERVER AUTH/RBAC MAP
+==================================
+S1.1) Find auth middlewares & usage:
+rg -n "requireSession|requireAuth|auth middleware|__session|session_token|Authorization|bearer" server --glob='*.ts' || true
+
+S1.2) Find permission/module enforcement in server:
+rg -n "requirePerm|permission|role_modules|module-context|moduleId|has_role|is_admin|admin" server --glob='*.ts' || true
+
+S1.3) Extract routes related to auth/rbac (raw excerpts):
+rg -n "app\.(get|post|put|patch|delete)\(\"/api/(auth|login|logout|me|session|module-context-data|roles|permissions|screens|custom-roles)" server/routes.ts || true
+
+S1.4) Detect duplicate SAME-METHOD routes in routes.ts (proof):
+node - <<'NODE'
+const fs=require('fs');
+const s=fs.readFileSync('server/routes.ts','utf8').split('\n');
+const re=/app\.(get|post|put|patch|delete)\(\s*["'`](\/api\/[^"'`]+)["'`]/;
+const map=new Map();
+for(let i=0;i<s.length;i++){
+  const m=s[i].match(re);
+  if(!m) continue;
+  const key=m[1].toUpperCase()+" "+m[2];
+  if(!map.has(key)) map.set(key, []);
+  map.get(key).push(i+1);
+}
+let dup=0;
+for (const [k, arr] of [...map.entries()].sort()){
+  if(arr.length>1){ dup++; console.log("DUP",k,arr.join(',')); }
+}
+console.log("DUP_COUNT",dup);
+NODE
+
+S1.5) For every DUP route above, print the full block boundaries (start line +-40) so we can see which one is protected/unprotected:
+(If DUP_COUNT>0) use sed -n '<start-20>,<start+80>p' for each start line. Paste raw.
+
+==================================
+SECTION 2 — FRONTEND AUTH/RBAC MAP
+==================================
+S2.1) Find ModuleContext / route guards / permission checks:
+rg -n "ModuleContext|module-context-data|ProtectedRoute|require.*module|hasModuleAccess|permissions|roles|isAdmin" src --glob='*.ts' --glob='*.tsx' || true
+
+S2.2) Identify exact endpoint(s) UI calls to decide access:
+rg -n "/api/module-context-data|/api/auth/me|/api/login|/api/me|ACTIVE_DATA_BACKEND" src --glob='*.ts' --glob='*.tsx' || true
+
+S2.3) Find any provider-dependent auth usage in UI (supabase auth etc):
+rg -n "supabase\.auth|signIn|signOut|getSession|onAuthStateChange" src --glob='*.ts' --glob='*.tsx' || true
+
+==================================
+SECTION 3 — DATABASE AUTH/RBAC INVENTORY (RAW SQL)
+==================================
+S3.1) List candidate tables that exist (no guessing):
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+select tablename
+from pg_tables
+where schemaname='public'
+and tablename ~ '(user|role|perm|session|auth|module|screen)'
+order by tablename;" || true
+
+S3.2) For each table found above, show columns:
+(If any tables found)
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+select table_name, column_name, data_type
+from information_schema.columns
+where table_schema='public'
+and table_name in (
+  select tablename from pg_tables
+  where schemaname='public'
+  and tablename ~ '(user|role|perm|session|auth|module|screen)'
+)
+order by table_name, ordinal_position;" || true
+
+S3.3) Check for auth session storage specifically (prove):
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+select tablename from pg_tables
+where schemaname='public' and tablename in ('auth_sessions','sessions','user_sessions','supabase_auth_sessions','replit_sessions');" || true
+
+S3.4) Check for role_modules existence (prove):
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+select to_regclass('public.role_modules') as role_modules_regclass,
+       to_regclass('public.modules') as modules_regclass,
+       to_regclass('public.screens') as screens_regclass;" || true
+
+S3.5) Data sanity counts (NO sensitive data dumps):
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+select
+  (select count(*) from public.users) as users_count,
+  (select count(*) from public.user_roles) as user_roles_count,
+  (select count(*) from public.roles) as roles_count,
+  (select count(*) from public.permissions) as permissions_count,
+  (select count(*) from public.role_permissions) as role_permissions_count
+;" 2>/dev/null || true
+(If tables missing, show which queries failed.)
+
+==================================
+SECTION 4 — RUNTIME SOURCE-OF-TRUTH PROOF (EVIDENCE)
+==================================
+S4.1) Identify the current access gating endpoint and expected shape (from code, no assumptions):
+- Open and paste ONLY the relevant code blocks:
+  - server route for /api/module-context-data (or /api/auth/me if used)
+  - src/core/contexts/ModuleContext.tsx consumer logic
+Use: sed -n 'start,endp' with exact line ranges.
+
+S4.2) Confirm which cookie name server checks in requireSession (proof):
+Open requireSession implementation and paste the block that reads cookies/headers.
+
+==================================
+SECTION 5 — DUPLICATION & CONFLICT MATRIX (OUTPUT)
+==================================
+Produce a table (no prose) with these columns:
+- Layer (DB / server / UI)
+- Component (table/file/route)
+- Purpose (sessions / roles / permissions / modules)
+- Current status (USED_AT_RUNTIME / DEAD_CODE / DUPLICATE / UNPROVEN)
+- Evidence pointer (command output + line numbers)
+
+==================================
+SECTION 6 — DECISION (A or B) + NEXT STEPS (NO IMPLEMENTATION)
+==================================
+Based ONLY on evidence, choose one:
+A) CONSOLIDATE/REUSE — if there is a coherent DB-backed sessions + RBAC already
+B) CLEAN REBUILD — if auth/rbac is fragmented, provider-dependent, duplicated, or missing core tables
+
+Output must be:
+1) DECISION: A or B (one line)
+2) 5 bullet reasons (each with evidence pointer)
+3) “Minimal Clean Plan” (tasklist only) to reach provider-independent auth/rbac, with anti-duplication gates:
+   - route-duplication detector gate
+   - lint/rg gates for forbidden patterns
+   - single endpoint contract for UI access checks
+
+STOP.

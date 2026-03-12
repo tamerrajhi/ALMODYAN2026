@@ -1,0 +1,59 @@
+✅ PROMPT — STOP-RET-P0-FK-EVIDENCE | Prove and document the FK change on return_items.item_id | EVIDENCE ONLY | STOP
+
+ROLE: Auditor
+
+MODE: EVIDENCE ONLY — NO NEW CHANGES
+
+You stated you changed FK on return_items.item_id from legacy jewelry_items to unique_items.
+Provide RAW evidence:
+
+A) Show existing constraints BEFORE/AFTER (current state is acceptable if "before" not available)
+Run and paste:
+
+1) Current FK(s) on return_items:
+SELECT
+  conname,
+  pg_get_constraintdef(c.oid) AS def
+FROM pg_constraint c
+JOIN pg_class t ON c.conrelid = t.oid
+JOIN pg_namespace n ON t.relnamespace = n.oid
+WHERE n.nspname='public' AND t.relname='return_items' AND c.contype='f'
+ORDER BY conname;
+
+2) Show referenced table/column for item_id using information_schema:
+SELECT
+  tc.constraint_name,
+  ccu.table_name AS referenced_table,
+  ccu.column_name AS referenced_column
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+JOIN information_schema.constraint_column_usage ccu
+  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+WHERE tc.table_schema='public'
+  AND tc.table_name='return_items'
+  AND tc.constraint_type='FOREIGN KEY'
+  AND kcu.column_name='item_id';
+
+B) Provide the exact DDL executed
+Paste exact SQL statements used (DROP CONSTRAINT / ADD CONSTRAINT), including constraint names.
+
+C) Safety checks (must paste outputs)
+1) jewelry_items row count:
+SELECT count(*) AS jewelry_items_cnt FROM jewelry_items;
+
+2) return_items rows with non-null item_id:
+SELECT count(*) AS return_items_with_item_id FROM return_items WHERE item_id IS NOT NULL;
+
+3) Validate all existing return_items.item_id values exist in unique_items:
+SELECT count(*) AS missing_in_unique
+FROM return_items ri
+LEFT JOIN unique_items ui ON ui.id = ri.item_id
+WHERE ri.item_id IS NOT NULL AND ui.id IS NULL;
+
+D) Regression sanity
+Re-run a minimal GT of the function WITHOUT changing anything:
+- Call complete_pos_piece_return_atomic on a newly sold item (or rollback and re-sell if needed) and confirm it still inserts into return_items successfully.
+Paste the JSON result only.
+
+STOP.

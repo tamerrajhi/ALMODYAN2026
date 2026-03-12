@@ -1,0 +1,97 @@
+نفّذ SQL Migration PROD-SAFE في قاعدة البيانات (Postgres) لإضافة توليد سيريال جديد per-type:
+
+🎯 الهدف
+إضافة:
+1) جدول public.serial_counters
+2) function public.normalize_prefix_from_stockcode(stockcode text)
+3) function public.generate_serial(prefix text)
+
+بدون تعديل أو حذف أي RPC حالية الآن.
+
+✅ نفّذ SQL التالي كما هو:
+
+-- 1) counters table
+create table if not exists public.serial_counters (
+  prefix text primary key,
+  next_seq bigint not null default 1,
+  updated_at timestamptz not null default now()
+);
+
+-- seed known prefixes
+insert into public.serial_counters(prefix, next_seq)
+values
+  ('FSETN', 1),
+  ('FSETE', 1),
+  ('FSETR', 1),
+  ('FSETB', 1)
+on conflict (prefix) do nothing;
+
+-- 2) normalize prefix from STOCKCODE / TYPE text
+create or replace function public.normalize_prefix_from_stockcode(p_stockcode text)
+returns text
+language plpgsql
+as $$
+declare
+  v_raw text := nullif(trim(coalesce(p_stockcode,'')), '');
+  v_prefix text;
+begin
+  if v_raw is null then
+    raise exception 'Missing STOCKCODE/TYPE for serial generation';
+  end if;
+
+  v_prefix := upper(v_raw);
+
+  -- tolerate suffixes, keep first 5 chars
+  if v_prefix not in ('FSETN','FSETE','FSETR','FSETB') then
+    v_prefix := substring(v_prefix from 1 for 5);
+  end if;
+
+  if v_prefix not in ('FSETN','FSETE','FSETR','FSETB') then
+    raise exception 'Unknown STOCKCODE/TYPE prefix: %', p_stockcode
+      using errcode = '22023';
+  end if;
+
+  return v_prefix;
+end;
+$$;
+
+-- 3) atomic serial generator (6 digits)
+create or replace function public.generate_serial(p_prefix text)
+returns text
+language plpgsql
+as $$
+declare
+  v_seq bigint;
+begin
+  update public.serial_counters
+     set next_seq = next_seq + 1,
+         updated_at = now()
+   where prefix = p_prefix
+   returning (next_seq - 1) into v_seq;
+
+  if v_seq is null then
+    insert into public.serial_counters(prefix, next_seq)
+    values (p_prefix, 2)
+    on conflict (prefix) do update
+      set next_seq = public.serial_counters.next_seq + 1,
+          updated_at = now()
+    returning (next_seq - 1) into v_seq;
+  end if;
+
+  return p_prefix || lpad(v_seq::text, 6, '0');
+end;
+$$;
+
+📎 Evidence REQUIRED
+1) SELECT * FROM public.serial_counters ORDER BY prefix;
+2) جرّب توليد 3 أرقام لكل prefix (اختبار سريع):
+
+select public.generate_serial('FSETN') as s1,
+       public.generate_serial('FSETN') as s2,
+       public.generate_serial('FSETN') as s3;
+
+select public.generate_serial('FSETE') as e1,
+       public.generate_serial('FSETE') as e2;
+
+3) ثم اعرض counters بعد الاختبار:
+select * from public.serial_counters order by prefix;

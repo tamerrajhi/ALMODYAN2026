@@ -1,0 +1,138 @@
+✅ PROMPT — FINAL SUPABASE DB SHUTDOWN (PROD PATH) | WAVE 5 → DONE | EVIDENCE ONLY | NO GUESSING | STOP
+
+ROLE: Full-stack Engineer (Vite/React + Express + Neon)
+MODE: Execute. Evidence-first. No speculation. No invented schemas.
+
+GOAL (non-negotiable):
+Eliminate ALL production Supabase DB usage from frontend:
+- supabase.from(...)
+- supabase.rpc(...)
+from ALL production-path code (src/ excluding DEV-only health components).
+Keep Supabase ONLY for edge-functions/storage temporarily IF present (Phase later).
+End state for this run:
+- PROD_PATH: 0 files, 0 calls for supabase.(from|rpc)
+- All new endpoints are requireSession
+- No duplicate same-method routes
+- Build passes
+
+STRICT RULES:
+1) NO guessing response shapes. Derive from the exact supabase query blocks in each file.
+2) Do NOT change UI/UX/state except swapping data source.
+3) Prefer explicit feature endpoints. Reuse existing endpoints when possible.
+4) Every new GET endpoint must:
+   - requireSession ON
+   - return JSON only
+   - deterministic ordering if original had order
+   - handle missing tables with 501 JSON { error_code:"SCHEMA_NOT_READY", error:"..." }
+5) Evidence required after EACH file:
+   - git diff --stat
+   - git diff (only touched files)
+   - curl -i (401 no cookie) for new endpoints
+   - curl -i (200/501 with cookie) for new endpoints
+   - rg proof: that file has zero supabase.(from|rpc)
+6) Final evidence:
+   - PROD_PATH supabase count = 0
+   - DUP_COUNT for routes = 0
+   - npm run build PASS
+
+========================
+SECTION A — BASELINE INVENTORY (RAW)
+A1) Multiline-aware inventory of supabase DB calls:
+node - <<'NODE'
+const fs=require('fs'), path=require('path');
+const root='src';
+let files=[], total=0;
+function walk(d){
+  for(const ent of fs.readdirSync(d,{withFileTypes:true})){
+    const p=path.join(d,ent.name);
+    if(ent.isDirectory()) walk(p);
+    else if(p.endsWith('.ts')||p.endsWith('.tsx')){
+      const s=fs.readFileSync(p,'utf8');
+      const m=[...s.matchAll(/supabase\s*\.\s*(from|rpc)\s*\(/g)];
+      if(m.length){ files.push([p,m.length]); total+=m.length; }
+    }
+  }
+}
+walk(root);
+files.sort((a,b)=>b[1]-a[1]);
+console.log('TOTAL_FILES',files.length);
+console.log('TOTAL_CALLS',total);
+console.log('TOP20');
+for(const [p,n] of files.slice(0,20)) console.log(String(n).padStart(3), p);
+NODE
+
+A2) PROD_PATH definition:
+- Exclude DEV-only health components if already gated by import.meta.env.DEV (keep as-is).
+- Treat everything else in src/ as PROD unless proven tree-shaken out of prod build.
+
+A3) Print the exact remaining TOP20 list (from A1 output) in the report.
+
+========================
+SECTION B — WAVE 5 EXECUTION (NO QUESTIONS)
+Pick Wave 5 targets as the current TOP bucket from A1 (take these first, in this order):
+1) src/pages/production/ProductionPlanningPage.tsx
+2) src/pages/settings/DepartmentsPage.tsx
+3) src/components/reports/dashboard/BranchDailyPerformanceReport.tsx
+4) src/components/reports/dashboard/SalesVsInventoryReport.tsx
+5) src/components/reports/financial/AdvancedTrialBalanceReport.tsx
+6) src/components/reports/pos/ZReport.tsx
+7) src/components/reports/pos/DiscountsReport.tsx
+8) src/components/reports/pos/EmployeePerformanceReport.tsx
+9) src/components/reports/pos/NetSalesReport.tsx
+10) src/components/reports/purchases/NetPurchasesReport.tsx
+11) src/components/reports/purchases/PurchaseReturnsReport.tsx
+12) src/pages/gemstones/LinkGemstoneToProduct.tsx
+(If any file is not in inventory anymore, skip and take the next from TOP20.)
+
+FOR EACH FILE i:
+B1) Paste the EXACT supabase query blocks used in that file (verbatim).
+B2) Decide reuse vs new endpoints:
+- First search routes.ts for an equivalent endpoint (same data / filters).
+- If not present, create minimal explicit GET endpoint(s) to match the query.
+B3) Implement backend endpoint(s) in server/routes.ts:
+- requireSession ON
+- SQL mirrors original select/filters/ordering/limit
+- Join logic matches supabase select(...) join semantics
+- 501 SCHEMA_NOT_READY if table missing (to_regclass check or try/catch by error code)
+B4) Add/extend typed wrappers in src/lib/dataGateway.ts OR use apiClient.get/fetch consistently.
+B5) Replace supabase calls in the file with Neon API calls.
+B6) Remove supabase imports from that file.
+B7) Evidence pack per file:
+- rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <file>  => MUST be empty
+- git diff --stat
+- git diff (only touched)
+- curl proof:
+  * without cookie => 401 JSON for new endpoints
+  * with cookie => 200 JSON or 501 JSON SCHEMA_NOT_READY
+- runtime/workflow logs: no 500, no HTML response
+
+========================
+SECTION C — AUTO-CONTINUE WAVES UNTIL ZERO (NO STOP AFTER WAVE 5)
+After Wave 5 completes:
+C1) Re-run the inventory command from A1.
+C2) Repeat the same per-file procedure for the next highest files (Wave 6, Wave 7, …) UNTIL:
+- PROD_PATH supabase.from/rpc calls = 0
+(DEV-only health folder may keep supabase calls ONLY if proven tree-shaken from production build chunk.)
+
+========================
+SECTION D — HARD GATES (PREVENT REGRESSION)
+D1) Add a simple CI/pre-commit script (scripts/no-supabase-db.sh):
+- Fail if any PROD file contains supabase.(from|rpc)(
+- Allow only src/components/health/* if it’s DEV-only gated.
+Provide the exact grep command used.
+
+D2) Add a server-side duplicate route detector script (scripts/no-duplicate-routes.sh) or equivalent check:
+- Fail if same METHOD+PATH appears more than once in server/routes.ts
+Show raw output.
+
+========================
+SECTION E — FINAL PROOF (MUST)
+E1) Show FINAL inventory (A1) output: TOTAL_FILES 0, TOTAL_CALLS 0 for PROD_PATH.
+E2) npm run build => PASS
+E3) Show dup-route count output => 0
+E4) Provide final summary table:
+- migrated files count
+- migrated calls count
+- new endpoints count
+- endpoints returning 501 SCHEMA_NOT_READY (list)
+STOP.

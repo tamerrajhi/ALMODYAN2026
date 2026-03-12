@@ -1,0 +1,66 @@
+IMPLEMENTATION — LIMITED SCOPE.
+You may apply DB changes using safe SQL (INSERT/UPSERT) only.
+Do NOT refactor code. Do NOT change frontend files in this prompt.
+Goal: Create two MVP roles and assign minimal access.
+
+Preconditions (from audit):
+- POS screen_path exists: /pos (module sales)
+- POSReturn exists: /pos/return (module sales)
+- Unique Return route exists: /purchasing/returns/unique (module purchases) but NOT registered as a screen_path currently.
+
+Rules:
+- Use custom_roles + user_custom_roles + role_modules + role_permissions only (do NOT use legacy user_roles).
+- Ensure idempotent SQL using ON CONFLICT where constraints exist.
+- Keep permissions minimal: can_view only unless explicitly needed.
+
+Tasks:
+
+A) Ensure screens registry contains required screens
+1) Confirm /pos exists in screens. If not, insert it with module_key='sales' and proper names.
+2) Confirm /purchasing/returns/unique exists in screens. If not, INSERT it:
+   - screen_path = '/purchasing/returns/unique'
+   - module_key = 'purchases'
+   - screen_name_ar = 'مرتجع القطع الفريدة'
+   - screen_name_en = 'Unique Items Return' (or similar)
+   Use ON CONFLICT (screen_path) DO NOTHING/UPDATE safely.
+
+B) Create two custom roles
+3) Upsert into custom_roles:
+   - role_key: 'branch_seller_pos_only', name_ar: 'بائع فرع (POS فقط)', is_admin=false
+   - role_key: 'branch_supervisor_pos_plus_unique_returns', name_ar: 'مشرف فرع (POS + مرتجع القطع الفريدة)', is_admin=false
+   (Use actual schema columns in custom_roles as discovered; adapt names accordingly.)
+
+C) Grant module access (role_modules)
+4) Seller role: module_key 'sales' only
+5) Supervisor role: modules 'sales' and 'purchases' (only if needed for unique returns screen)
+
+D) Grant screen permissions (role_permissions)
+6) Seller:
+   - Grant can_view on '/pos' only
+7) Supervisor:
+   - Grant can_view on '/pos'
+   - Grant can_view on '/purchasing/returns/unique'
+   - OPTIONAL: do NOT grant '/pos/return' unless required (default: not granted)
+
+Ensure role_permissions uses the existing schema (view/create/edit/delete flags).
+Set create/edit/delete=false by default.
+
+E) Assign roles to users (user_custom_roles) + branch link (user_branches)
+8) Identify the branch seller user(s) and supervisor user(s):
+   - If there are test users: user_مبيعات as seller, and create/choose a supervisor user (do NOT invent; list existing users)
+9) For the chosen users:
+   - Assign seller role to seller user via user_custom_roles
+   - Assign supervisor role to supervisor user via user_custom_roles
+10) Ensure each user is linked to a branch in user_branches (use existing branch or default_branch_id).
+   - Do NOT change default_branch_id unless necessary.
+
+Evidence required:
+1) SQL statements executed (or migration file content if you use migrations).
+2) Before/after SELECTs:
+   - show created roles in custom_roles
+   - show role_modules rows for the two roles
+   - show role_permissions rows for the two roles
+   - show user_custom_roles assignments
+3) If you inserted the new screen, show the row in screens.
+
+Stop after completing DB-only changes.

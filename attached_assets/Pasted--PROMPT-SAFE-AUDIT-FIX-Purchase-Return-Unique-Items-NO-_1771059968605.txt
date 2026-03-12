@@ -1,0 +1,200 @@
+✅ PROMPT — SAFE AUDIT & FIX
+Purchase Return – Unique Items (NO BREAKING CHANGES)
+Objective
+
+Fix failure in:
+
+Purchasing → Unique Purchase Return
+
+WITHOUT modifying system logic or breaking workflows.
+
+Error seen:
+
+null value in column "client_request_id"
+in relation "atomic_workflow_requests"
+
+
+Goal:
+
+Diagnose root cause.
+
+Confirm whether frontend or RPC is missing client_request_id.
+
+Apply minimal safe fix.
+
+Provide evidence queries.
+
+🚫 STRICT RULES (DO NOT BREAK SYSTEM)
+
+DO NOT:
+
+change schema
+
+rename statuses
+
+change accounting logic
+
+modify inventory logic
+
+change workflows
+
+modify JE generation
+
+modify triggers
+
+ONLY:
+
+audit
+
+add safe guard
+
+fix idempotency handling
+
+keep behavior identical
+
+STEP 1 — AUDIT FRONTEND CALL
+
+Find where RPC is called:
+
+Search:
+
+unique_purchase_return_create_atomic
+
+
+Verify payload sent to RPC.
+
+Check:
+
+client_request_id exists?
+
+
+Output:
+
+console.log("RETURN RPC PAYLOAD:", payload);
+
+
+Provide evidence:
+
+full payload example
+
+confirm if ID missing or null
+
+NO changes yet.
+
+STEP 2 — AUDIT RPC ENTRY
+
+Open function:
+
+unique_purchase_return_create_atomic(jsonb)
+
+
+Check:
+
+args->>'client_request_id'
+
+
+Is it mandatory?
+Is workflow row inserted before validation?
+
+Provide evidence:
+
+SELECT proname
+FROM pg_proc
+WHERE proname = 'unique_purchase_return_create_atomic';
+
+
+and function snippet.
+
+STEP 3 — CHECK WORKFLOW TABLE
+
+Run:
+
+SELECT *
+FROM atomic_workflow_requests
+ORDER BY created_at DESC
+LIMIT 5;
+
+
+Check:
+
+• Is client_request_id null?
+• Are rows stuck in pending?
+
+Provide output.
+
+STEP 4 — SAFE FIX STRATEGY
+
+Apply ONLY if frontend missing ID.
+
+Fix method (safe):
+
+Generate ID in frontend:
+
+const KEY = `upr:return:${invoiceId}`;
+
+let clientRequestId = localStorage.getItem(KEY);
+
+if (!clientRequestId) {
+  clientRequestId = crypto.randomUUID();
+  localStorage.setItem(KEY, clientRequestId);
+}
+
+
+Send it to RPC:
+
+client_request_id: clientRequestId
+
+
+On success:
+
+localStorage.removeItem(KEY);
+
+STEP 5 — RPC SAFE GUARD (NO LOGIC CHANGE)
+
+At RPC start:
+
+IF v_client_req_id IS NULL THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', 'MISSING_CLIENT_REQUEST_ID'
+  );
+END IF;
+
+
+This avoids DB constraint crash.
+
+No workflow logic change.
+
+STEP 6 — VERIFY RETURN STILL WORKS
+
+Run:
+
+SELECT return_number, created_at
+FROM unique_purchase_returns
+ORDER BY created_at DESC
+LIMIT 5;
+
+
+Ensure:
+
+• Only one return created
+• No duplicates
+• No errors
+
+SUCCESS CONDITIONS
+
+Return creation:
+
+✔ succeeds
+✔ no NOT NULL error
+✔ retry safe
+✔ no duplicate documents
+✔ inventory intact
+✔ accounting intact
+
+IMPORTANT
+
+If audit shows frontend already sends ID,
+DO NOT APPLY FIX.
+
+Return evidence instead.

@@ -1,0 +1,126 @@
+ROLE: Senior Full-Stack Engineer (React + Supabase/Postgres)
+MODE: IMPLEMENT + GATE TESTS + EVIDENCE
+SCOPE: ONLY /import screen (src/pages/ImportPage.tsx) is the canonical import UI.
+GOAL: Implement complete Multi-Invoice Excel Import for UNIQUE PIECES with SUPP INV dedupe, fully ATOMIC, and fully accounted/inventory-safe.
+
+HARD RULES
+1) NO DIRECT WRITES from client (NO supabase.from().insert/update/upsert/delete anywhere in ImportPage.tsx or related client services). All writes MUST go through RPCs only.
+2) /import must support selecting MULTIPLE Excel files (multi-invoice). Each file represents exactly ONE supplier invoice (SUPP INV).
+3) DEDUPE RULE: dedupe ONLY by SUPP INV for the same supplier_id:
+   - If user selects multiple files: block if any duplicate SUPP INV exists among the selected files (case-insensitive + trimmed).
+   - Block if any SUPP INV already exists in DB for that supplier (non-voided purchase invoices).
+   - MODEL duplicates are allowed and must NOT block import.
+4) This is for UNIQUE PIECES purchase invoices created from Excel (invoice_type='purchase' on invoices, item movements and inventory updates must be correct).
+5) Everything must be ATOMIC end-to-end: invoice header + invoice lines + jewelry_items + movements + journal entry must be consistent, with idempotency supported.
+
+WORK TO DO (DELIVERABLES)
+A) UI (/import) IMPLEMENTATION
+1) Ensure ImportPage.tsx is the only import screen in navigation and routing (already done). Do not create new routes.
+2) Update ImportPage.tsx to:
+   - accept multiple files: <input type="file" multiple accept=".xlsx,.xls">
+   - parse each file separately (each file = one invoice)
+   - extract SUPP INV from column exactly named "SUPP INV"
+   - normalize SUPP INV: upper(trim(value))
+   - enforce: each file must contain exactly ONE unique SUPP INV value across its rows; if 0 or >1 => file invalid and import blocked
+   - perform CROSS-FILE duplicate check on normalized SUPP INV before any DB calls; if duplicates => block and show clear Arabic error listing files
+   - perform DB precheck BEFORE any creation:
+       call RPC purchase_invoice_supp_inv_precheck(p_supplier_id, p_supp_invs[]) and block if any exists
+   - only if preflight passes:
+       for each file:
+         call a SINGLE atomic RPC that creates the full purchase invoice + unique items + movements + JE
+         show progress per file (success/failure)
+       stop on first create failure and show Arabic error; do not partially continue silently.
+3) UI must show a “Preflight Results” section:
+   - list each selected file with: extracted SUPP INV, rows count, validity status, error message if invalid
+   - show DB-existing conflicts and cross-file conflicts clearly in Arabic.
+
+B) DB/RPC (SUPABASE) IMPLEMENTATION
+1) Ensure invoices has supplier_invoice_no TEXT column and unique index exists:
+   - UNIQUE INDEX on (supplier_id, upper(trim(supplier_invoice_no)))
+   - WHERE invoice_type='purchase' AND status <> 'voided' AND supplier_invoice_no not null/empty
+2) Ensure purchase_invoice_supp_inv_precheck(p_supplier_id uuid, p_supp_invs text[]) exists and returns {success, exists: text[]}
+3) Create/Update ONE MAIN ATOMIC RPC for this screen:
+   NAME: purchase_invoice_import_unique_atomic(p_payload jsonb)
+   RESPONSIBILITIES (must be in ONE transaction):
+   - Validate required fields: supplier_id, branch_id, supplier_invoice_no, items[]
+   - Normalize supplier_invoice_no = upper(trim(...))
+   - Dedupe check inside RPC (same as index rule) returning error_code SUPP_INV_DUPLICATE with Arabic message
+   - Create invoice row in invoices (invoice_type='purchase', status='posted', supplier_invoice_no stored normalized, journal_entry_id set)
+   - Create purchase invoice lines (purchase_invoice_lines)
+   - Create jewelry_items for each unique piece (based on sheet rows) with:
+       branch_id = branch_id
+       sale_status='available'
+       sold_at NULL
+       unit_cost and other required attributes
+       link them to invoice_id and/or batch_id if your schema supports it
+   - Create item_movements ledger entries for purchase (movement_type='purchase_in' or consistent naming), with reference_type='purchase_invoice' and reference_id=invoice_id, include unit_cost
+   - Create balanced JE and link invoices.journal_entry_id to the created JE:
+       debit/credit totals must be >0 and equal
+       JE lines Arabic descriptions
+   - Return structured JSON:
+       { success, invoice_id, invoice_number, supplier_invoice_no, journal_entry_id, je_no, items_created, movements_created }
+   - Idempotency:
+       p_payload includes client_request_id (uuid/text). Use existing begin_workflow_request / pos_workflow_requests to support cached success and IDEMPOTENCY_CONFLICT when same id used with different payload.
+
+IMPORTANT: the RPC must not rely on client-side direct inserts into helper tables. If ImportPage currently creates purchase_batches or jewelry_sets via direct writes, move those writes into atomic RPCs as needed OR keep them read-only. DO NOT leave any direct write.
+
+C) EVIDENCE REQUIREMENTS (MUST OUTPUT)
+1) Code Evidence (ImportPage.tsx):
+   - show line-numbered snippets for:
+     a) multi-file input
+     b) SUPP INV extraction + normalization
+     c) per-file validation (exactly one SUPP INV)
+     d) cross-file duplicate gate (early return)
+     e) DB precheck call (early return)
+     f) create loop calling purchase_invoice_import_unique_atomic per file
+   - show grep proof:
+     grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src/pages/ImportPage.tsx
+     result must be EMPTY (or only comments)
+2) SQL Evidence:
+   - show CREATE/REPLACE for purchase_invoice_import_unique_atomic
+   - show unique index definition for invoices_purchase_supp_inv_uq
+   - show purchase_invoice_supp_inv_precheck definition or proof it exists
+3) GATE TESTS (MUST RUN AND PASTE RESULTS)
+   Use a real import run (multi-file) with at least 2 files and show:
+   A) Invoices created (one per file)
+      SELECT supplier_id, supplier_invoice_no, invoice_number, status, created_at
+      FROM invoices
+      WHERE invoice_type='purchase'
+      ORDER BY created_at DESC
+      LIMIT 20;
+   B) SUPP INV duplicates rejected (DB-level)
+      SELECT supplier_id, supplier_invoice_no, COUNT(*)
+      FROM invoices
+      WHERE invoice_type='purchase' AND status <> 'voided'
+      GROUP BY 1,2
+      HAVING COUNT(*) > 1;
+      Must return 0 rows.
+   C) JE linkage + balanced
+      SELECT i.invoice_number, i.supplier_invoice_no, i.status,
+             je.entry_number, je.status AS je_status,
+             je.total_debit, je.total_credit
+      FROM invoices i
+      JOIN journal_entries je ON je.id = i.journal_entry_id
+      WHERE i.invoice_type='purchase'
+      ORDER BY i.created_at DESC
+      LIMIT 20;
+      Must show total_debit=total_credit>0
+   D) Inventory visibility in POS (branch filter)
+      SELECT id, item_code, branch_id, sale_status, sold_at, unit_cost
+      FROM jewelry_items
+      WHERE branch_id = '<BRANCH_ID_USED_IN_IMPORT>'
+        AND sale_status = 'available'
+        AND sold_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 50;
+   E) Purchase movements created
+      SELECT movement_type, reference_type, reference_id, unit_cost, created_at
+      FROM item_movements
+      WHERE reference_type='purchase_invoice'
+      ORDER BY created_at DESC
+      LIMIT 100;
+
+STOP CONDITIONS
+- If any gate test fails, STOP and report exactly which invariant failed with the query output.
+- If any direct write remains in ImportPage.tsx, STOP and remove it (RPC-only).
+- Do NOT create new import pages. /import is canonical.

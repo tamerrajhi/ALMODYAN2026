@@ -1,0 +1,54 @@
+✅ PROMPT — STOP-POS-VERIFY | Verify POS Scanner + iPhone Camera in Reality | EVIDENCE (RAW) | POSPage.tsx ONLY | STOP
+
+ROLE: QA + Engineer
+
+MODE: VERIFY FIRST, then FIX ONLY IF NEEDED (POSPage.tsx only)
+
+TASK 1 — Provide actual code evidence (NOT summaries)
+A) Paste the exact updated code blocks from src/pages/POSPage.tsx for:
+  1) barcode input JSX section (the Input + buttons area)
+  2) the onKeyDown handler for Enter
+  3) the camera open/start function (getUserMedia + BarcodeDetector setup)
+  4) stopCameraStream() and the useEffect cleanup
+
+B) Provide the exact response shape/UX when handleBarcodeScan fails to find an item (toast/message). Copy the relevant code block.
+
+TASK 2 — Real device gate tests (must be executed, not “ready”)
+Provide screenshots/photos OR copied console logs for:
+
+GT1 — Hardware scanner on POS:
+- Show the barcode input focused
+- Scan a barcode
+- Show that the item actually appears in the cart/list
+- Show that the input is cleared and re-focused
+
+GT2 — Manual typing behavior:
+- Type a NON-barcode text (e.g., "ring" or Arabic word) in the same barcode input and press Enter
+- Show what happens (does it add? does it error? does it search?)
+We need this to confirm whether Enter should be gated.
+
+GT3 — Android camera:
+- Open camera modal
+- Show debug panel flags (hasBarcodeDetector true)
+- Show detection -> item added
+
+GT4 — iPhone Safari:
+- Open camera modal
+- Show debug panel flags + whether video preview actually plays
+- If getUserMedia fails, show error.name + error.message
+
+TASK 3 — If GT2 is bad UX, implement minimal gating (POSPage.tsx only)
+Implement a “likelyScan” timing gate:
+- Track first/last keystroke timestamps in onChange (barcode input only)
+- likelyScan = (duration <= 200ms && trimmedLength >= 6)
+- On Enter:
+   if likelyScan => handleBarcodeScan(barcode) and preventDefault
+   else: DO NOT call handleBarcodeScan (keep current search behavior; no error toast)
+- Keep "+" button behavior unchanged (still calls handleBarcodeScan)
+
+EVIDENCE REQUIRED
+1) git diff --stat
+2) git diff (full) with NO pager truncation
+3) Gate test evidence as requested above
+
+STOP after evidence.

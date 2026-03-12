@@ -1,0 +1,107 @@
+PROMPT — PATCH (Enterprise) — إزالة اختيار البائع + جعل اختيار الفرع خاص بالبيع فقط (Admin Global)
+
+الهدف:
+1) إزالة عنصر UI الأحمر "اختار البائع" من شاشة /pos نهائياً.
+2) البيع فقط هو الذي يعتمد على "فرع البيع" المختار.
+3) باقي شاشات POS (فواتير/مرتجعات/تقارير/إعدادات) للأدمن تكون Global (كل الفروع) ولا تتأثر باختيار الفرع.
+4) الكاشير/المشرف يظل Branch-scoped كالمعتاد.
+
+قيود مهمة:
+- لا تغيّر أي شيء في ERP.
+- لا تضف أي منطق صلاحيات ERP داخل POS.
+- لا تغيّر مسارات الـ routes الحالية.
+- لا ترجع لاستخدام MainLayout داخل POS.
+
+========================
+A) BACKEND (server/posSession.ts + migrations)
+========================
+
+A1) اجعل "البائع" يُحسم تلقائياً من الـ session context (بدون UI اختيار)
+- حدّث GET /api/pos/session/context بحيث يرجع حقول إضافية:
+  - seller_profile_id: uuid
+  - seller_display_name: text
+  المنطق:
+  - لو cashier_kind === "user": seller_profile_id = cashier_user_id ، seller_display_name = cashier_name
+  - لو cashier_kind === "admin": seller_profile_id = pos_admin_accounts.profile_id ، seller_display_name = cashier_name
+  (يعني الأدمن له Profile حقيقي يُستخدم كبائع)
+
+A2) إضافة profile_id للأدمن (مرة واحدة) حتى يقدر يبيع "باسمه"
+- Migration:
+  - ALTER TABLE pos_admin_accounts ADD COLUMN profile_id uuid NULL;
+  - CREATE UNIQUE INDEX ON pos_admin_accounts(profile_id) WHERE profile_id IS NOT NULL;
+- عند admin login (POST /api/pos/admin/login):
+  - بعد التحقق من username/password:
+    - إن لم يكن pos_admin_accounts.profile_id موجود:
+      - أنشئ profile جديد داخل جدول profiles (بنفس display_name للأدمن + is_active=true + أي حقول إلزامية)
+      - احفظ profile_id في pos_admin_accounts.profile_id
+  - ارجع profile_id في response (اختياري)
+
+ملاحظة: إنشاء profile يجب أن يكون minimal وآمن:
+- لا تربطه بـ ERP roles
+- فقط كـ "operator profile" لاستخدامه كبائع داخل POS
+
+A3) اجعل استعلامات الشاشات الأخرى Global للأدمن (ولا تعتمد على branch)
+- أي endpoint يُستخدم في:
+  /pos/invoices
+  /pos/returns
+  /pos/reports
+  /pos/settings
+  يجب أن:
+  - لو session.context.pos_admin === true => لا تطبق فلتر branch_id (أو اجعل الفلتر اختياري)
+  - وأعد مع كل سجل branch_name/branch_code (لأنها Multi-branch view)
+- لو cashier/supervisor => استمر في branch filter كالمعتاد.
+
+(لو عندك endpoints حالياً تتطلب branch session لعرض القوائم، لا تُلغِ الحماية؛ فقط ألغِ تصفية البيانات بالـ branch للأدمن. الأدمن مازال يملك branch session عند البيع، لكن العرض يجب أن يكون ALL.)
+
+========================
+B) FRONTEND
+========================
+
+B1) إزالة "اختار البائع" من /pos
+- الملف غالباً: src/pages/POSPage.tsx (أو component داخلها)
+- احذف dropdown الخاص باختيار البائع بالكامل + أي state/handlers مرتبطة به.
+- استبدله بعنصر Readonly بسيط يظهر "البائع الحالي":
+  - استخدم seller_display_name القادم من /api/pos/session/context
+  - أو cashier_name إن لم يتوفر.
+
+B2) اجعل البيع يشتغل فوراً بدون اختيار بائع
+- أي كود يرسل seller_profile_id في عملية البيع:
+  - استمده من session.context.seller_profile_id (بدلاً من selectedSellerId من UI)
+- Acceptance: بعد الدخول كاشير/مشرف -> يقدر يبيع مباشرة.
+- Acceptance: بعد دخول أدمن + اختيار فرع البيع -> يقدر يبيع مباشرة "باسمه" بدون اختيار بائع.
+
+B3) اختيار الفرع = "فرع البيع" فقط (لا يفلتر باقي الصفحات للأدمن)
+- اترك Dropdown الفرع في الـ sidebar (إن وُجد) لكن:
+  - سمّه (فرع البيع) أو ضع tooltip بسيط
+  - لا تستخدمه لتغيير filters في صفحات:
+    /pos/invoices, /pos/returns, /pos/reports, /pos/settings
+- لهذه الصفحات:
+  - لو الأدمن: اعرض ALL branches دائماً
+  - لو الكاشير: اعرض branch الحالي فقط (عادي)
+
+B4) إزالة أي Guard يمنع الأدمن من دخول صفحات التقارير/الإعدادات بدون علاقة بالفرع
+- لو لديك AdminBranchGuard يوجّه الأدمن إلى /pos عند عدم اختيار فرع:
+  - احتفظ به فقط على actions الخاصة بالبيع (صفحة /pos نفسها و /pos/return إن كانت بيع-أثر)
+  - ولا تطبقه على /pos/invoices /pos/returns /pos/reports /pos/settings للأدمن
+
+========================
+C) Acceptance Criteria (لا نقاش)
+========================
+1) اختفى تماماً "اختار البائع" من /pos.
+2) كاشير بعد PIN: يبيع فوراً بدون اختيار بائع (seller = cashier).
+3) أدمن بعد login + اختيار فرع البيع: يبيع فوراً (seller = admin profile).
+4) الأدمن يفتح:
+   - فواتير POS / مرتجعات POS / تقارير POS / إعدادات POS
+   ويشاهد بيانات كل الفروع (مع إظهار الفرع لكل سجل).
+5) الكاشير/المشرف يشاهد بيانات فرعه فقط في نفس الشاشات.
+
+========================
+D) Evidence إلزامي في الرد
+========================
+1) git diff --stat
+2) Snippets:
+- /api/pos/session/context (الجزء الذي يُرجع seller_profile_id + seller_display_name)
+- جزء POSPage بعد إزالة اختيار البائع (20-40 سطر)
+- مثال query في invoices/returns يوضح: admin => no branch filter
+
+ابدأ التنفيذ الآن.

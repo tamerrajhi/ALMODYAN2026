@@ -1,0 +1,225 @@
+✅ PROMPT (Replit) — Add Excel Paste to Unique Items Grid + Reusable for Transfer
+SCOPE (Strict)
+
+UI فقط في هذه المرحلة: دعم Paste / Import من Clipboard إلى جدول الـ Grid.
+
+لا تغيّر أي RPC أو DB في هذا البرومبت (لضمان صفر مخاطرة).
+
+حفظ البيانات يستمر بنفس آلية الحفظ الحالية (RPC واحدة عند Save).
+
+الهدف: المستخدم ينسخ من Excel ويلصق مباشرة في الجدول، يتكوّن صفوف تلقائيًا، ويظهر Validation قبل الحفظ.
+
+المطلوب بالظبط
+1) Paste من Excel (Clipboard → Rows)
+
+داخل Dialog تعديل فاتورة المشتريات (Excel-like grid):
+
+لما المستخدم يعمل Ctrl+V داخل أي خلية في الجدول:
+
+لو الـ Clipboard يحتوي جدول (Tab-separated):
+
+نفّذ parse إلى rows/cols.
+
+ابدأ الإدخال من الخلية الحالية (active cell).
+
+لو البيانات تتجاوز عدد الصفوف: أضف صفوف جديدة تلقائيًا (كـ new items).
+
+لو لصق داخل صف موجود: حدّث حقول هذا الصف في الـ state.
+
+لا تحفظ شيئًا تلقائيًا. فقط state.
+
+2) Header Mapping (اختياري + قوي)
+
+أضف زر واضح فوق الجدول:
+
+"Paste from Excel" + Tooltip يشرح الشكل المطلوب.
+
+عند الضغط:
+
+افتح Dialog صغير فيه:
+
+Textarea (لصق النص الخام)
+
+اختيار نوع الإدخال:
+
+Mode A: With Headers (أول سطر أسماء أعمدة)
+
+Mode B: No Headers (ترتيب أعمدة ثابت)
+
+زر “Preview” يعرض:
+
+عدد الصفوف
+
+الأعمدة التي تم التعرف عليها
+
+عدد الأخطاء
+
+زر “Apply to Grid” ينقل للـ grid.
+
+3) Column Mapping (بدون تخمين)
+
+استخدم mapping ثابت + قابل للتعديل من UI:
+
+أعمدة الفاتورة (أمثلة — استخدم نفس أسماء حقولك الفعلية في الكود)
+
+serial_no (للصفوف الجديدة فقط: اختياري/فارغ = “Auto”)
+
+description
+
+stock_code
+
+category (Necklace/Earring/Ring/Bracelet أو بالعربي)
+
+karat
+
+weight
+
+cost
+
+notes
+
+Mapping Rules
+
+لو Mode A (Headers):
+
+طابق headers بالـ synonyms التالية (case-insensitive, trim):
+
+serial, serial_no, سريال, رقم مسلسل
+
+desc, description, وصف
+
+code, stock_code, كود, موديل
+
+karat, عيار
+
+weight, وزن
+
+cost, price, تكلفة, سعر
+
+لو Mode B (No Headers):
+
+الأعمدة بالترتيب:
+
+description
+
+stock_code
+
+category
+
+karat
+
+weight
+
+cost
+
+notes
+
+أي أعمدة إضافية تجاهلها.
+
+4) Validation قبل Apply (UI Gate)
+
+قبل “Apply to Grid”:
+
+cost > 0 (لو موجود)
+
+weight > 0 (لو موجود)
+
+karat ضمن قيم مسموحة (مثلا 18/21/22/24 حسب نظامك) — لو غير معروف → خطأ
+
+serial_no:
+
+للصفوف الجديدة: لو موجود → تحقق أنه غير مكرر داخل الـ pasted batch.
+
+للصفوف الموجودة: ممنوع تغييره (read-only).
+
+اعرض الأخطاء في Preview:
+
+row index
+
+column
+
+reason
+
+ولا تطبق إذا errors > 0 إلا لو المستخدم اختار “Apply valid rows only”.
+
+5) UX محترف
+
+Highlight cells التي تغيرت (background subtle) + badge “Pasted”
+
+Undo لآخر Paste (stack واحدة تكفي):
+
+زر “Undo Paste”
+
+“Clear new rows” يمسح الصفوف التي أضيفت من paste فقط.
+
+6) Reusable Component for Transfer Screen (Architecture)
+
+استخرج من Dialog Component مستقل:
+
+Component Name
+
+UniqueItemsGridEditor
+
+Props
+
+mode: "purchase_invoice_edit" | "transfer_prepare"
+
+columns: definition array
+
+rows: current rows
+
+onRowsChange(nextRows)
+
+readOnlyFields (مثل serial_no للصفوف الموجودة)
+
+allowAddRows, allowDeleteRows
+
+enableExcelPaste (true)
+
+Output
+
+يرجّع نفس rows structure التي تستخدمها شاشة الفاتورة الآن.
+
+لاحقًا شاشة النقل ستستخدم نفس component وتغذيها ببيانات القطع + destination branch.
+
+Evidence Required (خام)
+
+بعد التنفيذ، اطبع الأدلة التالية:
+
+A) Git Evidence
+
+git diff --stat
+
+git diff
+
+B) Runtime Evidence
+
+لقطة من console logs أو screen recording قصيرة (لو متاح) تثبت:
+
+لصق 50 صف تم → Added rows = 50
+
+Preview shows errors when cost invalid
+
+Undo Paste يرجع الحالة كما كانت
+
+C) Unit-ish Evidence (بدون framework إضافي)
+
+أضف دالة pure:
+parseExcelClipboard(text: string, options) => { rows, errors, meta }
+واكتب لها 5 اختبارات بسيطة في نفس الملف (run in dev console) واطبع outputs.
+
+مهم: ممنوع التخمين
+
+لا تغير أي SQL / RPC / schema في هذا البرومبت.
+
+لا “تخمّن” أسماء الحقول: استخدم نفس أسماء الحقول الموجودة فعلاً في rows الحالية بالـ dialog.
+
+لو اسم حقل غير موجود، افشل بوضوح برسالة dev واضحة.
+
+Deliverable
+
+Paste يعمل عبر Ctrl+V داخل grid + عبر Paste Dialog
+
+Preview + Validation + Apply + Undo
+
+Component extracted reusable for Transfer screen لاحقًا

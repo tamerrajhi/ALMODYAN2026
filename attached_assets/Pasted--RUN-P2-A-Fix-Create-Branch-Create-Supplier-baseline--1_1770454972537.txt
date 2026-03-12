@@ -1,0 +1,72 @@
+البرومبت الصحيح التالي لريبلت (واحد فقط) — RUN-P2-A: Fix Create Branch + Create Supplier + baseline ops
+
+ده “أهم خطوة تشغيل” قبل ما ندخل على كل مشتريات/مبيعات/محاسبة:
+
+PROMPT — RUN-P2-A | UNBLOCK OPS CREATES (BRANCH + SUPPLIER) | SERVER+ALLOWLIST ONLY | EVIDENCE | STOP
+
+ROLE: Backend Engineer
+MODE: Minimal Fix (No schema changes unless absolutely required)
+GOAL: فك قفل عمليات التشغيل الأساسية الآن:
+
+إنشاء فرع (Create Branch)
+
+إنشاء مورد (Create Supplier)
+بحيث صفحات التشغيل تشتغل End-to-End (List + Create).
+
+STRICT RULES
+
+لا تغيّر UI/TSX إطلاقًا في هذا البرومبت. (Server فقط)
+
+لا تعمل migrations إلا لو اكتشفنا أن جدول/عمود ناقص ويمنع الإنشاء 100%.
+
+التعديل يكون أقل شيء ممكن: allowlist + endpoint/rpc wiring.
+
+STEP 1 — Identify the exact RPC(s) used by UI
+
+Run:
+
+rg -n "rpc\\(|dataGateway\\.rpc\\(" src/pages src/hooks src/domain | rg -n "(branch|branches|supplier|suppliers)"
+
+Output: list the exact function names being called to create:
+
+branch
+
+supplier
+
+STEP 2 — Fix allowlist (single source of truth)
+
+Find allowlist implementation (usually in server/routes.ts or server/rpcAllowlist.ts or similar).
+Add only the missing RPC function(s) from Step 1 to the allowlist.
+
+STEP 3 — Ensure the RPC handler routes to Postgres correctly
+
+Verify POST /api/rpc/:fnName:
+
+validates fnName against allowlist
+
+passes args to DB function safely (SELECT * FROM fn($1::jsonb) or equivalent)
+
+returns { data, error } envelope consistently
+
+STEP 4 — Runtime verification (real create)
+
+A) Create Branch (use realistic payload based on UI):
+
+call the same endpoint the UI calls (likely POST /api/rpc/<fn>)
+
+show HTTP status + JSON response
+
+then GET /api/branches to confirm the new branch appears
+
+B) Create Supplier:
+
+same flow (POST then GET /api/suppliers)
+
+EVIDENCE REQUIRED (RAW)
+
+A) rg output from Step 1 (the call sites + function names)
+B) git diff --stat
+C) git diff -- (full changes)
+D) Curl proofs for Branch create + Supplier create + follow-up GET lists
+E) npx tsc --noEmit (should remain Exit 0)
+STOP.

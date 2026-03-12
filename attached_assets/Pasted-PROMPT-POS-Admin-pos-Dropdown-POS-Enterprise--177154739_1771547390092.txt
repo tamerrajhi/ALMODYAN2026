@@ -1,0 +1,96 @@
+PROMPT — POS Admin يدخل /pos مباشرة + اختيار الفرع من Dropdown داخل الـPOS (Enterprise / بدون شاشة اختيار فرع منفصلة)
+
+الهدف النهائي (بالضبط):
+- بعد ما POS Admin يعمل login من /auth → يتحول مباشرة إلى /pos (بدون أي شاشة “اختيار الفرع” كـGate/Modal).
+- داخل /pos يظهر الـPOS UI بالكامل + الـSidebar الخاص بالأدمن (5 روابط: POS + Invoices + Returns + Reports + Settings).
+- الـAdmin لا يستطيع تنفيذ بيع/مرتجع/تقارير/إعدادات “فعليًا” إلا بعد اختيار فرع من Dropdown داخل شريط الـPOS (المربع اللي كان يعرض اسم الفرع يتحول Dropdown).
+- اختيار الفرع من الـDropdown ينشئ جلسة فرع + جلسة POS (يضع cookies __branch و __pos) ثم يعيد تحميل context ويشتغل كل شيء.
+- الكاشير/المشرف يبقوا كما هم: branch login + اختيار كاشير + PIN + Sidebar 3 روابط فقط.
+
+التعديل المطلوب (نفّذ بدون تخمين وبأقل تغيير ممكن):
+
+1) إلغاء شاشة/مود اختيار الفرع للأدمن (Admin Branch Picker Gate)
+- لو عندكم حاليًا أي وضع اسمه admin_branch / admin_branch_select / BranchPicker للأدمن داخل POSEntryGate أو POSPage: احذفه تمامًا.
+- للأدمن: لا تعرض أي “اختيار فرع” كصفحة أو مودال قبل الدخول إلى /pos.
+- /pos يجب أن يفتح دائمًا الـPOSLayout + POSPage حتى لو لا يوجد __branch/__pos طالما admin token موجود.
+
+2) تعريف “Admin Logged-in بدون فرع” (admin token فقط)
+- تأكد وجود endpoint:
+  GET /api/pos/admin/context
+  - يعتمد على cookie: __pos_admin
+  - يرجع { ok: true, admin_id, display_name } لو الأدمن مسجّل
+- POSLayout يجب أن يجلب:
+  - adminContext من /api/pos/admin/context
+  - sessionContext من /api/pos/session/context (هذا يتطلب فرع + pos session)
+
+قواعد الحالة:
+- hasAdmin = adminContext.ok === true
+- hasBranchPos = sessionContext.branch_id && sessionContext.pos_session_id (أي 200 من session/context)
+- isPosAdmin = hasAdmin || sessionContext.pos_admin === true
+- لو hasAdmin=true و hasBranchPos=false → ده وضع “Admin بدون فرع” ويجب يظهر الـPOS UI مع Dropdown “اختر الفرع”.
+
+3) تحويل “مربع اسم الفرع” داخل الـPOS إلى Dropdown للأدمن
+- في POSLayout (Header/Topbar أو المكان اللي يعرض اسم الفرع حاليًا):
+  - لو isPosAdmin=true:
+    - اعرض Select/Dropdown للفرع بدل نص ثابت.
+    - لو لا يوجد فرع مختار → placeholder = "اختر الفرع"
+    - لو يوجد فرع → اعرض اسم الفرع الحالي مع إمكانية تغييره.
+  - مصدر البيانات:
+    GET /api/pos/admin/branches
+    - يتطلب __pos_admin
+    - يرجع قائمة الفروع (branch_id, name, code)
+  - عند اختيار فرع من dropdown:
+    POST /api/pos/admin/select-branch  body: { branch_id }
+    - backend ينشئ/يحدد:
+      Set-Cookie: __branch=...; Path=/api/pos
+      Set-Cookie: __pos=...; Path=/api/pos
+      (ولا يمس __pos_admin)
+    - بعد النجاح:
+      - اعمل refresh للـcontext فورًا (إما refetch لـ /api/pos/session/context أو navigate('/pos?ts='+Date.now(), {replace:true}))
+      - لازم بعدها session/context يرجع 200 ويظهر branch name الحقيقي + يشتغل تحميل القطع والبيع.
+
+4) قفل “التنفيذ” قبل اختيار الفرع (بدون ما تمنع الدخول)
+- لو hasAdmin=true و hasBranchPos=false:
+  - اسمح بفتح /pos والـUI يظهر
+  - لكن:
+    - زر “اتمام البيع” + أي عمليات تعتمد على بيانات الفرع لازم تكون Disabled
+    - اعرض Banner صغير واضح: "اختر الفرع للمتابعة"
+- للروابط الأخرى (/pos/invoices, /pos/returns, /pos/reports, /pos/settings):
+  - لو isPosAdmin=true لكن hasBranchPos=false:
+    - Redirect إلى /pos (مع message/toast: "اختر الفرع أولاً")
+  - الهدف: الأدمن يدخل “التطبيق” مباشرة لكن لازم يختار فرع من داخل /pos قبل أي صفحات/عمليات.
+
+5) تغيير الفرع للأدمن من نفس الـDropdown (بدون Logout)
+- عند تغيير الفرع من Dropdown:
+  - نفّذ one-step أو two-step:
+    خيار A (أفضل): POST /api/pos/admin/select-branch يعمل revoke/close لأي pos session قديم ويصدر cookies جديدة.
+    خيار B: استعمل endpoint موجود/أضف:
+      POST /api/pos/admin/clear-branch
+      - يمسح فقط __branch و __pos (Path=/api/pos + legacy '/')
+      - لا يمس __pos_admin
+    ثم ينفذ select-branch للفرع الجديد
+- بعد التبديل لازم reload context وتحديث UI.
+
+6) لا تغيّر سلوك الكاشير/المشرف
+- مسار cashier/supervisor يظل يعتمد على BranchLoginGate + POSCashierGate + PIN كما هو.
+- لا تعرض Dropdown الفروع للأدمن في وضع الكاشير.
+- Sidebar:
+  - Admin (isPosAdmin=true) يرى 5 روابط دائمًا داخل POS (حتى قبل اختيار فرع).
+  - Cashier يرى 3 روابط فقط.
+
+ملفات متوقعة للتعديل:
+- src/components/pos/POSLayout.tsx  (إضافة Dropdown + adminContext logic + guards)
+- src/components/pos/POSEntryGate.tsx  (حذف أي admin branch picker mode)
+- server/posSession.ts  (admin context/branches/select-branch/clear-branch + cookies Path=/api/pos)
+
+Evidence إلزامي بعد التنفيذ:
+1) git diff --stat
+2) Snippet (20–60 سطر) من POSLayout يوضح:
+   - fetch admin/context + session/context
+   - تعريف isPosAdmin
+   - Dropdown branches + onChange يستدعي /api/pos/admin/select-branch ثم refresh
+3) تأكيد سلوك سريع:
+   - Admin بعد login → /pos مباشرة (بدون شاشة اختيار فرع)
+   - داخل /pos يظهر Dropdown "اختر الفرع"
+   - بعد اختيار الفرع → يشتغل البيع/المرتجع/التقارير/الإعدادات
+   - Cashier ما اتغيرش

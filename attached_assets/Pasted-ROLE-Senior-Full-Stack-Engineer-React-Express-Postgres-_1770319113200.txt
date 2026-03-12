@@ -1,0 +1,95 @@
+ROLE: Senior Full-Stack Engineer (React + Express + Postgres/Neon)
+MODE: SAFE MIGRATION / NO BREAKING CHANGES / FEATURE FLAG / EVIDENCE REQUIRED
+
+GOAL
+Migrate the frontend from Supabase client (VITE_SUPABASE_URL / KEY) to Express API that connects to Neon Postgres.
+Must be incremental + reversible. System is non-production but MUST NOT break current UI flows.
+
+CRITICAL RULES
+1) DO NOT delete any Supabase code yet. Keep it as fallback.
+2) Introduce a single feature flag: VITE_DATA_BACKEND = "neon" | "supabase" (default "supabase" unless explicitly set).
+3) When VITE_DATA_BACKEND="neon": ALL reads/writes used by ImportPage.tsx and PurchaseInvoiceFormPage.tsx MUST go through /api endpoints.
+4) When VITE_DATA_BACKEND!="neon": existing Supabase behavior remains unchanged.
+5) No direct SQL from frontend. No direct writes from frontend. All writes are atomic via Neon RPCs through API.
+6) Provide EVIDENCE OUTPUT at the end: file diffs + line numbers + test results.
+
+SCOPE (Phase 1 only)
+A) Implement Express API routes that proxy to Neon RPCs needed for:
+  - purchase_invoice_supp_inv_precheck(p_supplier_id uuid, p_supp_invs text[])
+  - purchase_invoice_create_atomic(p_payload jsonb)
+  - purchase_invoice_import_unique_atomic(p_payload jsonb)  (if used by ImportPage flow)
+  - import_purchase_batch_create_atomic(p_client_request_id uuid, p_payload jsonb)
+  - import_jewelry_sets_upsert_atomic(p_client_request_id uuid, p_payload jsonb)
+  - create_transfer_v2 / reverse_transfer_v2 (only if currently used in /import flow; otherwise skip)
+B) Add minimal READ endpoints used by UI (only those needed right now):
+  - GET /api/branches
+  - GET /api/suppliers
+  - GET /api/invoices (purchase list if used)
+  - GET /api/invoices/:id (if used)
+(If these screens currently read via supabase.from('...').select, mirror them via API with the same shapes.)
+
+IMPLEMENTATION DETAILS
+1) Backend (Express)
+- Create /server/api/neonDb.ts:
+  - Use pg Pool with DATABASE_URL (Neon).
+  - Helper fn callRpc(fnName, argsArrayOrNamed) using SELECT fn(...) as result; return json.
+- Create routes in /server/routes/neon.ts mounted at /api:
+  - POST /api/rpc/:fnName
+    Body: { args: object } where args keys match RPC named params
+    Server validates fnName is in an allowlist (security).
+    Executes: SELECT public.<fnName>(<named args>) as result for functions that take jsonb payload OR direct params.
+  - Also add specific typed routes for convenience (optional), but rpc proxy is OK.
+
+2) Frontend API Client
+- Add /src/lib/apiClient.ts:
+  - export const dataBackend = import.meta.env.VITE_DATA_BACKEND ?? "supabase"
+  - export async function rpc(fnName, args) => POST /api/rpc/<fnName> returning { data, error } shaped like supabase.rpc.
+  - export async function get(path) etc.
+- Add /src/lib/dataGateway.ts:
+  - If dataBackend==="neon": use apiClient.rpc/get
+  - Else: use existing supabase client
+
+3) Update ONLY these screens in Phase 1
+- src/pages/ImportPage.tsx
+- src/pages/purchasing/PurchaseInvoiceFormPage.tsx
+For every call like supabase.rpc(...) or supabase.from(...).select(...) inside those pages:
+  - wrap via dataGateway so it switches based on flag.
+  - Keep original code path for supabase.
+
+4) Verification (MANDATORY)
+Before switching the flag:
+- Add a small “connectivity check” endpoint:
+  GET /api/health/db => returns { ok:true, db:current_database(), schema:current_schema(), time:now() }
+- Add SQL verification endpoint (safe, read-only):
+  GET /api/health/schema => returns existence booleans for:
+    invoices.supplier_invoice_no column
+    index invoices_purchase_supp_inv_uq
+    functions:
+      purchase_invoice_create_atomic
+      purchase_invoice_post_atomic
+      purchase_invoice_void_atomic
+      purchase_invoice_supp_inv_precheck
+      purchase_invoice_import_unique_atomic
+      import_purchase_batch_create_atomic
+      import_jewelry_sets_upsert_atomic
+- In frontend, add a temporary console log on app start when backend=neon:
+  fetch /api/health/db and /api/health/schema and log results.
+
+5) Safety / Rollback
+- If any /api call fails, show toast:
+  "Neon API error - falling back to Supabase. Switch VITE_DATA_BACKEND to supabase."
+- Do NOT auto-switch in code; just fail gracefully.
+- Ensure no breaking TypeScript errors; keep typings minimal and correct.
+
+DELIVERABLES (EVIDENCE OUTPUT)
+At the end, output:
+A) List of files changed + purpose
+B) For each updated page (ImportPage & PurchaseInvoiceFormPage): show the exact replaced calls with line numbers.
+C) Curl tests (or node fetch) showing:
+   - GET /api/health/db returns ok
+   - GET /api/health/schema shows all required objects true
+   - POST /api/rpc/purchase_invoice_supp_inv_precheck works with a sample payload
+D) How to enable Neon:
+   - Set VITE_DATA_BACKEND="neon"
+   - Ensure DATABASE_URL is set on server
+STOP AFTER EVIDENCE. DO NOT proceed to delete Supabase code in this phase.

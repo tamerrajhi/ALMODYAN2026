@@ -1,0 +1,78 @@
+✅ PROMPT — IMPLEMENT TWO SEPARATE RETURNS MANAGEMENT SCREENS (POS vs GENERAL) | MINIMAL CHANGE | NO GUESSING | KEEP EXISTING ROUTES | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Senior Frontend Engineer (React Router)
+
+MODE: FIX ONLY (UI + ROUTE ALIASES). NO DB changes. NO backend changes. NO refactor.
+
+STRICT RULES (NO EXCEPTIONS):
+1) ممنوع التخمين: استخدم discriminator المثبت حاليًا في SalesReturnsListPage:
+   - POS returns (listing) = invoice.sale_id IS NOT NULL
+   - General returns (listing) = invoice.sale_id IS NULL
+2) ممنوع تغيير أو كسر routes الحالية أو سلوكها:
+   - Keep: /sales/returns?mode=pos|erp يعمل كما هو (Backward compatible)
+   - Keep: /pos/return (POS create page) كما هو
+   - Keep: /sales/returns/new (General create form) كما هو
+3) هدفنا: “شاشتين منفصلتين للمستخدم” بأقل تعديل:
+   - شاشة: "مرتجعات نقطة البيع" تعرض POS فقط + زر إنشاء يفتح /pos/return
+   - شاشة: "مرتجعات المبيعات العامة (العملاء)" تعرض General فقط + زر إنشاء يفتح /sales/returns/new
+4) لا تغيّر مصدر البيانات (/api/sales-returns-invoices) ولا تضف فلاتر backend.
+5) Arabic labels + RTL must remain correct.
+
+TASKS (do in order):
+
+A) ROUTE ALIASES (App.tsx)
+1) Add two new alias routes that render the SAME SalesReturnsListPage but with mode fixed:
+   - /sales/returns/pos       -> SalesReturnsListPage with mode forced to 'pos'
+   - /sales/returns/general   -> SalesReturnsListPage with mode forced to 'erp'
+2) Do NOT remove or modify existing route: /sales/returns (keeps ?mode behavior).
+3) If SalesReturnsListPage currently reads mode from query params only:
+   - Add support for an optional prop or route param override (e.g., `forcedMode?: 'pos'|'erp'`)
+   - If using react-router, you may pass a wrapper component per route that sets forcedMode.
+   - Keep existing query param mode logic when forcedMode is undefined.
+
+B) SALESRETURNSLISTPAGE (Minimal behavioral change)
+1) Implement precedence:
+   - if forcedMode exists -> use it (ignore query mode)
+   - else -> use query param mode as before (pos/erp)
+2) Update page title/header dynamically:
+   - forcedMode/pos -> "مرتجعات نقطة البيع"
+   - forcedMode/erp -> "مرتجعات المبيعات العامة (العملاء)"
+3) Update Create button action based on effective mode:
+   - pos -> navigate('/pos/return')
+   - erp -> navigate('/sales/returns/new')
+4) Keep the existing listing filter logic (sale_id null vs not null) exactly, just ensure it uses the effective mode.
+
+C) SIDEBAR / NAV (Minimal)
+1) Add TWO sidebar entries (or update existing ones) to point to the new alias routes:
+   - "مرتجعات نقطة البيع" -> /sales/returns/pos
+   - "مرتجعات المبيعات العامة (العملاء)" -> /sales/returns/general
+2) Keep existing sidebar links if present (optional), but the two new ones must exist.
+
+EVIDENCE REQUIRED (MANDATORY):
+1) A) git diff --stat
+2) B) git diff
+3) C) Snippets proving:
+   - App.tsx alias routes added
+   - SalesReturnsListPage forcedMode precedence implemented
+   - Create button navigation per mode
+   - Titles per mode
+4) D) Gate Tests results (below)
+
+GATE TESTS:
+GT1) Open /sales/returns/pos:
+- Title shows "مرتجعات نقطة البيع"
+- List shows only records where sale_id != null
+- Create button navigates to /pos/return
+
+GT2) Open /sales/returns/general:
+- Title shows "مرتجعات المبيعات العامة (العملاء)"
+- List shows only records where sale_id == null
+- Create button navigates to /sales/returns/new
+
+GT3) Backward compatibility:
+- /sales/returns?mode=pos and /sales/returns?mode=erp still work as before.
+
+GT4) No changes to existing create flows:
+- QuickActionsBar / SalesInvoicesPage create return routing remains unchanged.
+
+STOP after providing evidence + gate tests. Do NOT propose additional improvements.

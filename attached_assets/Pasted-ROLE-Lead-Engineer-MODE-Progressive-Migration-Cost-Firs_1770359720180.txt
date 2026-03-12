@@ -1,0 +1,68 @@
+ROLE: Lead Engineer
+MODE: Progressive Migration (Cost-First) — NO BIG-BANG
+
+CONTEXT
+- Default backend MUST remain Supabase.
+- Neon/Express is enabled ONLY via localStorage override (data_backend_override=neon).
+- Gate-1 Safety Switch is already implemented and confirmed.
+- Import flow on NEON is working now. We need to continue migration fast because Supabase cost is running out.
+
+PRIMARY GOAL (Next 2 stages only)
+Stage-1: Migrate HIGH-TRAFFIC READS to Neon via dataGateway/queryTable/table-read.
+Stage-2: Migrate HIGH-TRAFFIC PAGES to use dataGateway (reads) + rpc proxy (writes).
+KEEP TEMPORARILY on Supabase:
+- supabase.auth (all auth/session)
+- supabase.functions.invoke (Edge/ZATCA/cleanup) — leave as-is for now
+
+HARD RULES (NO SCOPE CREEP)
+- Do NOT change DB schema.
+- Do NOT remove features.
+- Do NOT migrate edge functions now.
+- Do NOT introduce a generic unrestricted query endpoint.
+- Do NOT touch routes unrelated to needed reads.
+- All new read access MUST go through existing /api/table-read with allowlist + hardened orderBy.
+- Any missing column names MUST be solved server-side with column aliasing/virtual filters (like suppliers fix), NOT by editing many pages.
+
+STAGE-1 (Foundation: reads used everywhere) — execute now
+1) Migrate these hooks/libs to use dataGateway (if any remaining Supabase reads exist):
+   - useItemMovements.ts
+   - useTransfersV2ReadModel.ts
+   - useTransfersV2.ts
+   - branch-inventory-accounts.ts
+   - transfer-accounting.ts
+   - accounting-health-checks.ts
+   - pr-notifications.ts
+   - AuditLogsPage/Audit utilities if they read tables
+2) For each file:
+   - Replace supabase.from(...) with dataGateway.queryTable(...) or specific dataGateway.fetchX
+   - Replace any supabase.rpc(...) with dataGateway.rpc(...)
+   - Leave auth/edge invokes unchanged.
+
+STAGE-2 (Highest cost pages) — execute after Stage-1 passes
+Migrate READS for these pages (do NOT change business logic):
+- DashboardPage.tsx (already patched for toLocaleString safety; keep)
+- POSPage.tsx + POSReturnPage.tsx + POSCreditNotePage.tsx (reads only; writes stay RPC)
+- TransfersCenterPage.tsx + TransferRequestsPage.tsx
+- UsersPage.tsx + RolesPage.tsx (RBAC reads; keep auth on Supabase)
+
+GATE TESTS (Must run after each stage; STOP if fail)
+Gate-A (after Stage-1):
+- Supabase default works (override removed): app login + dashboard loads.
+- Neon override works: open /import, supplier list loads, no 500, fingerprint OK.
+Gate-B (after Stage-2):
+- Dashboard loads both modes with no console errors.
+- POS landing page loads both modes.
+- Transfers pages load both modes.
+
+EVIDENCE REQUIRED (Must paste raw outputs)
+After Stage-1 and Stage-2 separately:
+A) git diff --stat
+B) grep proof:
+   - rg "supabase\\.from\\(" <touched files> => must be 0
+   - rg "supabase\\.rpc\\(" <touched files> => must be 0
+   - any remaining "supabase\\.functions\\.invoke" must be listed (expected)
+C) For NEON mode: show last 10 server logs lines proving 200 on /api/table-read and /api/rpc calls used by migrated screens.
+D) Confirm DEFAULT remains Supabase:
+   console line: [ACTIVE_DATA_BACKEND] supabase (reason=env, env=supabase, override=none)
+
+STOP after providing Stage-1 evidence, then wait for approval to proceed Stage-2.

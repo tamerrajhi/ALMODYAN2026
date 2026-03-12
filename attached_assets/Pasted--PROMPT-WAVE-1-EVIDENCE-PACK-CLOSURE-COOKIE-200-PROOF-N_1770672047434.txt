@@ -1,0 +1,59 @@
+✅ PROMPT — WAVE-1 EVIDENCE PACK CLOSURE (COOKIE + 200 PROOF) | NO NEW WORK | STOP
+
+ROLE: Auditor / Full-stack Engineer
+MODE: Evidence only. Do NOT migrate any new file. Do NOT add new endpoints. Only prove Wave-1 is healthy.
+
+HARD RULES:
+- Paste raw outputs exactly.
+- Provide BOTH negative (401) and positive (200) proofs where applicable.
+- If any request returns non-JSON or HTML, show it as FAILURE with raw output.
+
+SECTION 1 — SESSION COOKIE PROOF (RAW)
+1.1) Show how you obtain a valid session cookie (raw curl -i):
+- POST /api/auth/login (show status + Set-Cookie header only)
+- Then extract cookie value for subsequent calls.
+
+SECTION 2 — ENDPOINT HEALTH (200 WITH COOKIE)
+For EACH Wave-1 endpoint below, run:
+curl -i <endpoint> with the session cookie
+- show HTTP status line
+- show Content-Type
+- show first 30 lines of JSON body
+
+Endpoints (must match exact routes in routes.ts):
+/api/dashboard/gold-prices-with-karats
+/api/dashboard/branch-stats
+/api/dashboard/recent-sales
+/api/dashboard/recent-transfers
+/api/dashboard/pending-transfer-requests
+/api/approvers
+/api/daily-settlements
+/api/daily-sales-summary
+/api/branch-inventory-account
+/api/branch-inventory-accounts
+/api/branch-inventory-account-by-code
+/api/reports/party-statement
+
+SECTION 3 — JSON-ONLY GUARANTEE
+For EACH endpoint above:
+3.1) Prove it returns JSON (raw):
+curl -i ... | rg -n "Content-Type" || true
+
+SECTION 4 — FRONTEND ROUTE RUNTIME PROOF
+4.1) Provide workflow/server logs lines (raw) proving the 4 migrated pages hit the new endpoints (not supabase):
+rg -n "/api/dashboard/|/api/reports/party-statement|/api/branch-inventory|/api/daily-" -S . || true
+
+SECTION 5 — INSTRUMENTATION CLEANUP GATE
+Choose ONE:
+A) Remove instrumentation entirely and show diff
+OR
+B) Prove instrumentation is DEV-only and absent from production build:
+- npm run build
+- Then rg -n "SUPABASE_CALL|SUPABASE_CLIENT_ACTIVE" dist/ (or build output dir) || true
+
+SECTION 6 — WAVE-1 SCOPE SOURCE
+Provide raw proof of Wave-1 scope:
+- Paste the exact prompt text you executed for Wave-1 OR the chat log snippet that states “top 5 pages” / “Wave-1 is 4 files”.
+No summary.
+
+STOP.

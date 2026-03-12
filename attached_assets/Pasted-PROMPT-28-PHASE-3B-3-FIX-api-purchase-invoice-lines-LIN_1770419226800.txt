@@ -1,0 +1,47 @@
+PROMPT 28 — PHASE-3B.3 | FIX /api/purchase-invoice-lines LINKAGE CONTRACT | SERVER ONLY | EVIDENCE | STOP
+
+ROLE: Backend Engineer
+MODE: SERVER ONLY
+SCOPE: server/routes.ts ONLY
+DO NOT touch any DB migrations or frontend files.
+
+GOAL:
+Allow linkage reads from /api/purchase-invoice-lines when called WITHOUT invoice_id BUT WITH select=...
+This is needed by dataGateway lookup helpers in Neon mode.
+
+CURRENT PROBLEM:
+GET /api/purchase-invoice-lines?select=account_id returns 400 because invoice_id is required.
+
+REQUIRED BEHAVIOR:
+1) If invoice_id is provided -> KEEP existing behavior unchanged.
+2) If invoice_id is missing:
+   - If select is missing -> KEEP 400 unchanged.
+   - If select is present -> return JSON array of rows with only allowed selected columns (plus id).
+   - Enforce a safe hard limit (default 200, max 500).
+   - Enforce allowlist validation for select fields (no SQL injection, no arbitrary column names).
+
+IMPLEMENTATION RULES:
+- Follow the same style/pattern used by other endpoints (try/catch, pool.query, res.json, 500 envelope).
+- Validate "select" strictly:
+  - split by comma, trim, must match /^[a-zA-Z0-9_]+$/.
+  - allowlist only the columns that are actually needed by linkage:
+    allowed = ["id","invoice_id","account_id","branch_id","line_type","total_amount","created_at"]
+    (If your schema differs, adjust minimally but keep it tight and justify in a comment.)
+- SQL for linkage mode:
+  SELECT <validated_cols> FROM purchase_invoice_lines ORDER BY created_at DESC LIMIT <limit>;
+- Return [] if table empty.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- server/routes.ts (show full diff around the endpoint)
+C) Curl tests (show full output including status codes):
+   C1) curl -i "http://localhost:5000/api/purchase-invoice-lines"                  -> MUST stay 400
+   C2) curl -i "http://localhost:5000/api/purchase-invoice-lines?select=account_id" -> MUST become 200 JSON
+   C3) curl -i "http://localhost:5000/api/purchase-invoice-lines?select=account_id&limit=9999" -> MUST cap to max (prove it)
+   C4) curl -i "http://localhost:5000/api/purchase-invoice-lines?select=account_id;DROP TABLE x" -> MUST be 400
+   C5) curl -i "http://localhost:5000/api/purchase-invoice-lines?invoice_id=<some_uuid>" -> MUST behave exactly as before (200 or 400 depending on existence)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

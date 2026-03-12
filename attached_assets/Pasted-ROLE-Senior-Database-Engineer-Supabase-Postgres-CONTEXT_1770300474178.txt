@@ -1,0 +1,68 @@
+ROLE: Senior Database Engineer (Supabase/Postgres)
+
+CONTEXT:
+System is NOT production. We need the database to be "very empty" to re-test the Excel import from scratch. That means: wipe ALL DATA in ALL transactional tables INCLUDING inventory catalog tables (jewelry_sets) and items (jewelry_items) and all movements, accounting entries, invoices, transfers, audit logs, and workflow/idempotency tables.
+We must KEEP schema, RPCs, functions, indexes, policies, migrations intact (NO DROPS of tables/functions).
+
+GOAL:
+1) Full DATA RESET (truncate/delete rows) -> system empty.
+2) Seed ONLY minimal reference data required for the purchase import + invoice atomic flow to work:
+   - branches (MAIN + BR01)
+   - 1 supplier
+   - minimal chart_of_accounts rows needed by purchase invoice JE (inventory/AP/VAT input if used)
+3) Provide evidence queries that confirm emptiness + seed presence + a tiny smoke test.
+
+STRICT RULES:
+- DO NOT DROP tables.
+- DO NOT DROP functions/RPCs.
+- DO NOT ALTER schema definitions (no columns, no indexes changes) except temporarily disabling triggers.
+- Use a single SQL script with transaction.
+- Use TRUNCATE ... RESTART IDENTITY CASCADE wherever possible to guarantee full wipe.
+- If TRUNCATE fails due to dependencies, explicitly truncate in correct dependency order.
+- Disable triggers temporarily if needed, then re-enable.
+- After reset, run SEED inserts with deterministic UUIDs (so we can reference them in tests).
+
+DELIVERABLES:
+A) Provide ONE SQL script that does:
+   1) BEGIN;
+   2) SET session_replication_role = 'replica' (or disable triggers) to allow truncation cleanly, then restore to 'origin' at end.
+   3) TRUNCATE (RESTART IDENTITY CASCADE) ALL transactional tables found in schema, including but not limited to:
+      - invoices + invoice lines tables (invoice_lines / purchase_invoice_lines)
+      - purchase_batches / purchase_orders / purchase_order_items / purchase_requisitions / purchase_requisition_lines
+      - journal_entries / journal_entry_lines
+      - jewelry_items / jewelry_sets
+      - item_movements
+      - transfers / transfer_items / transfer_requests / transfer_request_items
+      - audit_logs
+      - import logs tables (import_backup_log*, import_row_errors*, any import_* logs)
+      - atomic_workflow_requests / pos_workflow_requests (idempotency tracking)
+      - any other similarly named transactional tables you detect (sales invoices if present can be truncated too)
+      NOTE: This is a "very empty system" -> it is OK to truncate almost everything except core auth tables.
+      DO NOT touch auth.users or Supabase internal schemas.
+   4) SEED minimal reference data using fixed UUIDs:
+      - Branch MAIN id = '2a3719b5-edd7-4a42-9518-735ae13079cd'
+      - Branch BR01 id = '2e8e6dca-7422-4f39-9fb2-ff4fd55d4a3c'
+      - Supplier TEST id = '2f49c41b-ee92-4276-8b79-425c72d51ae6'
+      Insert into the actual tables used by the system (branches, suppliers) with required columns.
+   5) Seed minimal Chart of Accounts for JE creation:
+      Create 3 accounts at minimum (use fixed UUIDs and realistic names):
+      - Inventory/Stock (asset)
+      - Accounts Payable (liability)
+      - VAT Input (asset) IF your purchase invoice RPC posts VAT lines; if not needed keep it but harmless.
+      Insert into the actual chart_of_accounts/accounts table used by journal_entry_lines.account_id FK.
+      If there are required columns (code, name_ar/name_en, type, parent_id, is_active, branch_id), populate them minimally.
+   6) COMMIT;
+
+B) After the script, output EVIDENCE QUERIES:
+   - counts for: invoices, journal_entries, journal_entry_lines, jewelry_items, jewelry_sets, item_movements, transfers, transfer_items, audit_logs, pos_workflow_requests, atomic_workflow_requests (must be 0)
+   - show seeded rows: branches (2), supplier (1), accounts (>=3)
+   - smoke test: SELECT purchase_invoice_supp_inv_precheck('2f49c41b-ee92-4276-8b79-425c72d51ae6', ARRAY['ABC123','X1']) must return success=true and exists=[]
+
+IMPORTANT:
+Before writing the TRUNCATE list, run discovery queries in SQL to list tables in public schema and identify which exist. Then generate TRUNCATE statements accordingly (only truncate tables that exist).
+Return final output with:
+1) SQL RESET+SEED script (single block)
+2) Evidence queries (single block)
+3) Short expected results.
+
+STOP.

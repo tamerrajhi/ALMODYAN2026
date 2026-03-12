@@ -1,0 +1,86 @@
+أنت Senior Engineer. ممنوع التخمين. ممنوع تغييرات كاسرة. المطلوب: جعل اختيار البائع جزءًا من بيانات فاتورة POS وإجباري + تخزينه في DB.
+
+# Confirmed Reality
+- قائمة البائعين تأتي من user_branches -> profiles.
+- saleCmd الحالي يرسل sold_by كنص ولا يرسل seller_profile_id.
+- RPC complete_pos_sale_atomic لا يحفظ البائع في DB.
+=> نضيف seller_profile_id (profiles.id UUID) ونفرضه.
+
+# Strict Scope
+- Additive changes فقط.
+- لا تغيّر منطق الأسعار/الضريبة/الخصم.
+- لا تعمل backfill تلقائي.
+- Evidence إلزامي: git diff + queries.
+
+# Phase 1 — DB Migration (Additive)
+1) Add columns:
+   ALTER TABLE sales ADD COLUMN IF NOT EXISTS seller_profile_id uuid NULL;
+   ALTER TABLE invoices ADD COLUMN IF NOT EXISTS seller_profile_id uuid NULL;
+
+2) Index:
+   CREATE INDEX IF NOT EXISTS idx_sales_branch_seller ON sales(branch_id, seller_profile_id);
+   CREATE INDEX IF NOT EXISTS idx_invoices_branch_seller ON invoices(branch_id, seller_profile_id);
+
+# Phase 2 — POS UI: Seller field inside invoice info (Mandatory)
+في src/pages/POSPage.tsx:
+1) أضف حقل داخل قسم بيانات الفاتورة/ملخص الفاتورة:
+   - Label: "البائع"
+   - Select options = sellers list already fetched from profiles
+   - option value = profile.id
+   - option label = profile.full_name ?? profile.username
+
+2) اجعل الاختيار إجباري:
+   - إن لم يتم اختيار sellerProfileId:
+     - Disable زر "إتمام البيع"
+     - اعرض رسالة واضحة (Arabic + English if i18n exists): "اختر البائع لإتمام البيع"
+3) لا تترك اختيار البائع في الهيدر فقط إن كان موجود؛ انقل/ادمج بحيث يكون مصدر واحد للحقيقة (single state).
+
+4) عدّل saleCmd الذي يُرسل للـ RPC:
+   - أضف seller_profile_id: selectedSellerProfileId
+   - احتفظ بـ sold_by كنص اختياري للعرض فقط (ليس مصدر truth)
+
+# Phase 3 — RPC: complete_pos_sale_atomic validation + persistence
+1) اقرأ:
+   v_seller_profile_id := NULLIF(p_payload->>'seller_profile_id','')::uuid;
+   IF v_seller_profile_id IS NULL THEN
+     RAISE EXCEPTION 'seller_profile_id is required';
+   END IF;
+
+2) Validate profile:
+   IF NOT EXISTS (SELECT 1 FROM profiles WHERE id=v_seller_profile_id AND is_active=true) THEN
+     RAISE EXCEPTION 'Invalid seller_profile_id';
+   END IF;
+
+3) Validate seller belongs to branch (NO NEW TABLES):
+   - join profiles.user_id to user_branches.user_id
+   - ensure user_branches.branch_id = v_branch_id
+   IF NOT EXISTS (
+     SELECT 1
+     FROM profiles p
+     JOIN user_branches ub ON ub.user_id = p.user_id
+     WHERE p.id = v_seller_profile_id
+       AND ub.branch_id = v_branch_id
+   ) THEN
+     RAISE EXCEPTION 'Seller not assigned to branch';
+   END IF;
+
+4) Save:
+   - عند INSERT/UPDATE sales: set seller_profile_id = v_seller_profile_id
+   - عند INSERT/UPDATE invoices: set seller_profile_id = v_seller_profile_id
+
+# Phase 4 — Evidence & Verification
+A) git diff --stat
+B) git diff
+C) Query test:
+   - نفّذ بيع تجريبي من POS بعد اختيار بائع
+   - ثم:
+     SELECT sale_code, branch_id, seller_profile_id FROM sales ORDER BY created_at DESC LIMIT 5;
+     SELECT invoice_number, branch_id, seller_profile_id FROM invoices ORDER BY created_at DESC LIMIT 5;
+   - وارجع أيضًا اسم البائع:
+     SELECT s.sale_code, p.full_name, p.username
+     FROM sales s
+     JOIN profiles p ON p.id = s.seller_profile_id
+     ORDER BY s.created_at DESC LIMIT 5;
+
+# Non-goals
+- لا تغيّر أي شيء آخر في POS calculations أو الطباعة أو التقارير الآن.

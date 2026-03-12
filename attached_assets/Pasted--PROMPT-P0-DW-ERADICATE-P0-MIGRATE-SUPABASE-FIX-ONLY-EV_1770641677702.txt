@@ -1,0 +1,71 @@
+✅ PROMPT — P0-DW-ERADICATE + P0-MIGRATE-SUPABASE | FIX ONLY | EVIDENCE | STOP
+
+ROLE: Lead Engineer
+MODE: FIX ONLY (no new features)
+
+GOALS:
+1) Remove ALL Direct SQL writes from backend business routes (server/routes.ts) and replace with atomic RPC calls.
+2) Create Supabase migrations for ALL “live SQL” DB objects (functions, constraints, indexes, FKs) so the DB can be rebuilt from scratch.
+3) Provide RAW Evidence pack. STOP after evidence.
+
+STRICT RULES:
+- No direct INSERT/UPDATE/DELETE SQL in Express handlers except auth_sessions in auth.ts (login/logout).
+- All business writes must go through /api/rpc/:fnName with whitelisted atomic functions.
+- Add requireSession to all write endpoints (except auth endpoints).
+- If a needed atomic function does NOT exist yet: create it in DB (CREATE OR REPLACE FUNCTION ...), then add it to migrations files (supabase/migrations/...), and whitelist it.
+- No UI changes unless a route contract requires minimal payload alignment (prefer to keep contracts stable).
+- Evidence required after each phase: git diff --stat, git diff, grep proofs.
+
+PHASE 1 — BACKEND DIRECT WRITE ERADICATION (P0 first)
+A) Replace these endpoints with RPC-only:
+- POST /api/post-invoice-accounting -> rpc('post_invoice_accounting_atomic', {p_payload:req.body})
+- POST /api/create-batch-invoice -> rpc('create_batch_invoice_atomic' OR existing purchase_invoice_create_atomic, {p_payload:req.body})
+
+B) Replace P1/P2 endpoints with RPC-only:
+- POST /api/branches -> branch_create_atomic
+- POST /api/suppliers -> supplier_create_atomic
+- POST /api/customers -> customer_create_atomic (create if missing)
+- POST /api/jewelry-items -> unique_item_create_atomic (create if missing)
+- POST /api/purchase-batches -> import_purchase_batch_create_atomic
+- POST /api/cleanup-import-batch -> cleanup_import_batch_atomic (create if missing)
+- PUT /api/app-settings/:key -> app_settings_update_atomic (create if missing)
+- POST /api/gold-prices -> gold_price_upsert_atomic (create if missing)
+- POST /api/users/set-primary-branch -> user_set_primary_branch_atomic (create if missing)
+
+C) requireSession:
+- Ensure requireSession exists and is applied to ALL above endpoints.
+
+D) Grep gate (MUST PASS):
+Run and paste output:
+grep -RIn "INSERT INTO|UPDATE |DELETE FROM" server | grep -v "auth_sessions"
+Expect: NO MATCHES.
+
+PHASE 2 — SUPABASE MIGRATIONS (FULL)
+Create migration files:
+1) supabase/migrations/YYYYMMDDHHMMSS__atomic_functions.sql
+- Dump full bodies of ALL atomic business functions (including newly created ones) using pg_get_functiondef
+- Use CREATE OR REPLACE FUNCTION
+2) supabase/migrations/YYYYMMDDHHMMSS__constraints_indexes_fks.sql
+- All constraints + indexes + FKs (including return_items FK fix, sales_invoice_items FKs, journal_entries status check, unique indexes)
+
+Create registry doc:
+P3-3A_db_migrations_registry.md with table: object_name, type, reason, date, migration_file, notes.
+
+PHASE 3 — GATE TESTS (RPC ONLY)
+Run minimal RPC-only tests:
+- post_invoice_accounting_atomic (or equivalent)
+- create_batch_invoice_atomic (or equivalent)
+- customer_create_atomic
+- unique_item_create_atomic
+- cleanup_import_batch_atomic (dry-run / safe mode if supported)
+Paste JSON results only.
+
+EVIDENCE PACK (RAW):
+A) git diff --stat
+B) git diff
+C) grep proof for no direct writes
+D) DB proof: pg_proc list for new RPCs + signatures (p_payload jsonb)
+E) Migrations file list + first/last 20 lines of each
+F) Gate tests JSON outputs
+
+STOP.

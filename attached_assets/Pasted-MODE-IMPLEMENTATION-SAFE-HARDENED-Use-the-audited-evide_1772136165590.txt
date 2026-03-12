@@ -1,0 +1,94 @@
+MODE: IMPLEMENTATION (SAFE, HARDENED). Use the audited evidence. No schema changes.
+
+EVIDENCE
+- Frontend does NOT call GET /api/app-settings.
+- Frontend reads app_settings via POST /api/table-read using dataGateway.queryTable('app_settings', select:'key,value').
+- GET /api/app-settings is public and returns SELECT * (no filters).
+- /api/table-read allows app_settings in its whitelist.
+- We want POS Admin to toggle dashboard widgets from POS Settings UI.
+
+NON-NEGOTIABLE
+- Do NOT touch ERP /api/admin/* endpoints.
+- No DB schema changes.
+- No sales/inventory logic changes.
+- No DB data changes for testing (no password resets).
+- All dashboard-settings endpoints must use requirePosAdminToken.
+
+GOAL
+Persist POS dashboard widget visibility in app_settings securely (not readable by cashier), controlled via a POS Settings page, and consumed by /pos/pos-dashboard.
+
+TASKS
+
+1) BACKEND — POS Admin endpoints (server/posSession.ts)
+Add:
+A) GET /api/pos/admin/settings/dashboard  (requirePosAdminToken)
+- Query app_settings where key='pos_dashboard_widgets'
+- If exists: parse JSON from value, validate keys/booleans, return {data:{widgets:<obj>}, error:null}
+- If missing or invalid: return default widgets (all true) WITHOUT writing DB
+
+B) PUT /api/pos/admin/settings/dashboard (requirePosAdminToken)
+- Body: { widgets: { today_kpis:boolean, profit_snapshot:boolean, top_sellers:boolean, top_branches:boolean, inventory_valuation:boolean, inventory_aging:boolean, reconciliation:boolean } }
+- Validate strictly: only allowed keys; values boolean
+- UPSERT into app_settings:
+  key='pos_dashboard_widgets'
+  value=JSON.stringify(widgets)
+  value_type='json'
+  scope='pos_admin'
+  description='POS admin dashboard widget visibility'
+  is_sensitive=true
+  is_system=true
+  is_editable=true
+  updated_at=now()
+- Return saved config
+
+2) SECURITY HARDENING — Prevent leakage via public endpoints
+A) Harden GET /api/app-settings (server/routes.ts)
+- Change query to: SELECT * FROM app_settings WHERE is_sensitive=false ORDER BY key
+
+B) Harden POST /api/table-read for app_settings (server/routes.ts)
+- When table === 'app_settings', enforce an additional filter server-side so callers cannot read sensitive rows:
+  - Always apply WHERE is_sensitive=false (minimum)
+  - If the endpoint supports only allowlist select without where, implement it by rewriting query or by post-filtering rows before returning.
+- Ensure this does NOT break existing usage that reads company_name etc (all are is_sensitive=false).
+
+3) FRONTEND — Settings UI
+A) Add a new card in src/pages/pos/POSSettingsPage.tsx:
+- "إعدادات لوحة التحكم" -> navigate('/pos/settings/dashboard')
+
+B) Create src/pages/pos/POSDashboardSettingsPage.tsx:
+- Fetch GET /api/pos/admin/settings/dashboard
+- Render toggles for each widget key with Arabic labels
+- Save button -> PUT endpoint
+- Reset button -> set all true (then allow save)
+- Must be admin-only (wrap route in POSAdminGuard)
+
+C) Route registration
+- Add route: /pos/settings/dashboard behind <POSRoute><POSAdminGuard>...
+
+4) FRONTEND — Dashboard consumption
+- In src/pages/pos/POSDashboardPage.tsx:
+  - Fetch GET /api/pos/admin/settings/dashboard
+  - Render only enabled widgets (based on returned config)
+  - Keep existing widgets unchanged otherwise
+
+5) SIDEBAR ORDER
+- In src/components/pos/POSLayout.tsx:
+  - Ensure "لوحة التحكم" (/pos/pos-dashboard) is the FIRST admin item in the menu.
+  - Under settings submenu, add "إعدادات لوحة التحكم" link.
+
+6) VERIFICATION (must provide evidence)
+- Without __pos_admin cookie: settings endpoints return 401.
+- With POS admin cookie:
+  - Save config toggling off one widget
+  - Refresh /pos/pos-dashboard and show the widget is hidden
+  - Restart server and show config persists
+- Confirm:
+  - GET /api/app-settings does NOT include pos_dashboard_widgets
+  - POST /api/table-read for app_settings does NOT return pos_dashboard_widgets (sensitive row filtered)
+- Run: npm run build and npx tsc --noEmit
+
+DELIVERABLE
+- Files changed list
+- Snippets of the new filters in /api/app-settings and /api/table-read
+- Proof outputs for the verification bullets above
+- Confirm: no schema changes, ERP untouched, no DB data edits outside the single upsert for pos_dashboard_widgets

@@ -1,0 +1,93 @@
+PROMPT — Unique Purchase Invoice Edit Grid — Paste Rows (NO HEADER) from “Purchase SUPP INV_10.xlsx” Template (UI-ONLY, SAFE)
+
+Context
+We already have an “Excel-like” grid editor for unique purchase invoice items and a paste/import dialog.
+User will NOT paste the header row; they will paste rows only (data under header).
+We must support pasting rows from the provided Excel template “Purchase SUPP INV_10.xlsx”.
+
+ABSOLUTE RULES (NO EXCEPTIONS)
+1) UI-only changes: do NOT modify DB schema, migrations, RPCs, or server routes.
+2) Do NOT change the save contract: saving remains via dataGateway.rpc('unique_purchase_invoice_edit_atomic') exactly as-is.
+3) Do NOT introduce any direct DB writes (no supabase.from, no pool.query).
+4) Deterministic + safe parsing: invalid rows must be rejected with clear per-row errors; do not “guess” values silently.
+
+Excel Template Reality (from the attached file)
+Header (Row 1) includes these important columns:
+SUPP INV, DIVISION, STOCKCODE, MODEL, SUPP.REF, SUPPLIER, DESCRIPTION, TYPE, COST CODE, TAG1..TAG4, COST, TAG PRICE, MINIMUM PRICE, G, D, Stone, Metal, Rate Type, …
+Example data row pattern:
+- DESCRIPTION contains Arabic text and includes karat like “عيار18”
+- COST may contain commas/spaces: “ 26,391 ”
+- TAG PRICE numeric
+- G and D are numeric weights
+- “Metal” in the sheet is NOT karat; it can be a letter like “G” (do not treat it as karat)
+
+Goal
+When user pastes rows (without header), the UI must correctly map the pasted columns into our grid fields and validate them.
+
+Implementation Plan
+A) Add a new paste mode option in the paste dialog:
+   - “Template: SUPP INV_10 (rows only)”
+   - When selected, the parser uses a fixed column index mapping and ignores extra columns.
+
+B) Column Index Mapping for SUPP INV_10 rows (0-based indices in pasted row array):
+   idx2  STOCKCODE       -> grid.stockcode (string)
+   idx3  MODEL           -> grid.model (string)
+   idx4  SUPP.REF        -> grid.supp_ref (string)
+   idx6  DESCRIPTION     -> grid.description (string)
+   idx7  TYPE            -> grid.type (string)
+   idx13 COST            -> grid.cost (number)
+   idx14 TAG PRICE       -> grid.tag_price (number)
+   idx15 MINIMUM PRICE   -> grid.minimum_price (number)
+   idx16 G               -> grid.g_weight (number)
+   idx17 D               -> grid.d_weight (number)
+   idx22 Stone           -> grid.stone (string)   (optional)
+   IMPORTANT: grid.metal must be KARAT (8/9/10/12/14/18/21/22/24).
+   The sheet “Metal” column is NOT karat and must NOT be used as-is.
+   Instead:
+     - Try extract karat from DESCRIPTION using regex /(عيار\s*([0-9]{1,2}))/.
+     - If not found, try regex /(\b(8|9|10|12|14|18|21|22|24)\b)/ within DESCRIPTION.
+     - If still not found: mark row invalid with error “Missing karat”.
+
+C) Normalization rules (must be applied before validation):
+   - For numeric fields: trim, remove commas, remove spaces.
+     Example: " 26,391 " -> 26391
+   - Empty -> null / undefined (but validation may fail if required).
+   - Do NOT auto-fill missing required numeric fields.
+
+D) Validation rules (hard errors):
+   - cost > 0
+   - g_weight >= 0 (allow 0)
+   - d_weight >= 0 (allow 0)
+   - karat in allowed set
+   - At least one identifier: stockcode OR description must be present
+   - If pasted row has fewer columns than required indices -> invalid row “Row has insufficient columns”.
+
+E) Apply behavior
+   - In “Template: SUPP INV_10” mode:
+     - Ignore columns not mapped above.
+     - Create new rows only (do not update existing rows) unless user explicitly pastes inside the grid (Ctrl+V active-cell behavior remains unchanged).
+   - Show preview:
+     - total rows pasted
+     - valid rows count
+     - invalid rows count
+     - table of first 10 rows with mapped fields
+     - error list with (rowNumber, field, message)
+
+F) Evidence (MANDATORY)
+After implementing, provide:
+1) git diff --stat
+2) git diff
+3) A deterministic test: paste 2 sample rows (copied from the template) WITHOUT header and show preview outcome:
+   - mapped fields
+   - karat extracted from DESCRIPTION
+   - cost parsed correctly removing commas
+4) prove no DB write code added:
+   - grep -R "supabase.from\\(" for modified files => 0 matches
+   - grep -R "pool.query\\(" for modified files => 0 matches
+
+Files likely involved
+- src/components/purchasing/ExcelPasteDialog.tsx (or equivalent)
+- src/components/purchasing/UniqueItemsGridEditor.tsx (if needed for paste UI)
+- Any small shared parser utility file (UI-only)
+
+Do it now without changing any backend.

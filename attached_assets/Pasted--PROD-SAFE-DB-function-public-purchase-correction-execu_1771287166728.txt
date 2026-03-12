@@ -1,0 +1,54 @@
+نفّذ تعديل PROD-SAFE في DB function واحدة فقط:
+
+public.purchase_correction_execute_atomic(jsonb)
+
+🎯 الهدف
+1) إزالة أي reference لـ unique_serial_seq داخل الدالة.
+2) جعل توليد رقم القيد (JE number) يستخدم sequence مستقل.
+3) عدم تغيير أي منطق آخر (تصحيح/حركات/قيود/حسابات/validation) إطلاقًا.
+
+✅ خطوة Gate داخل الدالة (لمنع التخمين)
+داخل تعريف الدالة، حدّد نمط رقم القيد المستخدم حاليًا:
+- إذا كانت الدالة تولّد je_number بصيغة تبدأ بـ 'JE-UIMP-' → استخدم je_uimp_doc_seq
+- إذا كانت تولّد je_number بصيغة تبدأ بـ 'JE-' (بدون UIMP) → لا تستخدم je_uimp_doc_seq
+  بل أنشئ sequence جديد عام للـJE باسم public.je_doc_seq (إن لم يكن موجودًا) واستخدمه.
+
+🛠️ التعديلات المطلوبة
+
+(A) إزالة self-healing أو أي استخدام لـ:
+- nextval('unique_serial_seq')
+- setval('unique_serial_seq'...)
+- last_value من unique_serial_seq
+- أي حسابات MAX(...) مرتبطة بـ SN- أو unique_serial_seq
+
+(B) توليد رقم القيد (JE):
+- لو النمط JE-UIMP-:
+  v_je_number := 'JE-UIMP-' || to_char(current_date,'YYYYMMDD') || '-' || lpad(nextval('public.je_uimp_doc_seq')::text, 6, '0');
+
+- لو النمط JE- العام:
+  1) أنشئ sequence عام مرة واحدة (داخل نفس patch للدالة عبر CREATE SEQUENCE IF NOT EXISTS قبل CREATE OR REPLACE FUNCTION أو داخل migration منفصل إن لزم):
+     CREATE SEQUENCE IF NOT EXISTS public.je_doc_seq START WITH 1 INCREMENT BY 1 MINVALUE 1 NO MAXVALUE CACHE 50;
+  2) ثم:
+     v_je_number := 'JE-' || to_char(current_date,'YYYYMMDD') || '-' || lpad(nextval('public.je_doc_seq')::text, 6, '0');
+
+⚠️ قواعد صارمة
+- لا تغيّر أي INSERT/UPDATE غير أسطر توليد رقم القيد + إزالة legacy blocks.
+- لا تغيّر أسماء الحقول أو المنطق المحاسبي.
+
+📎 Evidence REQUIRED
+A) Gate: لازم 0 صفوف بعد التعديل:
+   select p.proname
+   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public'
+     and p.proname='purchase_correction_execute_atomic'
+     and (pg_get_functiondef(p.oid) ilike '%unique_serial_seq%'
+          or pg_get_functiondef(p.oid) ilike '%SN-%');
+
+B) اعرض مقطع توليد je_number (قبل/بعد) أو pg_get_functiondef للدالة.
+
+C) (اختياري Smoke Test) نفّذ correction صغيرة من الواجهة/endpoint إن متاح، ثم:
+   select je_number, created_at
+   from journal_entries
+   order by created_at desc
+   limit 5;
+   وتأكد أن النمط مطابق (JE-UIMP- أو JE-) وبالـpadding 6.

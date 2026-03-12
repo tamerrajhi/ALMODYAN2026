@@ -1,0 +1,62 @@
+✅ PROMPT — VERIFY REPLIT CLAIMS + DECIDE NEXT STEP | EVIDENCE PACK ONLY | NO GUESSING | STOP
+
+ROLE: Auditor
+MODE: Evidence-only + Decision (based strictly on outputs)
+
+GOAL:
+Validate the claims in the previous report:
+1) Supabase env vars are undefined
+2) 105 import-fix applied correctly
+3) build passes
+4) runtime does not throw ReferenceError on affected pages
+5) despite import fix, Supabase client cannot function without env keys (if true)
+Then output a single Next-Step decision with proof.
+
+SECTION A — ENV PROOF (RAW)
+Run and paste raw outputs:
+A1) node -e "console.log('VITE_SUPABASE_URL', process.env.VITE_SUPABASE_URL); console.log('VITE_SUPABASE_PUBLISHABLE_KEY', process.env.VITE_SUPABASE_PUBLISHABLE_KEY); console.log('VITE_DATA_BACKEND', process.env.VITE_DATA_BACKEND)"
+A2) rg -n "VITE_SUPABASE_URL|VITE_SUPABASE_PUBLISHABLE_KEY|VITE_DATA_BACKEND" -S .env* package.json server src || true
+A3) If Replit Secrets UI is referenced, DO NOT describe it verbally. Instead print:
+node -e "console.log('NO_SECRETS_PROOF_NOT_AVAILABLE_IN_CLI')"
+(If you cannot prove secrets via CLI, mark as UNPROVEN.)
+
+SECTION B — IMPORT FIX PROOF (RAW)
+B1) Count files importing supabase:
+rg -l "import\\s+\\{\\s*supabase\\s*\\}\\s+from\\s+['\\\"]@/integrations/supabase/client['\\\"]" src | wc -l
+B2) Confirm NO file uses supabase without import:
+python - <<'PY'
+import os, re, subprocess, sys
+# list files that reference "supabase" but do not contain an import line
+def rg(cmd):
+    return subprocess.check_output(cmd, shell=True, text=True).splitlines()
+files = rg("rg -l '\\\\bsupabase\\\\b' src --glob='*.ts' --glob='*.tsx' || true")
+bad=[]
+for f in files:
+    txt=open(f,'r',encoding='utf-8',errors='ignore').read()
+    if re.search(r"\\bimport\\b", txt[:4000]) and "supabase" in txt:
+        # must have explicit import if it uses supabase.
+        if "import { supabase } from '@/integrations/supabase/client'" not in txt and "import { supabase } from \"@/integrations/supabase/client\"" not in txt and "import { supabase } from '@/integrations/supabase/client';" not in txt and "import { supabase } from \"@/integrations/supabase/client\";" not in txt:
+            # still allow files that only mention supabase in comments
+            if re.search(r"(^|[^/])\\bsupabase\\b", txt) and not re.search(r"^\\s*//.*\\bsupabase\\b", txt, re.M):
+                bad.append(f)
+print("FILES_WITH_SUPABASE_NO_IMPORT", len(bad))
+for f in bad[:50]:
+    print(f)
+PY
+(If python is not allowed, do a best-effort with rg + manual sample: pick 10 files from M3 and show first 40 lines to prove import exists.)
+
+SECTION C — BUILD PROOF (RAW)
+C1) npm run build
+Paste the final lines including exit code (or the error stack if failed).
+
+SECTION D — RUNTIME PROOF (RAW, MINIMUM 2 PAGES)
+D1) npm run dev
+D2) Open these routes in browser and paste console output (copy/paste text):
+- /dashboard (DashboardPage)
+- /inventory/inventory-counts (InventoryCountsPage)
+We need to see either:
+- No ReferenceError, OR
+- The exact ReferenceError stack.
+
+SECTION E — DECISION (NO GUESSING)
+Based strictly on

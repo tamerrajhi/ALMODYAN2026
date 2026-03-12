@@ -1,0 +1,92 @@
+✅ PROMPT — STOP-POS-AUDIT-ONLY | Audit POS Screens (No Changes) | EVIDENCE RAW | STOP
+
+ROLE: Senior Auditor (Frontend + Data Access)
+
+MODE: AUDIT ONLY (READ-ONLY)
+
+STRICT RULES
+- DO NOT change any code.
+- DO NOT refactor.
+- DO NOT add new files.
+- DO NOT run migrations.
+- Only inspect and output evidence + findings.
+- Provide RAW command outputs exactly as-is.
+
+SCOPE (FILES)
+Audit these POS-related pages:
+- src/pages/POSPage.tsx
+- src/pages/POSReturnPage.tsx
+- src/pages/POSCreditNotePage.tsx
+- src/pages/CustomerReceiptsPage.tsx
+- src/pages/ReportsPage.tsx
+- src/pages/UsersPage.tsx
+(If paths differ, locate the correct paths and note them.)
+
+OBJECTIVES
+1) Confirm whether ANY of these pages use Supabase directly:
+   - supabase.from(...)
+   - supabase.rpc(...)
+   - import from "@/integrations/supabase/client"
+2) Confirm whether the pages use a modern data layer (dataGateway/apiClient) or legacy paths (direct fetch calls to old endpoints).
+3) Map the POS flow at a high level:
+   - Search/barcode input: where is it, what triggers search?
+   - Add to cart: what function runs when pressing "+"?
+   - Checkout/post sale: what API/RPC is called?
+   - Returns/Credit note: what API/RPC is called?
+   - Journal/receipts: what endpoints are used?
+4) Identify any "legacy" indicators:
+   - direct table writes from UI
+   - old endpoints / v1 routes / hardcoded table names
+   - missing atomic RPC usage in critical actions (post/void/pay)
+
+REQUIRED COMMANDS (RUN IN TERMINAL)
+A) Supabase direct usage scan:
+rg -n "supabase\\.|@/integrations/supabase/client|\\bfrom\\(|\\brpc\\(" \
+src/pages/POSPage.tsx \
+src/pages/POSReturnPage.tsx \
+src/pages/POSCreditNotePage.tsx \
+src/pages/CustomerReceiptsPage.tsx \
+src/pages/ReportsPage.tsx \
+src/pages/UsersPage.tsx
+
+B) Data layer usage scan (gateway vs direct fetch/axios):
+rg -n "dataGateway\\.|apiClient\\.|fetch\\(|axios\\(|/api/|queryTable\\(|\\brpc\\(" \
+src/pages/POSPage.tsx \
+src/pages/POSReturnPage.tsx \
+src/pages/POSCreditNotePage.tsx \
+src/pages/CustomerReceiptsPage.tsx
+
+C) POS behavior keywords (to locate functions):
+rg -n "barcode|scan|search|cart|add|\\+|Enter|onKeyDown|onChange|handleAdd|addItem|lookup|checkout|post|void|payment|receipt" \
+src/pages/POSPage.tsx \
+src/pages/POSReturnPage.tsx \
+src/pages/POSCreditNotePage.tsx \
+src/pages/CustomerReceiptsPage.tsx
+
+D) Show the key code snippets (COPY/PASTE ONLY, NO EDITS)
+From POSPage.tsx, copy/paste:
+1) The barcode/search input JSX section (inputs + buttons around it)
+2) The function invoked by the "+" button (add-to-cart)
+3) The function invoked by checkout/post (finalize sale / post / pay)
+If these are in hooks/services, also paste the referenced function definitions.
+
+OUTPUT FORMAT (MUST FOLLOW)
+1) RAW OUTPUTS
+- Paste the full raw outputs for commands A, B, C (no summarizing).
+
+2) FLOW MAP (SHORT, PRACTICAL)
+- List the POS flow in 10-15 bullets:
+  UI event -> function -> data layer call -> endpoint/RPC -> response usage
+
+3) RISK FLAGS
+- Table with columns:
+  File | Finding | Risk Level (P0/P1/P2) | Evidence (line ref) | Suggested Fix (one-liner)
+
+4) DECISION
+- Explicitly answer:
+  - Is POS free of Supabase direct usage? (YES/NO)
+  - Is POS free of legacy direct writes? (YES/NO)
+  - Where is the safest insertion point for "scan-to-add" + "camera button"? (file + function)
+
+STOP CONDITION
+After providing the above outputs, STOP. No further work.

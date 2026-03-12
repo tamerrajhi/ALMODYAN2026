@@ -1,0 +1,74 @@
+ROLE: Lead Auditor (No Guessing)
+
+MODE: READ-ONLY AUDIT (ممنوع أي تعديل كود أو DB)
+
+TARGET: شاشة سندات الصرف / مدفوعات الموردين (Payment Vouchers / Supplier Payments)
+
+GOAL:
+تحقق بالدليل (Evidence) من 3 نقاط فقط:
+A) هل الشاشة فعلاً ATOMIC (RPC-only / no direct writes)
+B) هل بتنشىء قيود محاسبية JE بشكل صحيح عند Create/Update/Void
+C) هل فيها Allocations على فواتير الموردين وتحديث paid/remaining/status
+
+STRICT RULES:
+- ممنوع التخمين أو الوصف العام.
+- أي ادعاء لازم يكون معه دليل: file path + line numbers أو SQL أو curl.
+- ممنوع أي تغييرات (لا routes edits / لا UI edits / لا migrations / لا seed).
+
+DELIVERABLES (Evidence Pack فقط):
+
+1) UI → Mutations Map
+- اسم الملف/الملفات الخاصة بالشاشة (مثلاً PaymentVouchersPage.tsx أو ما شابه)
+- اعمل:
+  rg -n "payment_voucher|voucher|supplier payment|PaymentVoucher|forbidDirectWrite|supabase\\.from\\(|supabase\\.rpc\\(" src
+وألصق النتائج كاملة.
+- استخرج أسماء جميع عمليات الكتابة (create/update/post/void/allocate إن وجدت) وحدد لكل واحدة:
+  - ما الذي يتم استدعاؤه بالضبط؟ (dataGateway.rpc؟ apiClient؟)
+  - اسم RPC أو endpoint.
+  - سطور الكود (20 سطر حول كل استدعاء).
+
+2) RPC Existence Proof (DB)
+- إذا قلت أن هناك RPCs:
+  payment_voucher_atomic
+  payment_voucher_update_atomic
+  payment_voucher_void_atomic
+أثبت وجودهم عبر SQL (أو introspection) مع نتائج فعلية:
+  SELECT proname, oid::regprocedure
+  FROM pg_proc
+  WHERE proname IN ('payment_voucher_atomic','payment_voucher_update_atomic','payment_voucher_void_atomic');
+
+- ثم أعطني تعريف كل Function (DDL) أو على الأقل أول 60 سطر + آخر 60 سطر لكل واحدة:
+  (أي طريقة مناسبة عندك لعرض definition)
+
+3) Atomicity Proof داخل RPC
+- داخل كل RPC: أثبت وجود transaction behavior أو أن كل writes تتم كعملية واحدة (لا multi-step خارج DB).
+- اعطني مواضع الكتابة الأساسية داخل RPC:
+  - insert voucher header
+  - insert voucher lines / allocations (إن وجدت)
+  - create journal entry + journal lines
+  - تحديث فواتير المورد (paid_amount/remaining/status إن وجد)
+مع مقتطفات كود من الـ function (مع سطور).
+
+4) Journal Entry Linkage Proof
+- أثبت أن JE ترتبط بالسند عبر source_type/source_id أو أي mapping.
+- اعطني SQL query جاهز يُظهر آخر 10 سندات ومعهم JE المرتبطة:
+  (اكتب query فعلي مطابق لسكيمتك، ولا تستخدم أسماء جداول افتراضية)
+
+5) Runtime Proof (curl) — بدون تعديل أي شيء
+- نفّذ curl لقراءة قائمة السندات (list endpoint) إن موجود:
+  /api/... (اكتب المسار الحقيقي)
+- ثم أنشئ سند Test صغير (إن كان هناك endpoint create) أو صف كيف يتم الإنشاء عبر UI فقط.
+- اعطني نتائج HTTP status + response snippet.
+
+6) Direct Write Proof
+- أعطني دليل أن الشاشة لا تحتوي forbidDirectWrite ولا supabase.from/rpc للكتابة:
+  rg -n "forbidDirectWrite|DIRECT_WRITE_BLOCKED|supabase\\.from\\(|supabase\\.rpc\\(" <paths to the page files>
+والنتيجة يجب أن تكون 0 للكتابة (أو اشرح بالدلائل أين وجدت).
+
+OUTPUT FORMAT (مهم):
+- قسم 1: Files + rg output
+- قسم 2: Mutations list (جدول: action → call → target)
+- قسم 3: RPC existence + DDL snippets
+- قسم 4: JE linkage SQL + sample output
+- قسم 5: curl proof
+- قسم 6: Final verdict (Atomic? JE? Allocations?) مع إحالة للدلائل أعلاه

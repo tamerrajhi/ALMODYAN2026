@@ -1,0 +1,71 @@
+ROLE: Principal Auditor (No Guessing)
+MODE: READ-ONLY AUDIT (NO CODE CHANGES / NO DB CHANGES)
+
+MISSION:
+اعمل تدقيق شامل للنظام لاكتشاف أي معاملات/شاشات/Endpoints/RPCs بتتعامل مع "القطع" (items) لكنها تقرأ/تربط من جدول غلط.
+المعيار:
+- معاملات مرتبطة بالمشتريات الفريدة يجب أن تعتمد على SoT: unique_purchase_invoices (وجداول التفاصيل المرتبطة بها إن وجدت)
+- معاملات المشتريات العامة يجب أن تعتمد على جدول SoT الخاص بالمشتريات العامة (اكتشفه بالدليل).
+أي خلط بين المسارين أو قراءة من جداول قديمة/غير صحيحة = MISWIRED.
+
+STRICT RULES:
+- ممنوع التخمين.
+- كل claim لازم Evidence: file path + line numbers أو SQL schema أو curl.
+- لا تغيّر أي ملف. لا تضيف endpoints. لا تعدّل functions.
+
+DELIVERABLES (Output as a single report):
+
+SECTION A) Identify SoT Tables (DB Evidence)
+1) أثبت وجود unique_purchase_invoices: أعطني SQL:
+   - \d unique_purchase_invoices (أو query من information_schema)
+   - واذكر الأعمدة الأساسية: id, invoice_no, supplier_id, branch_id, status, posted_at (حسب الموجود)
+2) اكتشف جدول SoT للمشتريات العامة بالدليل:
+   - ابحث في schema + code عن "general purchase" tables.
+   - قد يكون اسمه purchase_invoices / purchase_orders / supplier_invoices ... إلخ.
+   - أعطني SQL proof (\d table) + لماذا هو SoT (علاقات + استخدامات).
+
+SECTION B) Global Search: Where "items" are used (Code Evidence)
+نفّذ searches التالية واطبع النتائج (paths + line numbers):
+- rg -n "unique_purchase_invoices|purchase_invoices|purchase_invoice_items|unique_purchase|invoice_items" src server
+- rg -n "jewelry_items|item_movements|stock_movements|inventory_items|barcode|serial" src server
+- rg -n "return|returns|ReceiptVoucher|PaymentVoucher|Transfer|POS|Sales|Void|Post" src/pages server
+
+SECTION C) Build the "Items Consumer Inventory" (No Guessing)
+من نتائج SECTION B, استخرج قائمة بكل الملفات/الشاشات/Endpoints/RPCs التي:
+- تعرض قطع
+- أو تختار قطع
+- أو تربط قطع بفواتير
+- أو تعمل movements/ledger على القطع
+- أو تعمل returns/transfers/sales
+
+لكل عنصر في القائمة، اكتب صف بهذه الحقول (مع دليل سطر):
+1) Component/Endpoint/RPC name
+2) Domain (Purchases Unique / Purchases General / Sales / Returns / Transfers / Vouchers / Inventory)
+3) Reads items from which table(s)
+4) Expected SoT table (unique vs general)
+5) Verdict: OK or MISWIRED
+6) Evidence: file path + line numbers (or SQL)
+
+SECTION D) Top 20 MISWIRES (Prioritized)
+رتّب كل MISWIRED حسب خطورة الأثر:
+P0: يسبب اختفاء قطع / بيع قطعة غير موجودة / حركة مخزون غلط / قيد محاسبي غلط
+P1: يسبب تقارير غلط أو UI mismatch
+P2: cosmetic/labels
+
+لكل MISWIRE أعطني:
+- What is wrong (table mismatch)
+- Exact location(s) (file + lines)
+- Suggested fix direction (فقط "حوّل القراءة إلى SoT X" بدون تعديل كود)
+
+SECTION E) Quick Runtime Verification (Optional but strong evidence)
+إذا يوجد endpoints list/items, أعطني curl GET لواحد/اثنين يوضح المصدر:
+- /api/...items...
+- /api/...unique-purchase...
+أظهر response snippet يوضح fields تدل على المصدر (invoice_id type, source_type, etc.)
+
+OUTPUT FORMAT:
+- A: SoT tables proofs
+- B: rg outputs (raw)
+- C: Consumer inventory table
+- D: Top miswires list (with P0/P1/P2)
+- E: curl evidence (if possible)

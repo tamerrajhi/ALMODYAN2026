@@ -1,0 +1,92 @@
+✅ PROMPT — SUPABASE-IMPACT-MAP | EVIDENCE PACK ONLY | NO CHANGES | STOP
+
+ROLE: Auditor
+MODE: Evidence-only (no edits, no refactors)
+
+GOALS (no guessing):
+G1) Identify ALL files that call supabase.from / supabase.rpc (including multiline).
+G2) For each such file, prove whether it imports supabase (any import path) or not.
+G3) Locate the true source of the `supabase` symbol (createClient wrapper, re-export, or global).
+G4) Output an “Impact Map” listing affected SCREENS (pages) and SHARED MODULES (lib/components) separately.
+
+RULES:
+- Run commands only.
+- Output raw results only.
+- If output is long, write to text files and then show `sed -n '1,120p'` / `tail -n 120`.
+
+RUN:
+
+---S1 (multiline .from hits; save list)---
+rg -nU --hidden --no-ignore-vcs "supabase\s*(\r?\n)\s*\.from\(" src > /tmp/supabase_from_multiline.txt
+wc -l /tmp/supabase_from_multiline.txt
+sed -n '1,120p' /tmp/supabase_from_multiline.txt
+tail -n 120 /tmp/supabase_from_multiline.txt
+
+---S2 (multiline .rpc hits; save list)---
+rg -nU --hidden --no-ignore-vcs "supabase\s*(\r?\n)\s*\.rpc\(" src > /tmp/supabase_rpc_multiline.txt
+wc -l /tmp/supabase_rpc_multiline.txt
+cat /tmp/supabase_rpc_multiline.txt
+
+---S3 (same-line hits; for completeness)---
+rg -n --hidden --no-ignore-vcs "supabase\.from\(|supabase\.rpc\(" src > /tmp/supabase_same_line.txt
+wc -l /tmp/supabase_same_line.txt
+sed -n '1,120p' /tmp/supabase_same_line.txt
+tail -n 120 /tmp/supabase_same_line.txt
+
+---S4 (extract unique file list from S1+S2; show top)---
+cat /tmp/supabase_from_multiline.txt /tmp/supabase_rpc_multiline.txt \
+| cut -d: -f1 | sort -u > /tmp/supabase_call_files.txt
+wc -l /tmp/supabase_call_files.txt
+sed -n '1,200p' /tmp/supabase_call_files.txt
+
+---S5 (for each file: prove imports that mention supabase; show first 40 lines only)---
+python - <<'PY'
+import pathlib, re
+files = [p.strip() for p in open("/tmp/supabase_call_files.txt","r",encoding="utf-8").read().splitlines() if p.strip()]
+def head(path, n=60):
+  try:
+    lines = pathlib.Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
+  except Exception as e:
+    return ["<READ_ERROR> "+str(e)]
+  return lines[:n]
+import_pat = re.compile(r'^\s*import\s+.*supabase.*from\s+[\'"].+[\'"]\s*;?\s*$')
+destruct_pat = re.compile(r'^\s*import\s+\{\s*supabase\s*\}\s+from\s+[\'"].+[\'"]\s*;?\s*$')
+any_sup_pat = re.compile(r'\bsupabase\b')
+
+missing_import = []
+has_import = []
+for f in files:
+  lines = head(f, 80)
+  has_any_sup = any(any_sup_pat.search(x) for x in lines)
+  imports = [x for x in lines if "import" in x and "supabase" in x]
+  destruct = [x for x in lines if destruct_pat.search(x)]
+  any_import_match = [x for x in lines if import_pat.search(x) or destruct_pat.search(x)]
+  if any_import_match:
+    has_import.append((f, any_import_match[:3]))
+  else:
+    missing_import.append((f, imports[:5]))
+print("===FILES_WITH_SUPABASE_IMPORT===")
+for f, imps in has_import:
+  print(f)
+  for x in imps: print("  " + x)
+print("\n===FILES_CALL_SUPABASE_BUT_NO_IMPORT_MATCH_IN_HEAD===")
+for f, imps in missing_import:
+  print(f)
+  if imps:
+    for x in imps: print("  " + x)
+PY
+
+---S6 (find the canonical supabase export / re-export chain)---
+rg -n --hidden --no-ignore-vcs "export\s+\{\s*supabase\s*\}" src || true
+rg -n --hidden --no-ignore-vcs "export\s+const\s+supabase" src || true
+rg -n --hidden --no-ignore-vcs "globalThis\.supabase|window\.supabase" src || true
+rg -n --hidden --no-ignore-vcs "createClient\(" src/integrations/supabase src/lib src/core || true
+rg -n --hidden --no-ignore-vcs "from ['\"].*supabase/client['\"]" src || true
+
+---S7 (Impact Map: pages only)---
+cat /tmp/supabase_call_files.txt | rg "^src/pages/" || true
+
+---S8 (Impact Map: shared libs/components only)---
+cat /tmp/supabase_call_files.txt | rg -v "^src/pages/" || true
+
+STOP.

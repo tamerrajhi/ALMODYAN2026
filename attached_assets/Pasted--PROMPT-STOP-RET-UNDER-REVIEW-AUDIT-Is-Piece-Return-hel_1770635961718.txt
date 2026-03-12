@@ -1,0 +1,59 @@
+✅ PROMPT — STOP-RET-UNDER-REVIEW-AUDIT | Is Piece Return held for inspection before re-stock? | READ-ONLY | EVIDENCE | STOP
+
+ROLE: Auditor
+MODE: READ-ONLY (NO CODE CHANGES, NO DB CHANGES)
+
+GOAL
+Verify whether POS piece returns support:
+1) return status = "under_review/inspection" (or equivalent)
+2) item is NOT returned to sellable stock until approval
+3) there is an approval action/page/RPC that moves it to sellable
+
+A) UI CONTRACT EVIDENCE (POSReturnPage)
+1) Paste the exact payload object passed to complete_pos_piece_return_atomic from POSReturnPage.tsx
+   Focus on keys: post_return_status, create_invoice, refund_method, items[] and any “inspection/hold” flags.
+2) Identify UI options/dropdowns for return status and show their exact values (strings).
+
+B) DB SCHEMA EVIDENCE
+1) returns table:
+- show columns (especially status, return_type, original_sale_id, journal_entry_id)
+- show CHECK constraints/enums if any:
+SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+WHERE conrelid='public.returns'::regclass AND contype='c';
+2) unique_items table relevant columns:
+- sold_at, sale_id, and any "condition/status/hold" column like:
+  item_status, stock_status, location_status, qa_status, is_quarantined, is_sellable, etc.
+Provide a column list evidence:
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name IN ('unique_items','returns','return_items')
+ORDER BY table_name, ordinal_position;
+
+3) v_sellable_unique_items / POS sellable filter evidence:
+- show the view definition:
+SELECT pg_get_viewdef('public.v_sellable_unique_items'::regclass, true) AS viewdef;
+- confirm if it excludes under-review/quarantine items.
+
+C) CURRENT FUNCTION BEHAVIOR (EVIDENCE)
+Open the function body (read-only):
+SELECT pg_get_functiondef('public.complete_pos_piece_return_atomic(jsonb)'::regprocedure);
+
+From the function body, extract and paste ONLY the parts that:
+- update unique_items (what exactly happens: sold_at=NULL, sale_id=NULL, any status updates?)
+- set returns.status or any “inspection” status
+
+D) APPROVAL PATH EVIDENCE
+Search for any RPC/page that approves/rejects returns, e.g.:
+approve_return, inspect_return, receive_return, return_review, return_approve, return_reject
+
+Provide evidence:
+- Matching file names + routes
+- Any RPC names found in code
+- Any endpoints /api/return-approve etc.
+
+E) CONCLUSION (YES/NO)
+Based on evidence A-D:
+- Does the system currently keep returned pieces under inspection and prevent sellable stock until approval?
+Answer YES/NO with 3 bullet proofs.
+
+STOP.

@@ -1,0 +1,74 @@
+✅ PROMPT — WAVE-1 VERIFICATION EVIDENCE PACK (NO NEW WORK) | MUST PROVE CLAIMS | STOP
+
+ROLE: Auditor / Full-stack Engineer
+MODE: Evidence only. NO further migrations. NO new endpoints unless required to fix a proven issue.
+
+GOAL:
+Verify the Wave-1 migration claims with raw evidence and reconcile any mismatch (Wave1=5 vs 4).
+
+HARD RULES:
+- NO narrative, NO conclusions without command output.
+- Show raw outputs exactly.
+- If something is missing, show it as MISSING.
+
+SECTION 0 — WAVE-1 SCOPE RECONCILIATION
+S0.1) List the exact migrated frontend files (paths) in Wave-1.
+S0.2) If Wave-1 is not 5 files, name the missing file and show why it was not migrated (raw grep count + location).
+
+SECTION 1 — DIFF EVIDENCE
+S1.1) git diff --stat (raw)
+S1.2) git diff (raw) ONLY for:
+- migrated frontend files
+- server/routes.ts (or any server file touched)
+- src/lib/dataGateway.ts or apiClient.ts if touched
+
+SECTION 2 — SUPABASE ELIMINATION PROOF (PER FILE)
+For EACH migrated frontend file:
+S2.1) rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <file> || true
+S2.2) rg -n "from '@/integrations/supabase/client'|@supabase/supabase-js" <file> || true
+
+SECTION 3 — ENDPOINT INVENTORY + SECURITY PROOF
+S3.1) List all NEW endpoints added for Wave-1 with exact route strings (raw grep):
+rg -n "app\\.(get|post|put|delete)\\(\"/api/dashboard/|/api/party-statement|/api/branch-inventory-accounts|/api/daily-settlements" server/routes.ts
+S3.2) For each endpoint above: show the exact line that includes requireSession (or prove it is intentionally public).
+S3.3) Prove there are NO duplicate route definitions:
+rg -n "app\\.get\\(\"/api/cash-vaults\"|app\\.get\\(\"/api/gold-vaults\"|app\\.get\\(\"/api/branches\"" server/routes.ts
+
+SECTION 4 — RUNTIME/API PROOF (CURL)
+Using a valid session cookie:
+For each NEW endpoint:
+S4.1) curl -i (status + headers + first 30 lines of JSON)
+Also run the old endpoints used by those pages (if any) to prove they still return JSON.
+
+SECTION 5 — SCHEMA CLAIM PROOF
+For every table you claimed “doesn't exist” (daily_settlements, cash_vault_transactions, gold_vault_transactions):
+S5.1) Provide raw SQL output proving existence/non-existence, e.g.:
+SELECT to_regclass('public.daily_settlements') AS daily_settlements;
+SELECT to_regclass('public.cash_vault_transactions') AS cash_vault_transactions;
+SELECT to_regclass('public.gold_vault_transactions') AS gold_vault_transactions;
+
+SECTION 6 — INSTRUMENTATION SAFETY
+S6.1) Show the exact instrumentation code block added in src/integrations/supabase/client.ts
+S6.2) Prove it is DEV-only AND/OR removed after verification (raw diff + current file content snippet).
+
+SECTION 7 — GLOBAL COUNTS (POST-WAVE1)
+S7.1) Total remaining files with supabase calls (multiline-aware):
+python - <<'PY'
+import os,re,collections
+cnt=collections.Counter()
+for root,_,files in os.walk("src"):
+  for fn in files:
+    if fn.endswith((".ts",".tsx")):
+      p=os.path.join(root,fn)
+      s=open(p,"r",encoding="utf-8",errors="ignore").read()
+      n=len(re.findall(r"supabase\\s*\\.\\s*(from|rpc)\\s*\\(", s))
+      if n: cnt[p]=n
+print("TOTAL_FILES",len(cnt))
+print("TOTAL_CALLS",sum(cnt.values()))
+for p,n in cnt.most_common(20):
+  print(n,p)
+PY
+
+OUTPUT FORMAT:
+- Paste all raw outputs in the order above.
+STOP.

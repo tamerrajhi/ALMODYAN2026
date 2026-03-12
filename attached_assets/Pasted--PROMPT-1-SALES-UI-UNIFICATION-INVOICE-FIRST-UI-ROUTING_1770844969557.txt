@@ -1,0 +1,79 @@
+✅ PROMPT 1 — SALES UI UNIFICATION (INVOICE-FIRST) | UI + ROUTING ONLY | 4 FILES MAX | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+
+MODE: UI + Routing only (NO DB changes, NO backend changes, NO new APIs)
+
+🎯 OBJECTIVES (MUST):
+1) في كل القوائم/العرض/البحث: الرقم الرئيسي المعروض = invoice_number فقط.
+2) في صفحة عرض الفاتورة (Invoice View): اعرض "رقم العملية (POS): SAL-..." كحقل ثانوي فقط عندما تكون الفاتورة POS (sale_id موجود).
+3) في كل الإجراءات (مرتجع/طباعة/إلغاء/ترحيل): مرّر invoice_id فقط في الـ navigation/query.
+4) POS Return Page: إذا جاء URL فيه ?invoice_id=... بدل ?sale_id=...:
+   - اجلب invoice (invoice-with-customer) بالـ invoice_id
+   - استخرج sale_id منها
+   - لو sale_id غير موجود → رسالة عربية واضحة: "هذه فاتورة مبيعات عامة — استخدم مرتجع المبيعات العامة"
+   - لو موجود → أكمل نفس auto-load الحالي وكأنها ?sale_id=
+5) لا نغيّر أي مسارات routes ولا نضيف صفحات جديدة.
+6) لا نلمس ZATCA.
+
+🧩 FILES ALLOWED TO EDIT (MAX 4 FILES):
+A) src/pages/sales/SalesInvoicesPage.tsx
+B) src/pages/sales/SalesInvoiceViewPage.tsx
+C) src/components/sales/invoice-view/QuickActionsBar.tsx
+D) src/pages/POSReturnPage.tsx
+
+✅ REQUIRED CHANGES (BY FILE):
+
+A) SalesInvoicesPage.tsx
+- في جدول الفواتير: اجعل العمود الرئيسي والبحث/الفلتر يعتمدان على invoice_number (لا تستخدم sale_code كساسي).
+- إذا كانت الفاتورة POS: اعرض sale_code في سطر ثانوي صغير داخل نفس الخانة (Secondary text) بصيغة:
+  "رقم العملية (POS): SAL-XXXX"
+- Action "إنشاء مرتجع": يجب أن يوجّه دائمًا إلى:
+  /pos/return?invoice_id=<invoice.id>
+  (حتى لو POS)
+  ولـ ERP:
+  /sales/returns/new?invoice_id=<invoice.id> (كما هو)
+- لا تستخدم sale_id في أي navigation من هذه الصفحة.
+
+B) SalesInvoiceViewPage.tsx
+- في Header/Details: اعرض invoice_number كعنوان أساسي.
+- إذا POS (sale_id موجود): اعرض تحت العنوان مباشرة "رقم العملية (POS): SAL-..." (خذها من بيانات الفاتورة إذا متاحة مثل sale_code أو من sale relation إن كانت محمّلة؛ لو غير متاحة اكتب فقط "POS" بدون تخمين).
+
+C) QuickActionsBar.tsx
+- زر "إنشاء مرتجع":
+  - لو POS: navigate إلى /pos/return?invoice_id=<invoiceId> (NOT sale_id)
+  - لو ERP: كما هو /sales/returns/new?invoice_id=<invoiceId>
+- باقي الأزرار تبقى كما هي (طباعة/إلغاء/ترحيل) ولا تغيّر شروط posted.
+- لا تستخدم sale_id في أي route داخل هذا الملف.
+
+D) POSReturnPage.tsx
+- دعم query param جديد: invoice_id
+- منطق التحميل:
+  1) إذا sale_id موجود → استعمله (كما هو).
+  2) else إذا invoice_id موجود:
+     - fetch(`/api/invoice-with-customer/${invoice_id}`, credentials include)
+     - استخرج sale_id
+     - إذا sale_id null → toast.error('هذه فاتورة مبيعات عامة — استخدم مرتجع المبيعات العامة')
+       وانهِ التحميل (يظهر البحث اليدوي)
+     - إذا sale_id موجود → نفّذ نفس auto-load الحالي باستخدام هذا sale_id (بدون تكرار كود: اعمل resolveSaleId() ثم استعمله)
+- حافظ على autoLoading لمنع flash.
+
+🧾 EVIDENCE REQUIRED (NO EXCUSES):
+A) git diff --stat
+B) git diff (full for the 4 files only)
+C) Before/After screenshots NOT required.
+D) Quick sanity checklist in 5 bullets:
+   - POS invoice list shows invoice_number primary and SAL secondary
+   - ERP invoice list shows invoice_number only
+   - Create Return from POS invoice routes with invoice_id
+   - POSReturnPage accepts invoice_id and resolves sale_id
+   - ERP return flow unchanged
+
+⛔️ STRICT:
+- لا تعديل DB
+- لا تعديل backend routes
+- لا إنشاء ملفات جديدة
+- لا تغيير أسماء routes
+- لا أي refactors كبيرة
+
+STOP after evidence.

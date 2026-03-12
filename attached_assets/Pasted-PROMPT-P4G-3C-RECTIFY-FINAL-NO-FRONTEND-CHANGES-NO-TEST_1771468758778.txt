@@ -1,0 +1,109 @@
+PROMPT — P4G-3C-RECTIFY FINAL (NO FRONTEND CHANGES, NO TEST-ONLY KEYS)
+
+GOAL
+Finalize the Enterprise PIN policy rectification with a clean scope:
+- NO changes under src/ (frontend must be untouched after this prompt)
+- PIN_REQUIRED_ROLE_KEYS must contain production keys only (no temp/test keys)
+- user_custom_roles INSERT SQL must exist exactly once (inside a helper), invoked from 3 endpoints
+- Provide EVIDENCE: git diff --stat, rg proof, and Gate Tests T1/T2/T3
+- No DB schema changes. No atomic/RPC changes. No legacy. No guesses.
+
+SCOPE RULES
+1) Implementation: backend only (server/routes.ts only).
+2) Frontend MUST be clean: after changes, `git diff --stat` must show ONLY server/routes.ts.
+3) Do NOT add any "temp_pos_*" key or any test-only key to PIN_REQUIRED_ROLE_KEYS.
+4) Do NOT delete/alter real role assignments for tests. No destructive tests.
+
+PHASE 0 — AUDIT (READ-ONLY)
+A) Confirm src has no changes:
+- Show: `git diff --stat` BEFORE doing anything.
+- If src/pages/UsersPage.tsx has changes from previous work, you MUST revert them now.
+
+B) Confirm PIN_REQUIRED_ROLE_KEYS is production-only (expected keys):
+- branch_seller_pos_only
+- branch_supervisor_pos_plus_unique_returns
+Show the constant content.
+
+C) Count SQL sites:
+- Run `rg "INSERT INTO user_custom_roles" server/routes.ts` and report count + line(s).
+
+PHASE 1 — FIX (MINIMAL EDITS)
+1) FRONTEND CLEANUP (if needed)
+- If any committed or uncommitted frontend changes exist (src/*), revert them.
+- End state: NO changes in src/.
+
+2) BACKEND: ensure a single SQL site for inserting into user_custom_roles
+- Create helper in server/routes.ts (near RBAC helpers), e.g.:
+  async function insertUserCustomRole({ userId, roleId, enabled, actorUserId? }): Promise<void>
+  - It contains the ONLY `INSERT INTO user_custom_roles` SQL in the entire file.
+  - It supports enable=true (insert) and enable=false (delete/disable logic as currently used).
+  - Use the same semantics currently implemented (do not change business logic).
+
+- Refactor the three endpoints to call the helper:
+  A) POST /api/admin/users/create
+  B) POST /api/admin/users/bulk-create-role-users
+  C) POST /api/users/:userId/custom-roles (enable=true/false)
+
+3) POLICY: production-only PIN enforcement (no test keys)
+- Keep PIN_REQUIRED_ROLE_KEYS production-only (two keys above).
+- Create helper `hasActivePin(userId)` (SELECT 1 FROM user_pins WHERE user_id=$1 AND is_active=true LIMIT 1).
+- Ensure enforcement is applied exactly as follows (NO partial-fail UX):
+  A) /api/users/:userId/custom-roles:
+     - When enable=true AND role_key is one of PIN_REQUIRED_ROLE_KEYS:
+       - If no active pin => return 409 with JSON:
+         { data: null, error: { message: "PIN_REQUIRED" } }
+     - Otherwise proceed normally (call helper insertUserCustomRole).
+  B) /api/users/:userId/active:
+     - When activating a user (is_active=true):
+       - If user has any role_key in PIN_REQUIRED_ROLE_KEYS AND has no pin => 409 PIN_REQUIRED
+  C) /api/admin/users/create:
+     - MUST NOT return 409 after profile creation (no half-fail).
+     - Always return 200 for user creation.
+     - If requested role is POS role and user has no pin:
+       - Create user profile normally
+       - DO NOT assign the role
+       - Return 200 with explicit fields:
+         { data: { ok: true, role_assigned: false, role_skipped_reason: "PIN_REQUIRED" }, error: null }
+     - If pin exists (rare) or role not POS => role_assigned true as normal.
+  D) /api/admin/users/bulk-create-role-users:
+     - If a role is POS role (role_key in PIN_REQUIRED_ROLE_KEYS):
+       - DO NOT assign it to any created user unless pin exists (pins won't exist for new users)
+       - Count it in role_skipped_count and pin_required_skipped_count
+     - Return 200 with explicit counters:
+       { data: { ok: true, created_count, role_assigned_count, role_skipped_count, pin_required_skipped_count }, error: null }
+
+NOTE: Do NOT modify DB schema or add endpoints. Only routes.ts.
+
+PHASE 2 — EVIDENCE (MUST PROVIDE ALL)
+A) Final diff scope:
+- Show `git diff --stat`
+  MUST be: server/routes.ts only
+
+B) rg proof:
+- Show `rg "INSERT INTO user_custom_roles" server/routes.ts`
+  MUST return exactly 1 match (inside insertUserCustomRole helper)
+
+C) Gate Tests (no destructive setup)
+Use existing environment only. Perform:
+T1) Create user via /api/admin/users/create with requested POS role and WITHOUT pin.
+Expected: HTTP 200, role_assigned=false, role_skipped_reason="PIN_REQUIRED".
+Also verify user exists but has no assigned POS role in user_custom_roles.
+
+T2) Set PIN via /api/admin/users/set-pin for that user, then assign POS role via /api/users/:userId/custom-roles enable=true.
+Expected: 200 and role assigned in DB.
+
+T3) Bulk create role users via /api/admin/users/bulk-create-role-users.
+Expected: response shows pin_required_skipped_count >= 0 (could be 0 depending on existing data),
+BUT must prove that POS roles are NOT assigned to any created users without pins.
+Provide a DB query proof that no user created in this bulk run has POS role unless they already had PIN (should be none).
+
+D) No changes elsewhere:
+- `rg "\buser_roles\b" server src` => No matches
+- Confirm PIN_REQUIRED_ROLE_KEYS unchanged (production-only)
+
+DELIVERABLE
+Return a final “RECTIFY COMPLETE” report with:
+- diff --stat
+- rg proof (1 match)
+- T1/T2/T3 results (HTTP + DB proofs)
+- Explicit confirmation: src/ unchanged, no test keys, no destructive tests

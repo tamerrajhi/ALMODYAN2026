@@ -1,0 +1,201 @@
+PROMPT — POS UI Closure (Branch name + Seller name + POS-only sidebar)
+Hard Constraints
+
+Frontend-only: أي تعديل يكون داخل src/ فقط.
+
+ممنوع تعديل DB schema.
+
+ممنوع تعديل RPC payloads.
+
+ممنوع أي تغييرات RBAC/Atomic logic.
+
+ممنوع localStorage للتخزين الدائم (session/runtime فقط).
+
+0) AUDIT (إجباري قبل أي تعديل)
+
+اعمل تدقيق بالأدلة (ملف + سطر) للآتي:
+
+A) Sidebar POS-only (3 routes)
+
+فين المنطق اللي بيعمل sidebar menu؟
+
+MainLayout / Sidebar / menu config
+
+فين بيتحدد “POS Mode”؟
+
+لازم يكون based على GET /api/pos/session/context (مش branch context).
+
+هات allowlist الفعلية للـ3 routes في وضع POS (لازم تطابق الصورة):
+
+/pos
+
+/sales/pos-invoices
+
+/sales/returns?mode=pos
+
+B) Branch display (ليه بيتعرض UUID)
+
+في /pos و /pos/return… فين بيتعرض branchId الحالي؟ (badge/label)
+
+هل branch name مصدره userBranches (ERP)؟
+
+لو آه: ده بيكسر POS Standalone (بدون ERP login).
+
+C) Seller display (“اسم البائع غير محدد”)
+
+فين النص “اسم البائع غير محدد”؟ اعمل search واعرض المقطع.
+
+فين selectedSellerId / selectedSellerName؟ وهل بيتجاب من:
+
+/api/branches/:branchId/sellers ؟ ولا /api/pos/cashiers؟
+
+إزاي البيع بيتمنع لو مفيش seller؟ (guard موجود ولا ناقص؟)
+
+بعد الـAudit اكتب “Root causes” سطرين بالضبط لكل مشكلة (sidebar/branch/seller).
+
+1) FIX PLAN (بدون تخمين) — ثم نفذ
+Fix-1: Branch name + code بدل UUID (POS Standalone compatible)
+
+المبدأ: POS Standalone ممكن يشتغل بدون ERP user session، فـuserBranches مش متاح.
+
+المطلوب:
+
+استخدم endpoint العام: GET /api/public/branches-list (no-auth)
+
+ابنِ map داخل UI: branch_id -> {name, code}
+
+في Header/Badge الخاص بالفرع:
+
+اعرض: اسم الفرع (الكود) مثل: فرع 01 (BR01)
+
+fallback لو فشل الجلب: Branch: 2a3719b5… (uuid مختصر)
+
+Implementation rule:
+
+لو عندكم BranchLoginGate هو اللي ماسك branchId:
+خليه هو اللي يجلب branch name من public endpoint داخليًا (عشان يشتغل في POS standalone).
+
+ممنوع أي اعتماد على user session.
+
+Fix-2: Seller badge — إزالة “اسم البائع غير محدد” نهائيًا
+المطلوب:
+
+شيل أي UI قديم بيعرض “اسم البائع غير محدد”.
+
+استبدله بـ Badge واضح:
+
+قبل اختيار البائع:
+
+البائع: اختر بائع
+
+بعد اختيار البائع:
+
+البائع: {sellerName}
+
+Source of truth:
+
+sellerName لازم يجي من قائمة البياعين للفرع الحالي (نفس القائمة اللي بيتعمل منها اختيار seller).
+
+تأكد أن selectedSellerId ما بيتصفرش غلط عند refresh branch/session.
+
+Guard:
+
+قبل تنفيذ أي sale atomic:
+
+لو مفيش sellerSelected → امنع العملية برسالة موحدة:
+
+"يجب اختيار البائع أولاً"
+
+Fix-3: Sidebar في وضع POS = 3 routes فقط (بعد cashier PIN فقط)
+المطلوب:
+
+POS Mode يتحدد فقط بعد نجاح:
+
+GET /api/pos/session/context (200)
+
+لو 401 → مش POS mode.
+
+عندما POS mode true → filter sidebar إلى allowlist الثلاثة فقط (exact match):
+
+/pos
+
+/sales/pos-invoices
+
+/sales/returns?mode=pos
+
+ملاحظة: branch session لوحدها لا تعتبر POS mode. لازم POS cashier session.
+
+2) EVIDENCE (إجباري)
+
+بعد التعديل رجّع الآتي بدون كلام عام:
+
+A) git diff --stat
+
+اعرضه كامل.
+
+لازم يطلع الملفات اللي اتغيرت فقط.
+
+B) File list
+
+اذكر paths بالضبط اللي اتعدلوا.
+
+C) Smoke Tests (Manual checklist)
+Smoke-1: POS Standalone access
+
+افتح /pos بدون ERP login → يظهر BranchLoginGate (بدون redirect لـ /auth)
+
+Smoke-2: Branch badge
+
+بعد branch login + cashier PIN:
+
+يظهر اسم الفرع + الكود (ليس UUID)
+
+Smoke-3: Sidebar POS-only
+
+بعد cashier PIN success:
+
+السايدبار يعرض فقط:
+
+نقطة بيع (POS)
+
+فواتير مبيعات POS
+
+مرتجعات مبيعات POS
+
+أي tabs أخرى تختفي.
+
+Smoke-4: Seller badge + block
+
+قبل اختيار seller: يظهر “البائع: اختر بائع”
+
+بعد اختيار seller: يظهر اسم seller
+
+حاول تنفيذ بيع بدون seller:
+
+يمنع برسالة “يجب اختيار البائع أولاً”
+
+3) Non-Goals (ممنوع لمسها)
+
+ممنوع تعديل backend endpoints.
+
+ممنوع تعديل Branch auth / POS session logic.
+
+ممنوع تعديل RBAC أو allowlists.
+
+ممنوع تغيير أي RPC payloads.
+
+Output format المطلوب منك (Replit)
+
+اكتب: AUDIT → FIX → EVIDENCE
+
+كل جزء بعناوين واضحة.
+
+أي استنتاج لازم يكون مبني على “ملف:سطر” مش تخمين.
+
+نقطة أخيرة (مهمة جدًا)
+
+لو اتضح أن branch selector في AuthPage يعتمد على endpoint خاص بالـERP session:
+
+ممنوع استخدامه في POS tab.
+
+الحل الوحيد: public branches endpoint + fetch في POS tab/BranchLoginGate.

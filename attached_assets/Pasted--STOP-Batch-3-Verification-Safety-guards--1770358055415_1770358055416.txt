@@ -1,0 +1,56 @@
+أوقف التنفيذ الآن (STOP) — لا Batch-3 ولا أي ملفات إضافية.
+نحتاج Verification صارم + Safety guards لتغييرات Batch-2 لأنك وسّعت scope (أضفت /api/table-read + aliasing + parsing).
+
+المطلوب بالترتيب، وارجع بـ Evidence خام (outputs) فقط:
+
+A) إثبات النطاق (Scope proof)
+1) git status
+2) git show --stat HEAD
+3) git show HEAD
+4) قائمة الملفات المعدّلة فقط:
+   git diff --name-only HEAD~1..HEAD
+
+B) Grep proof (لازم يكون 0 داخل الملفين فقط)
+rg -n "supabase\.from\(|supabase\s*\.\s*from\(" src/domain/purchasing/purchasingReadService.ts src/domain/purchasing/purchasingWriteService.ts
+rg -n "supabase\.rpc\(" src/domain/purchasing/purchasingReadService.ts src/domain/purchasing/purchasingWriteService.ts
+(مسموح فقط supabase.functions.invoke('send-invoice-email') إن كان موجود)
+
+C) Gate-1 still intact (Default Supabase) — لازم تثبتها بدون ما أعمل أنا أي شيء
+1) في UI اضغط RESET في الـ badge (يمسح data_backend_override ويعمل reload)
+   ثم انسخ سطر console:
+   [ACTIVE_DATA_BACKEND] supabase (reason=env/default, env=supabase, override=none)
+2) بعدها اضغط NEON ثم reload
+   انسخ سطر console:
+   [ACTIVE_DATA_BACKEND] neon (reason=override, env=supabase, override=neon)
+
+D) /api/table-read Hardening (مهم جدًا)
+أنت أضفت endpoint عام — لازم تمنع أي تسريب أو SQL injection أو توسّع غير مقصود:
+1) اطبع allowlist tables المستخدمة فعليًا (اسماء فقط) داخل الكود واثبت أنها allowlist حقيقية وليست مفتوحة.
+2) أثبت أن:
+   - tableName لا يُستخدم إلا بعد التحقق من allowlist
+   - أعمدة orderBy مسموحة فقط من قائمة آمنة (لا string raw)
+   - or filter parsing لا يسمح بحقن (كل القيم تمر كـ parameters فقط)
+3) Evidence بالاختبارات التالية (curl outputs):
+   - طلب جدول غير مسموح:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" -d '{"table":"pg_catalog.pg_tables"}'
+     لازم يرجع 403/400 مع رسالة واضحة.
+   - محاولة orderBy injection:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" -d '{"table":"suppliers","orderBy":"name;drop table suppliers;--"}'
+     لازم يترفض.
+   - or filter عادي:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" -d '{"table":"suppliers","or":"name.ilike.%SUP%,code.ilike.%SUP%","limit":5}'
+     لازم يرجع data.
+
+E) Purchasing smoke test (بدون UI screenshots)
+نفّذ 4 calls في وضع NEON وارجع بالمخرجات:
+1) curl -s http://localhost:5000/api/health/fingerprint
+2) call واحد من purchasing JOIN endpoints اللي أضفتها (هات path بالضبط)
+3) POST /api/rpc/has_role مع user_id admin للتأكد صلاحيات NEON ما زالت OK
+4) أي RPC من writeService (مثلاً purchase_invoice_create_atomic) مع payload check-only لو متاح أو dry-run إن وجد. لو لا يوجد dry-run، لا تنفّذ إنشاء فعلي.
+
+F) Rollback plan
+اكتب سطرين فقط:
+- كيف نعمل revert للـ commit (git revert <hash>)
+- وما الذي سنفقده (endpoints /api/table-read + changes) وما الذي سيبقى (Gate-1 switch)
+
+STOP بعد تقديم Evidence أعلاه بالكامل. ممنوع Batch-3 قبل موافقتي.

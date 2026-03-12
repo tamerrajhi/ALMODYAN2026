@@ -1,0 +1,99 @@
+
+Legacy backend/gateway functions are already removed. Now let me find the yellow button in the view page:
+
+Let me read the relevant sections - the button area and the handleEdit/policy logic:
+
+Now let me check the InvoiceActionRenderer to find the yellow "تعديل" button:
+
+Now let me check the action registry to see the 'edit' action definition:
+
+Now I have the full picture. Let me read the policy evaluator to understand the full edit action:
+
+Now I have the full audit. Let me also check the policy types file:
+
+Good. Now I have the complete audit. Let me check if canEdit is used elsewhere beyond the policy result:
+
+=== A) AUDIT COMPLETE ===
+
+Here's what exists:
+
+Yellow "تعديل" button path (LEGACY):
+
+JSX: Rendered through InvoiceActionRenderer (policy-driven), NOT a standalone button
+Handler: handleEdit() at line 179 → navigates to /purchasing/invoices/${id} (standard edit form)
+Policy check: policy?.canEdit (always disabled for posted invoices)
+Policy evaluator: evaluateInvoicePolicy.ts lines 55-70, result line 206
+Action registry: actionRegistry.ts lines 106-114 (key: 'edit', icon: Edit, placement: both)
+Types: invoicePolicyTypes.ts — 'edit' in InvoiceActionKey, canEdit in InvoicePolicyResult
+Renderer special-case: InvoiceActionRenderer.tsx line 93-94 (variant override for edit)
+Handler map entry: line 337 edit: handleEdit
+Backend/DB: Already removed (0 grep matches for legacy functions in src/server)
+Rebuild path (KEEP - NOT TOUCHING):
+
+editDialogOpen / setEditDialogOpen — used by rebuild button
+UniqueInvoiceEditDialog — used by rebuild
+fetchRebuildGate / canRebuildInvoice — rebuild gate
+Now executing the full deletion:
+
+Now remove the EDIT section from the evaluator, and the canEdit from the result, and the edit action from the actions record, and the action registry:
+
+Now fix the remaining LSP errors - remove editAction references and the registry entry:
+
+Now also clean up the Edit icon from ICON_MAP since no action uses it anymore, remove canEdit translation keys, and drop DB functions:
+
+Now check for any remaining LSP errors and also check canEdit references in PurchaseInvoiceViewPage:
+
+Zero LSP errors. Now run the gates:
+
+=== C) GATES: ALL PASSED ===
+
+rg in src: 0 matches
+rg in server: 0 matches
+DB functions: 0 rows
+Now restart and take screenshot:
+
+Login page intercepted the screenshot. The app requires auth. Let me check the git diff for evidence instead:
+
+=== D) EVIDENCE ===
+
+A) git diff --stat:
+
+ InvoiceActionRenderer.tsx           |  4 +--
+ actionRegistry.ts                   | 10 -------
+ evaluateInvoicePolicy.ts            | 31 ------
+ invoicePolicyTypes.ts               |  2 --
+ PurchaseInvoiceViewPage.tsx         | 10 -------
+ 5 files changed, 1 insertion(+), 56 deletions(-)
+B) git diff: (shown above) — pure deletions across 5 files, zero additions except simplifying one ternary.
+
+C) Gates — ALL PASSED:
+
+Gate	Result
+rg in src/	0 matches
+rg in server/	0 matches
+DB: can_edit_unique_purchase_invoice	DROP FUNCTION — gone
+DB: unique_purchase_invoice_edit_atomic	DROP FUNCTION — gone
+LSP diagnostics	0 errors
+D) ما تم حذفه بالتحديد:
+
+Layer	Item	Status
+Frontend	زر "تعديل" (Edit) من شريط الأزرار	محذوف
+Frontend	handleEdit() handler	محذوف
+Frontend	edit: handleEdit من actionHandlers	محذوف
+Policy	'edit' من InvoiceActionKey type	محذوف
+Policy	canEdit من InvoicePolicyResult	محذوف
+Policy	قسم EDIT بالكامل (31 سطر) من evaluator	محذوف
+Registry	تعريف action edit (10 أسطر)	محذوف
+Renderer	special-case variant للـedit	محذوف
+Renderer	Edit icon من ICON_MAP	محذوف
+DB	can_edit_unique_purchase_invoice(uuid)	DROP FUNCTION
+DB	unique_purchase_invoice_edit_atomic(jsonb)	DROP FUNCTION
+ما لم يُمس (Rebuild path سليم):
+
+UniqueInvoiceEditDialog — موجود
+editDialogOpen / setEditDialogOpen — موجود (يستخدمه زر إعادة البناء)
+can_rebuild_unique_purchase_invoice — موجود
+unique_purchase_invoice_rebuild_atomic — موجود
+rebuild-gate endpoint — موجود
+
+Scroll to latest

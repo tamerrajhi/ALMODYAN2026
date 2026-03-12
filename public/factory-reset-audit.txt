@@ -1,0 +1,488 @@
+════════════════════════════════════════════════════════════════════
+  Database Audit Report — المودان للمجوهرات ERP
+  تاريخ التقرير: 2026-02-17
+  قاعدة البيانات: Neon PostgreSQL | Schema: public
+════════════════════════════════════════════════════════════════════
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION A: الجداول التي تحتوي بيانات (مرتبة تنازلياً)          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ #   الجدول                            العدد (تقديري)   النوع
+───  ──────────────────────────────────  ──────────────   ──────────
+ 1   unique_item_movements              12,017           تشغيلي
+ 2   unique_purchase_invoice_items       8,964           تشغيلي
+ 3   unique_items                        8,964           تشغيلي
+ 4   unique_purchase_return_items        1,938           تشغيلي
+ 5   transfer_items                      1,091           تشغيلي
+ 6   role_permissions                       84           مرجعي/أمني
+ 7   screens                                84           مرجعي
+ 8   chart_of_accounts                      42           مرجعي
+ 9   branch_coa_accounts                    24           مرجعي
+10   auth_sessions                          17           أمني
+11   coa_account_templates                   8           مرجعي
+12   invoices                                8           تشغيلي
+13   accounting_config_keys                  8           مرجعي
+14   sales                                   8           تشغيلي
+15   custom_roles                            5           مرجعي/أمني
+16   app_settings                            5           مرجعي
+17   serial_counters                         4           مرجعي (عدادات)
+18   journal_entry_lines                     4           تشغيلي
+19   gold_karats                             3           مرجعي
+20   branches                                3           مرجعي
+21   user_branches                           2           مرجعي/أمني
+22   payment_account_settings                1           مرجعي
+23   user_roles                              1           مرجعي/أمني
+24   profiles                                1           مرجعي/أمني
+
+باقي الـ 67 جدول فارغة (0 صفوف).
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION B: FK Map — العلاقات (child → parent)                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+الجداول الأب الأكثر اعتماداً عليها:
+
+  Parent                    عدد FKs   أهم الأبناء
+  ────────────────────────  ────────   ──────────────────────────
+  branches                  34         كل الجداول التشغيلية
+  chart_of_accounts         13         journal_entry_lines, vaults, configs
+  unique_items               7         movements, invoice/return items
+  unique_purchase_invoices   5         unique_items, corrections, returns
+  invoices                   6         credit_notes, sales, lines
+  journal_entries            7         invoices, payments, returns, sales
+  suppliers                  8         invoices, payments, batches
+  customers                  5         credit_notes, invoices, sales
+  jewelry_items              5         movements, sale_items
+
+جميع العلاقات (FK Edges):
+
+  Child Table                          Child Column                    → Parent Table                Parent Column
+  ─────────────────────────────────    ────────────────────────────     ─────────────────────────     ─────────────
+  audit_logs                           branch_id                       → branches                    id
+  branch_accounting_config             branch_id                       → branches                    id
+  branch_coa_accounts                  branch_id                       → branches                    id
+  branch_inventory_accounts            branch_id                       → branches                    id
+  cash_vaults                          branch_id                       → branches                    id
+  credit_notes                         branch_id                       → branches                    id
+  gold_scrap                           branch_id                       → branches                    id
+  gold_vaults                          branch_id                       → branches                    id
+  inventory_counts                     branch_id                       → branches                    id
+  invoices                             branch_id                       → branches                    id
+  item_movements                       from_branch_id                  → branches                    id
+  item_movements                       to_branch_id                    → branches                    id
+  jewelry_items                        branch_id                       → branches                    id
+  jewelry_sets                         branch_id                       → branches                    id
+  journal_entries                      branch_id                       → branches                    id
+  payment_account_settings             branch_id                       → branches                    id
+  payments                             branch_id                       → branches                    id
+  production_account_settings          branch_id                       → branches                    id
+  profiles                             default_branch_id               → branches                    id
+  purchase_batches                     branch_id                       → branches                    id
+  purchase_returns                     branch_id                       → branches                    id
+  returns                              branch_id                       → branches                    id
+  sales                                branch_id                       → branches                    id
+  transfer_requests                    from_branch_id                  → branches                    id
+  transfer_requests                    to_branch_id                    → branches                    id
+  transfers                            from_branch_id                  → branches                    id
+  transfers                            to_branch_id                    → branches                    id
+  unique_item_movements                from_branch_id                  → branches                    id
+  unique_item_movements                to_branch_id                    → branches                    id
+  unique_items                         branch_id                       → branches                    id
+  unique_purchase_batches              branch_id                       → branches                    id
+  unique_purchase_invoices             branch_id                       → branches                    id
+  unique_purchase_returns              branch_id                       → branches                    id
+  user_branches                        branch_id                       → branches                    id
+  branch_accounting_config             account_id                      → chart_of_accounts           id
+  branch_coa_accounts                  account_id                      → chart_of_accounts           id
+  branch_inventory_accounts            general_inventory_account_id    → chart_of_accounts           id
+  branch_inventory_accounts            imported_pieces_account_id      → chart_of_accounts           id
+  cash_vaults                          account_id                      → chart_of_accounts           id
+  chart_of_accounts                    parent_id                       → chart_of_accounts           id
+  gold_vaults                          account_id                      → chart_of_accounts           id
+  journal_entry_lines                  account_id                      → chart_of_accounts           id
+  payment_account_settings             bank_transfer_account_id        → chart_of_accounts           id
+  payment_account_settings             card_account_id                 → chart_of_accounts           id
+  payment_account_settings             check_account_id                → chart_of_accounts           id
+  payment_account_settings             cash_account_id                 → chart_of_accounts           id
+  production_account_settings          finished_goods_account_id       → chart_of_accounts           id
+  production_account_settings          scrap_loss_account_id           → chart_of_accounts           id
+  production_account_settings          wip_account_id                  → chart_of_accounts           id
+  production_account_settings          raw_material_account_id         → chart_of_accounts           id
+  branch_coa_accounts                  template_code                   → coa_account_templates       template_code
+  coa_account_templates                parent_template_code            → coa_account_templates       template_code
+  role_modules                         role_id                         → custom_roles                id
+  role_permissions                     role_id                         → custom_roles                id
+  user_custom_roles                    role_id                         → custom_roles                id
+  credit_notes                         customer_id                     → customers                   id
+  gold_scrap                           customer_id                     → customers                   id
+  invoices                             customer_id                     → customers                   id
+  payments                             customer_id                     → customers                   id
+  returns                              customer_id                     → customers                   id
+  sales                                customer_id                     → customers                   id
+  inventory_count_readings             count_id                        → inventory_counts            id
+  inventory_count_results              count_id                        → inventory_counts            id
+  credit_notes                         invoice_id                      → invoices                    id
+  purchase_invoice_lines               invoice_id                      → invoices                    id
+  purchase_return_lines                invoice_id                      → invoices                    id
+  returns                              original_invoice_id             → invoices                    id
+  sales                                invoice_id                      → invoices                    id
+  sales_invoice_items                  invoice_id                      → invoices                    id
+  supplier_payment_allocations         invoice_id                      → invoices                    id
+  inventory_count_readings             item_id                         → jewelry_items               id
+  item_movements                       item_id                         → jewelry_items               id
+  purchase_return_items                jewelry_item_id                 → jewelry_items               id
+  sale_items                           item_id                         → jewelry_items               id
+  transfer_request_items               item_id                         → jewelry_items               id
+  jewelry_items                        set_id                          → jewelry_sets                id
+  invoices                             journal_entry_id                → journal_entries             id
+  journal_entry_lines                  journal_entry_id                → journal_entries             id
+  payments                             journal_entry_id                → journal_entries             id
+  purchase_returns                     journal_entry_id                → journal_entries             id
+  returns                              journal_entry_id                → journal_entries             id
+  sales                                journal_entry_id                → journal_entries             id
+  unique_purchase_invoices             journal_entry_id                → journal_entries             id
+  unique_purchase_returns              journal_entry_id                → journal_entries             id
+  role_modules                         module_key                      → modules                    module_key
+  screens                              module_key                      → modules                    module_key
+  supplier_payment_allocations         payment_id                      → payments                   id
+  auth_sessions                        user_id                         → profiles                   user_id
+  import_row_errors                    batch_id                        → purchase_batches            id
+  invoices                             batch_id                        → purchase_batches            id
+  jewelry_items                        batch_id                        → purchase_batches            id
+  jewelry_sets                         batch_id                        → purchase_batches            id
+  label_print_jobs                     batch_id                        → purchase_batches            id
+  purchase_correction_artifacts        action_id                       → purchase_correction_actions id
+  purchase_correction_actions          group_id                        → purchase_correction_groups  id
+  purchase_correction_artifacts        group_id                        → purchase_correction_groups  id
+  purchase_order_items                 po_id                           → purchase_orders             id
+  purchase_order_receipts              po_id                           → purchase_orders             id
+  purchase_requisition_lines           pr_id                           → purchase_requisitions       id
+  purchase_return_items                return_id                       → purchase_returns            id
+  purchase_return_lines                return_id                       → purchase_returns            id
+  return_items                         return_id                       → returns                    id
+  returns                              original_sale_id                → sales                      id
+  sale_items                           sale_id                         → sales                      id
+  role_permissions                     screen_path                     → screens                    screen_path
+  gold_scrap                           supplier_id                     → suppliers                  id
+  invoices                             supplier_id                     → suppliers                  id
+  jewelry_items                        supplier_id                     → suppliers                  id
+  payments                             supplier_id                     → suppliers                  id
+  purchase_batches                     supplier_id                     → suppliers                  id
+  purchase_returns                     supplier_id                     → suppliers                  id
+  returns                              supplier_id                     → suppliers                  id
+  supplier_payment_allocations         supplier_id                     → suppliers                  id
+  unique_items                         supplier_id                     → suppliers                  id
+  unique_purchase_batches              supplier_id                     → suppliers                  id
+  unique_purchase_invoices             supplier_id                     → suppliers                  id
+  unique_purchase_returns              supplier_id                     → suppliers                  id
+  transfer_request_items               request_id                      → transfer_requests          id
+  transfer_items                       transfer_id                     → transfers                  id
+  purchase_correction_actions          source_unique_item_id           → unique_items               id
+  return_items                         item_id                         → unique_items               id
+  sales_invoice_items                  jewelry_item_id                 → unique_items               id
+  transfer_items                       unique_item_id                  → unique_items               id
+  unique_item_movements                unique_item_id                  → unique_items               id
+  unique_purchase_invoice_items        unique_item_id                  → unique_items               id
+  unique_purchase_return_items         unique_item_id                  → unique_items               id
+  unique_items                         batch_id                        → unique_purchase_batches    id
+  unique_purchase_invoices             batch_id                        → unique_purchase_batches    id
+  purchase_correction_groups           parent_unique_invoice_id        → unique_purchase_invoices   id
+  purchase_returns                     purchase_invoice_id             → unique_purchase_invoices   id
+  unique_items                         unique_invoice_id               → unique_purchase_invoices   id
+  unique_purchase_invoice_items        unique_invoice_id               → unique_purchase_invoices   id
+  unique_purchase_returns              unique_invoice_id               → unique_purchase_invoices   id
+  unique_purchase_return_items         unique_return_id                → unique_purchase_returns    id
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION C: Factory Reset Plan                                   ║
+╚══════════════════════════════════════════════════════════════════╝
+
+─── قائمة TRUNCATE (58 جدول تشغيلي) — بترتيب آمن ──────────────
+
+الطبقة 1: أبناء الأبناء (leaf tables)
+  1.  purchase_correction_artifacts
+  2.  purchase_correction_actions
+  3.  purchase_correction_groups
+  4.  unique_purchase_return_items
+  5.  unique_purchase_invoice_items
+  6.  unique_item_movements
+  7.  transfer_items
+  8.  transfer_request_items
+  9.  return_items
+ 10.  sale_items
+ 11.  sales_invoice_items
+ 12.  purchase_return_items
+ 13.  purchase_return_lines
+ 14.  purchase_invoice_lines
+ 15.  purchase_order_items
+ 16.  purchase_order_receipts
+ 17.  purchase_requisition_lines
+ 18.  purchase_requisition_items
+ 19.  supplier_payment_allocations
+ 20.  import_row_errors
+ 21.  label_print_jobs
+ 22.  credit_notes
+ 23.  journal_entry_lines
+ 24.  inventory_count_readings
+ 25.  inventory_count_results
+ 26.  item_movements
+ 27.  cost_entries
+ 28.  accounting_audit_logs
+ 29.  accounting_health_check_results
+
+الطبقة 2: جداول وسطى
+ 30.  unique_purchase_returns
+ 31.  unique_items
+ 32.  unique_purchase_invoices
+ 33.  unique_purchase_batches
+ 34.  purchase_returns
+ 35.  returns
+ 36.  sales
+ 37.  invoices
+ 38.  payments
+ 39.  journal_entries
+ 40.  transfers
+ 41.  transfer_requests
+ 42.  purchase_batches
+ 43.  purchase_orders
+ 44.  purchase_requisitions
+ 45.  inventory_counts
+ 46.  jewelry_items
+ 47.  jewelry_sets
+ 48.  gold_scrap
+ 49.  finished_goods_showroom
+
+الطبقة 3: جداول مساعدة/نظامية
+ 50.  pos_workflow_requests
+ 51.  atomic_workflow_requests
+ 52.  backup_logs
+ 53.  accounting_health_check_runs
+ 54.  attachments
+ 55.  gold_prices
+ 56.  fiscal_years
+ 57.  products
+
+الطبقة 4: إعادة تعيين العدادات
+ 58.  serial_counters
+
+إعادة تعيين Sequences:
+  - je_doc_seq         → RESTART WITH 1
+  - je_uimp_doc_seq    → RESTART WITH 1
+  - ucor_doc_seq       → RESTART WITH 1
+  - uinv_doc_seq       → RESTART WITH 1
+  - upb_doc_seq        → RESTART WITH 1
+  - upr_doc_seq        → RESTART WITH 1
+
+
+─── قائمة KEEP (30 جدول مرجعي — لا تُمسح) ────────────────────
+
+ #   الجدول                          السبب
+───  ──────────────────────────────   ──────────────────────────
+ 1   profiles                        حسابات المستخدمين
+ 2   auth_sessions                   جلسات تسجيل الدخول
+ 3   user_roles                      ربط المستخدمين بالأدوار
+ 4   user_branches                   ربط المستخدمين بالفروع
+ 5   user_custom_roles               أدوار مخصصة
+ 6   custom_roles                    تعريف الأدوار
+ 7   role_permissions                صلاحيات الأدوار
+ 8   role_modules                    وحدات الأدوار
+ 9   modules                         وحدات النظام
+10   screens                         شاشات النظام
+11   branches                        الفروع
+12   suppliers                       الموردين
+13   customers                       العملاء
+14   chart_of_accounts               شجرة الحسابات
+15   branch_coa_accounts             حسابات الفروع
+16   coa_account_templates           قوالب الحسابات
+17   branch_accounting_config        إعدادات المحاسبة
+18   branch_inventory_accounts       حسابات المخزون
+19   payment_account_settings        إعدادات الدفع
+20   production_account_settings     إعدادات الإنتاج
+21   accounting_config_keys          مفاتيح الإعدادات
+22   app_settings                    إعدادات التطبيق
+23   gold_karats                     عيارات الذهب
+24   cash_vaults                     الخزن النقدية
+25   gold_vaults                     خزن الذهب
+26   cost_centers                    مراكز التكلفة
+27   departments                     الأقسام
+28   employees                       الموظفين
+29   pr_approval_thresholds          حدود الموافقات
+30   workflow_types                  أنواع سير العمل
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION D: استخدام كل جدول تشغيلي                              ║
+╚══════════════════════════════════════════════════════════════════╝
+
+─── جداول القطع الفريدة (Unique Items System) ─────────────────
+
+  unique_items                      الجدول الرئيسي للمخزون — كل قطعة بسيريال
+  unique_item_movements             حركات القطع (شراء/تحويل/بيع/إرجاع)
+  unique_purchase_batches           دفعات الشراء الفريدة
+  unique_purchase_invoices          فواتير شراء القطع الفريدة
+  unique_purchase_invoice_items     بنود فواتير الشراء
+  unique_purchase_returns           مرتجعات شراء القطع الفريدة
+  unique_purchase_return_items      بنود المرتجعات
+
+─── جداول التصحيح (Purchase Corrections) ──────────────────────
+
+  purchase_correction_groups        مجموعات تصحيح مرتبطة بفاتورة (UCOR-)
+  purchase_correction_actions       إجراءات التصحيح الفردية
+  purchase_correction_artifacts     المخرجات الناتجة عن كل إجراء
+
+─── جداول المبيعات والمرتجعات ─────────────────────────────────
+
+  sales                             عمليات البيع
+  sale_items                        بنود المبيعات (legacy — jewelry_items)
+  sales_invoice_items               بنود فواتير المبيعات (unique_items)
+  invoices                          الفواتير (شراء/بيع)
+  returns                           مرتجعات المبيعات
+  return_items                      بنود مرتجعات المبيعات
+  credit_notes                      إشعارات دائنة
+
+─── جداول المحاسبة ────────────────────────────────────────────
+
+  journal_entries                   القيود المحاسبية (JE)
+  journal_entry_lines               بنود القيود (مدين/دائن)
+  payments                          المدفوعات
+  supplier_payment_allocations      توزيع المدفوعات على الفواتير
+  fiscal_years                      السنوات المالية
+  cost_entries                      قيود التكاليف
+  accounting_audit_logs             سجل تدقيق المحاسبة
+  accounting_health_check_runs      فحص صحة المحاسبة
+  accounting_health_check_results   نتائج فحص الصحة
+
+─── جداول التحويلات ───────────────────────────────────────────
+
+  transfers                         تحويلات بين الفروع
+  transfer_items                    بنود التحويل
+  transfer_requests                 طلبات تحويل
+  transfer_request_items            بنود طلبات التحويل
+
+─── جداول المشتريات العامة ────────────────────────────────────
+
+  purchase_batches                  دفعات شراء عامة
+  purchase_invoice_lines            بنود فواتير الشراء العامة
+  purchase_returns                  مرتجعات شراء عامة
+  purchase_return_items             بنود مرتجعات الشراء
+  purchase_return_lines             بنود مرتجعات مرتبطة بفواتير
+  purchase_orders                   أوامر الشراء
+  purchase_order_items              بنود أوامر الشراء
+  purchase_order_receipts           إيصالات استلام
+  purchase_requisitions             طلبات الشراء
+  purchase_requisition_items        بنود طلبات الشراء
+  purchase_requisition_lines        سطور طلبات الشراء
+
+─── جداول المخزون العامة ──────────────────────────────────────
+
+  jewelry_items                     قطع المجوهرات العامة
+  jewelry_sets                      أطقم المجوهرات
+  item_movements                    حركات القطع العامة
+  inventory_counts                  عمليات الجرد
+  inventory_count_readings          قراءات الجرد
+  inventory_count_results           نتائج الجرد
+  finished_goods_showroom           المنتجات المعروضة
+
+─── جداول الذهب ───────────────────────────────────────────────
+
+  gold_scrap                        خردة الذهب (كسر)
+  gold_prices                       أسعار الذهب اليومية
+
+─── جداول مساعدة/نظامية ──────────────────────────────────────
+
+  serial_counters                   عدادات السيريالات (FSETN/FSETE/FSETR/FSETB)
+  pos_workflow_requests             طلبات نقاط البيع (idempotency)
+  atomic_workflow_requests          طلبات العمليات الذرية (idempotency)
+  import_row_errors                 أخطاء استيراد البيانات
+  label_print_jobs                  مهام طباعة الملصقات
+  attachments                       المرفقات
+  backup_logs                       سجل النسخ الاحتياطي
+  products                          المنتجات (catalog)
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION E: Sequences النشطة                                     ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  Sequence            الاستخدام                          Padding
+  ──────────────────  ─────────────────────────────────   ───────
+  upb_doc_seq         أرقام دفعات الشراء UPB-            6-digit
+  uinv_doc_seq        فواتير الشراء UINV- / UINV-COR-   6-digit
+  je_uimp_doc_seq     قيود الاستيراد JE-UIMP-            6-digit
+  je_doc_seq          قيود عامة JE-COR-R/A / JE-UPR      6-digit
+  upr_doc_seq         مرتجعات الشراء UPR- / UPR-COR-     6-digit
+  ucor_doc_seq        مجموعات التصحيح UCOR-               6-digit
+
+  Sequences محذوفة (legacy):
+  - unique_serial_seq      — حُذف 2026-02-17
+  - unique_invoice_seq     — حُذف 2026-02-17
+  - unique_item_serial_seq — حُذف 2026-02-17
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION F: ملاحظات المخاطر                                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  1. audit_logs — تشغيلي لكن قد يُرغب الاحتفاظ به كسجل تاريخي
+  2. serial_counters — يجب إعادة تعيينه (TRUNCATE + INSERT 4 prefixes بقيمة 1)
+  3. auth_sessions — يمكن مسحه اختيارياً (سيُعاد تسجيل الدخول)
+  4. Document Sequences — يجب ALTER SEQUENCE ... RESTART WITH 1 بعد TRUNCATE
+  5. journal_entries ↔ invoices — علاقة دائرية، CASCADE ضروري
+  6. البيانات التاريخية — 7,995 قطعة بسيريالات SN- القديمة ستُحذف عند Factory Reset
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║  SECTION G: Generated Factory Reset SQL                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+BEGIN;
+
+TRUNCATE TABLE "purchase_correction_artifacts", "purchase_correction_actions",
+  "purchase_correction_groups", "unique_purchase_return_items",
+  "unique_purchase_invoice_items", "unique_item_movements",
+  "transfer_items", "transfer_request_items", "return_items",
+  "sale_items", "sales_invoice_items", "purchase_return_items",
+  "purchase_return_lines", "purchase_invoice_lines",
+  "purchase_order_items", "purchase_order_receipts",
+  "purchase_requisition_lines", "purchase_requisition_items",
+  "supplier_payment_allocations", "import_row_errors",
+  "label_print_jobs", "credit_notes", "journal_entry_lines",
+  "inventory_count_readings", "inventory_count_results",
+  "item_movements", "cost_entries", "accounting_audit_logs",
+  "accounting_health_check_results", "unique_purchase_returns",
+  "unique_items", "unique_purchase_invoices",
+  "unique_purchase_batches", "purchase_returns", "returns",
+  "sales", "invoices", "payments", "journal_entries",
+  "transfers", "transfer_requests", "purchase_batches",
+  "purchase_orders", "purchase_requisitions", "inventory_counts",
+  "jewelry_items", "jewelry_sets", "gold_scrap",
+  "finished_goods_showroom", "pos_workflow_requests",
+  "atomic_workflow_requests", "backup_logs",
+  "accounting_health_check_runs", "attachments", "gold_prices",
+  "fiscal_years", "products"
+  RESTART IDENTITY CASCADE;
+
+TRUNCATE TABLE "serial_counters";
+INSERT INTO serial_counters (prefix, next_seq) VALUES
+  ('FSETN', 1),
+  ('FSETE', 1),
+  ('FSETR', 1),
+  ('FSETB', 1);
+
+ALTER SEQUENCE public."je_doc_seq" RESTART WITH 1;
+ALTER SEQUENCE public."je_uimp_doc_seq" RESTART WITH 1;
+ALTER SEQUENCE public."ucor_doc_seq" RESTART WITH 1;
+ALTER SEQUENCE public."uinv_doc_seq" RESTART WITH 1;
+ALTER SEQUENCE public."upb_doc_seq" RESTART WITH 1;
+ALTER SEQUENCE public."upr_doc_seq" RESTART WITH 1;
+
+COMMIT;
+
+
+════════════════════════════════════════════════════════════════════
+  نهاية التقرير
+════════════════════════════════════════════════════════════════════

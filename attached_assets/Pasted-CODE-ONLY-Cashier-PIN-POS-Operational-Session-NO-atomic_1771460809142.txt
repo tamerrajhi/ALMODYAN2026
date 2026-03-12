@@ -1,0 +1,104 @@
+CODE-ONLY — Cashier PIN + POS Operational Session (NO atomic/RBAC changes)
+
+STRICT RULES:
+- Do NOT modify any atomic RPCs or business SQL for sales/returns.
+- Only add new middleware + endpoints for operational POS sessions.
+- Use bcrypt for PIN verify (hash stored in user_pins.pin_hash).
+- Use SHA-256 hashing for pos session token (similar to requireSession/branch).
+- Cookie name for POS session: "__pos"
+- All endpoints must requireBranchSession (from Phase 2B).
+- Evidence: git diff --stat + git diff + smoke tests.
+
+A) NEW MIDDLEWARE: requirePosSession(req,res,next)
+- requires requireBranchSession already executed
+- read cookie "__pos"
+- sha256(token) => find active session row in pos_sessions_tokens (or store token_hash in pos_sessions if you prefer)
+  Choose ONE of these approaches (minimal diff preferred):
+  Option 1 (recommended minimal new table): add a new table pos_session_tokens
+  Option 2: add token_hash column to pos_sessions (DB change NOT allowed here — so use option 1)
+=> Use Option 1.
+
+So, create new table via code migration? NOT allowed.
+Therefore: implement token store WITHOUT schema change:
+- Reuse existing branch_sessions? NOT allowed.
+We need a DB place. Since P3B is code-only, we must store token_hash in an existing table.
+Conclusion: Add a minimal DB migration is required OR adjust plan.
+
+NEW RULE for this prompt:
+- Allow DB migration ONLY to add a new table pos_session_tokens (no modification of existing tables).
+
+B) DB MIGRATION (minimal):
+Create table pos_session_tokens:
+- id uuid pk default gen_random_uuid()
+- token_hash text unique not null
+- pos_session_id uuid not null references pos_sessions(id) on delete cascade
+- created_at timestamptz default now()
+- expires_at timestamptz not null
+- revoked_at timestamptz null
+- last_seen_at timestamptz default now()
+Indexes: pos_session_id, expires_at
+
+C) requirePosSession:
+- read __pos cookie, hash
+- lookup pos_session_tokens where token_hash=... AND revoked_at IS NULL AND expires_at > now()
+- join pos_sessions to get branch_id + cashier_user_id
+- enforce that pos_sessions.branch_id == (req as any).branchId (from branch session)
+- set (req as any).posSessionId, cashierUserId
+- update last_seen_at
+
+D) ENDPOINTS:
+1) GET /api/pos/cashiers  (requireBranchSession)
+Return users for current branch:
+- Query user_branches for branch_id = req.branchId
+- Join profiles for display fields (username, full_name, email)
+- Join user_custom_roles -> custom_roles to get role_key and is_admin
+- Filter to only staff roles relevant to POS:
+  role_key IN ('branch_seller_pos_only','branch_supervisor_pos_plus_unique_returns') OR is_admin=true
+Return: {data:[{user_id, username, full_name, role_key, is_supervisor:boolean}], error:null}
+
+2) POST /api/pos/cashier/enter  (requireBranchSession)
+Body: { cashier_user_id, pin }
+Flow:
+- validate cashier belongs to branch (user_branches)
+- fetch pin_hash from user_pins where user_id=... and is_active=true
+- lockout check: if locked_until > now => 423 with message
+- bcrypt.compare(pin, pin_hash)
+- on fail:
+  increment failed_attempts; if >=5 lock 10 minutes; return 401
+- on success:
+  reset failed_attempts=0, locked_until=null
+  create pos_sessions row: branch_id=req.branchId, cashier_user_id, created_by_user_id=(req as any).userId (system user)
+  create pos_session_tokens row with random token (32+ bytes), store sha256(token), expires_at=now()+12 hours
+  set cookie "__pos" = raw token (httpOnly, sameSite=lax, secure in prod)
+  return {data:{pos_session_id, cashier_user_id}, error:null}
+
+3) POST /api/pos/cashier/exit  (requireBranchSession + requirePosSession)
+- revoke current pos_session_token (revoked_at=now())
+- update pos_sessions.closed_at=now()
+- clear cookie "__pos"
+- return {data:{ok:true}, error:null}
+
+E) SMOKE TESTS:
+0) Ensure /api/pos/cashiers without __branch => 401
+1) With __branch but without __pos:
+   GET /api/pos/cashiers => 200 data array
+2) POST /api/pos/cashier/enter with wrong pin => 401 and failed_attempts increments
+3) POST /api/pos/cashier/enter with correct pin => 200 and sets __pos cookie
+4) With __branch + __pos:
+   POST /api/pos/cashier/exit => 200, cookie cleared
+5) After exit, requirePosSession protected endpoint should 401 (call exit twice or call a dummy protected endpoint if you add one)
+
+Notes:
+- Do NOT hardcode any PINs.
+- If no PIN exists for cashier => return 400 "PIN غير مضبوط لهذا المستخدم"
+- Keep responses consistent.
+
+FILES:
+- server/routes.ts (and optionally server/posSession.ts helper)
+- apply minimal migration in the same workflow you already use for migrations.
+
+EVIDENCE:
+A) git diff --stat
+B) git diff
+C) Smoke test outputs
+STOP.

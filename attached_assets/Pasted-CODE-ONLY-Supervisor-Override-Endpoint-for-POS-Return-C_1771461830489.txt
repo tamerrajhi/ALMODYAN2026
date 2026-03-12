@@ -1,0 +1,65 @@
+CODE-ONLY — Supervisor Override Endpoint for POS Return Confirm (NO atomic/RBAC changes)
+
+STRICT RULES:
+- Do NOT modify any atomic RPC or sales/return SQL logic.
+- Only add ONE new endpoint + (optional) tiny helper function.
+- Must require: requireBranchSession + requirePosSession.
+- Must verify supervisor is allowed:
+  - supervisor is assigned to the SAME branch (user_branches)
+  - supervisor role_key is 'branch_supervisor_pos_plus_unique_returns' OR is_admin=true
+  - supervisor has active PIN in user_pins and PIN matches (4 digits)
+- Log approval into supervisor_overrides with action_key='pos_return_confirm'
+- Return {data:{override_id}, error:null} on success.
+- Errors:
+  - 400 invalid pin format / missing fields
+  - 401 wrong pin
+  - 403 not supervisor / not in branch
+  - 423 locked (locked_until not null and > now)
+- Evidence: git diff --stat + git diff + smoke tests.
+
+ENDPOINT:
+POST /api/pos/override
+Middleware: requireBranchSession, requirePosSession
+
+Body:
+{
+  "action_key": "pos_return_confirm",
+  "supervisor_user_id": "<uuid>",
+  "pin": "1234",
+  "notes": "optional"
+}
+
+VALIDATION:
+- action_key must equal 'pos_return_confirm' (reject other values 400 for now)
+- pin must match /^\d{4}$/
+
+IMPLEMENTATION STEPS:
+1) Locate requirePosSession and PIN verify logic from cashier enter.
+   - Reuse the same PIN lockout rules (failed_attempts, locked_until, bcrypt compare)
+   - Do NOT duplicate too much: create helper verifyUserPin(user_id, pin) if reasonable.
+
+2) Authorization checks:
+   a) Ensure supervisor_user_id is linked to req.branchId in user_branches
+   b) Ensure supervisor_user_id has role_key in allowed list OR is_admin=true:
+      Join user_custom_roles -> custom_roles (role_id)
+      Allowed role_key: 'branch_supervisor_pos_plus_unique_returns'
+      Admin bypass: cr.is_admin=true
+
+3) Insert log row:
+INSERT INTO supervisor_overrides (pos_session_id, branch_id, action_key, approved_by_user_id, notes)
+VALUES ($posSessionId, $branchId, 'pos_return_confirm', $supervisorUserId, $notes)
+RETURNING id;
+
+4) Return:
+{ data: { override_id: <id> }, error: null }
+
+SMOKE TESTS (use sessions):
+0) Without __branch => 401
+1) With __branch but without __pos => 401
+2) With __branch + __pos, but supervisor not in branch => 403
+3) With __branch + __pos, supervisor in branch but wrong PIN => 401
+4) With __branch + __pos, supervisor correct PIN => 200 returns override_id
+5) Ensure row exists:
+   SELECT * FROM supervisor_overrides ORDER BY approved_at DESC LIMIT 1;
+
+STOP after evidence.

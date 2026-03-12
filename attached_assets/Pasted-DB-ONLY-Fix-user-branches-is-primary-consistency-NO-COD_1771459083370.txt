@@ -1,0 +1,86 @@
+DB-ONLY — Fix user_branches.is_primary consistency (NO CODE CHANGES)
+
+Goal:
+Ensure every user who has branches in user_branches has exactly ONE primary branch (is_primary=true).
+No guessing: use deterministic rules, and provide BEFORE/AFTER evidence.
+
+Rules:
+1) For each user_id that has >=1 rows in user_branches:
+   - If user already has exactly 1 primary => do nothing.
+   - If user has 0 primary:
+       - If profiles.default_branch_id matches one of their rows => set that one primary.
+       - Else set the earliest row (min created_at) as primary. If created_at absent, use min(branch_id) deterministic.
+   - If user has >1 primary:
+       - Keep the one matching profiles.default_branch_id if exists, else keep earliest, set others false.
+
+A) BEFORE report:
+1) users with 0 primary:
+SELECT ub.user_id,
+       COUNT(*) AS branches,
+       SUM(CASE WHEN ub.is_primary THEN 1 ELSE 0 END) AS primaries
+FROM user_branches ub
+GROUP BY ub.user_id
+HAVING SUM(CASE WHEN ub.is_primary THEN 1 ELSE 0 END) = 0;
+
+2) users with >1 primary:
+SELECT ub.user_id,
+       COUNT(*) AS branches,
+       SUM(CASE WHEN ub.is_primary THEN 1 ELSE 0 END) AS primaries
+FROM user_branches ub
+GROUP BY ub.user_id
+HAVING SUM(CASE WHEN ub.is_primary THEN 1 ELSE 0 END) > 1;
+
+B) Fix (single transaction):
+BEGIN;
+
+WITH ranked AS (
+  SELECT
+    ub.user_id,
+    ub.branch_id,
+    ub.is_primary,
+    ub.created_at,
+    p.default_branch_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY ub.user_id
+      ORDER BY
+        CASE WHEN p.default_branch_id = ub.branch_id THEN 0 ELSE 1 END,
+        ub.created_at NULLS LAST,
+        ub.branch_id
+    ) AS rn
+  FROM user_branches ub
+  LEFT JOIN profiles p ON p.user_id = ub.user_id
+),
+chosen AS (
+  SELECT user_id, branch_id AS primary_branch_id
+  FROM ranked
+  WHERE rn = 1
+),
+impacted AS (
+  SELECT ub.user_id
+  FROM user_branches ub
+  GROUP BY ub.user_id
+  HAVING SUM(CASE WHEN ub.is_primary THEN 1 ELSE 0 END) <> 1
+)
+UPDATE user_branches ub
+SET is_primary = (ub.branch_id = c.primary_branch_id)
+FROM chosen c
+WHERE ub.user_id = c.user_id
+  AND ub.user_id IN (SELECT user_id FROM impacted);
+
+COMMIT;
+
+C) AFTER report:
+Re-run A1 and A2 (must return zero rows).
+
+Also show sample for 5 users:
+SELECT ub.user_id, ub.branch_id, ub.is_primary
+FROM user_branches ub
+WHERE ub.user_id IN (
+  SELECT user_id FROM user_branches GROUP BY user_id ORDER BY user_id LIMIT 5
+)
+ORDER BY ub.user_id, ub.is_primary DESC, ub.branch_id;
+
+STOP. Return:
+- BEFORE outputs
+- number of updated rows
+- AFTER outputs

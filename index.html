@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <title>Almodyan</title>
+    <meta name="description" content="Almodyan - نظام إدارة المجوهرات" />
+    <meta name="author" content="Almodyan" />
+
+    <meta property="og:title" content="Almodyan" />
+    <meta property="og:description" content="Almodyan - نظام إدارة المجوهرات" />
+    <meta property="og:type" content="website" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@Almodyan" />
+    
+    <!-- Preload auth background image for faster loading -->
+    <link rel="preload" href="/images/auth-bg.jpg" as="image" />
+    
+    <!-- QZ Tray for direct thermal printing to Zebra printers -->
+    <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.min.js"></script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

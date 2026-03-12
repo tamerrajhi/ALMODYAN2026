@@ -1,0 +1,53 @@
+PROMPT 17 — PHASE-2D | REMOVE DIRECT supabase.auth.getSession() FROM 3 PROD FILES (EDGE TOKEN) | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+MODE: FRONTEND ONLY (NO SERVER CHANGES)
+
+SCOPE (ONLY THESE FILES):
+1) src/lib/set-images-api.ts
+2) src/pages/ImportPage.tsx
+3) src/pages/BatchDetailPage.tsx
++ (Add ONE helper in src/lib/ if needed, max 1 new file)
+
+GOAL:
+Replace direct supabase.auth.getSession() usage in these 3 files with a centralized helper:
+- getSupabaseAccessTokenOrNull()
+Behavior:
+- If VITE_AUTH_BACKEND != "session" (supabase-mode): return supabase session access_token (string | null)
+- If session-mode: return null (no Supabase JWT available)
+Then:
+- If token is null and code is about calling Supabase Edge Functions:
+  show a clear blocked message (same toast pattern) and abort the call safely.
+
+STRICT RULES (NO EXCEPTIONS):
+- Do NOT change AuthContext.tsx or AuthPage.tsx in this prompt.
+- Do NOT change any Edge Function invocation signatures.
+- No business logic changes beyond moving token retrieval and gating in session-mode.
+- Keep UI Arabic messages consistent; if you add a toast, make it short:
+  "هذه الميزة غير متاحة في وضع Session حالياً"
+- Remove supabase client import from these 3 files ONLY if it becomes unused.
+
+IMPLEMENTATION DETAILS:
+1) Create helper (suggested): src/lib/supabaseToken.ts
+   export function getSupabaseAccessTokenOrNull(): Promise<string | null>
+   - read AUTH_BACKEND from import.meta.env.VITE_AUTH_BACKEND ?? "supabase"
+   - if session-mode => return null
+   - else => call supabase.auth.getSession() and return session?.access_token ?? null
+2) Update the 3 target files:
+   - replace each supabase.auth.getSession() usage with helper call
+   - if token null => abort request + toast (or existing error handling)
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) Before/After grep:
+   A1) rg -n "supabase\\.auth\\.getSession\\(" -S src/lib/set-images-api.ts src/pages/ImportPage.tsx src/pages/BatchDetailPage.tsx
+   A2) rg -n "supabase\\.auth\\.getSession\\(" -S src/lib/set-images-api.ts src/pages/ImportPage.tsx src/pages/BatchDetailPage.tsx  (after) --> must be NO MATCHES
+B) git diff --stat
+C) git diff -- (show full diffs for the 3 files + helper file if added)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+E) Runtime note:
+   - supabase-mode: features still work (token retrieved)
+   - session-mode: Edge-function-dependent actions are blocked gracefully (no crash)
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

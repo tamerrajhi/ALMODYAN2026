@@ -1,0 +1,64 @@
+IMPLEMENTATION — RK2 (CODE ONLY)
+Goal: Update the RPC gateway RBAC to rely on custom_roles.role_key (NOT role_name).
+
+STRICT RULES:
+- Touch only the RPC gateway route: POST /api/rpc/:fnName in server/routes.ts (or where implemented).
+- Do NOT refactor unrelated code.
+- Do NOT change any payload formats.
+- Do NOT modify any database functions or business logic.
+- Keep diff minimal and localized.
+- Evidence required: git diff --stat and git diff.
+
+Context:
+- custom_roles now has role_key (NOT NULL, UNIQUE).
+- user_custom_roles links users to roles via role_id.
+- Admin is identified by custom_roles.is_admin = true.
+
+Required RBAC Policy (non-admin):
+1) Seller role_key = 'branch_seller_pos_only'
+   allow RPCs:
+   - complete_pos_sale_atomic
+   - pos_fail_request
+   - pos_succeed_request
+
+2) Supervisor role_key = 'branch_supervisor_pos_plus_unique_returns'
+   allow RPCs:
+   - complete_pos_sale_atomic
+   - pos_fail_request
+   - pos_succeed_request
+   - complete_pos_piece_return_atomic
+   - get_customer_credit_balance
+   - unique_purchase_return_create_atomic
+   - generate_purchase_return_number
+
+Implementation steps:
+A) Locate the RPC gateway handler:
+   - keep requireSession
+   - keep RPC_ALLOWLIST check as outer allowlist
+
+B) Replace the role lookup query to fetch role_key instead of role_name:
+   SELECT cr.role_key, cr.is_admin
+   FROM user_custom_roles ucr
+   JOIN custom_roles cr ON cr.id = ucr.role_id
+   WHERE ucr.user_id = $1;
+
+C) Authorization logic:
+   - If any row has is_admin=true -> allow
+   - Else build allowed set:
+     - If user has role_key 'branch_seller_pos_only' -> seller allow set
+     - Else if user has role_key 'branch_supervisor_pos_plus_unique_returns' -> supervisor allow set
+     - Else -> deny
+   - If fnName not in allowed set -> return 403 (consistent message style)
+
+D) Testing (provide curl examples or test notes):
+   1) seller calling /api/rpc/complete_pos_sale_atomic -> not 403
+   2) seller calling /api/rpc/unique_purchase_return_create_atomic -> 403
+   3) supervisor calling /api/rpc/complete_pos_piece_return_atomic -> not 403
+   4) supervisor calling /api/rpc/unique_purchase_return_create_atomic -> not 403
+   5) admin calling any allowlisted RPC -> not 403
+
+Evidence required:
+A) git diff --stat
+B) git diff
+C) Mention the exact location (line range) of the added/modified RBAC block.
+Stop after this change only.

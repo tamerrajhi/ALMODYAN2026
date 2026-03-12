@@ -1,0 +1,47 @@
+ROLE: Full-Stack Engineer
+MODE: MULTI-INVOICE EXCEL IMPORT (SUPP INV PREFLIGHT) — STOP AFTER EVIDENCE
+
+TARGET: src/pages/purchasing/PurchaseInvoiceImportPage.tsx ONLY
+
+GOAL:
+Support selecting 1..N Excel files in one go (multi-file).
+Each file = ONE purchase invoice.
+Before creating ANY invoice:
+1) Extract SUPP INV from column exactly "SUPP INV"
+2) Validate each file has EXACTLY ONE unique normalized SUPP INV
+3) Validate no duplicate SUPP INV across selected files
+4) Precheck DB for existing invoices with same SUPP INV for same supplier_id (purchase only, status<>'voided')
+If any fails => BLOCK and create ZERO invoices (do not start create loop)
+
+NORMALIZATION:
+norm = upper(trim(value))
+
+DB:
+Create READ RPC:
+purchase_invoice_supp_inv_precheck(p_supplier_id uuid, p_supp_invs text[]) RETURNS jsonb
+- returns {success:true, exists:[...normalized...]}
+
+UI:
+- change input to multiple: <input type="file" multiple accept=".xlsx,.xls" />
+- parse each file, first sheet, rows with headers
+- extract SUPP INV values, normalize, ignore empty
+- if per-file unique count == 0 => error "الملف X لا يحتوي على SUPP INV"
+- if per-file unique count > 1 => error "الملف X يحتوي على أكثر من SUPP INV: [...]"
+- build cross-files duplicate map; if duplicates => error listing duplicates and file names
+- require supplier_id selected, then call precheck RPC with all SUPP INV norms
+- if RPC returns exists not empty => block: "هذه الفواتير موجودة بالفعل: [...]"
+- ONLY after all checks pass, run create loop calling purchase_invoice_create_atomic per file
+- on any create failure: stop remaining and show error
+
+EVIDENCE (MANDATORY):
+1) Paste exact SQL for purchase_invoice_supp_inv_precheck
+2) Paste TSX snippets with line numbers:
+   - multi-file input
+   - SUPP INV extraction from column "SUPP INV"
+   - per-file validation
+   - cross-files duplicate check
+   - DB precheck call with early return BEFORE any create
+   - create loop AFTER preflight passes
+3) Manual test evidence: duplicates inside selection blocked; existing-in-DB blocked; unique passes
+
+STOP.

@@ -1,0 +1,104 @@
+PROMPT — PV-AUDIT-0 | PAYMENT VOUCHERS AUDIT (NO CHANGES) | EVIDENCE ONLY | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon/Postgres)
+MODE: READ-ONLY AUDIT (ABSOLUTELY NO CODE CHANGES, NO MIGRATIONS)
+
+GOAL:
+Produce a complete, evidence-backed map of everything related to Purchasing > Payment Vouchers (PV):
+- UI routes + components
+- Read dependencies (tables/endpoints)
+- Write dependencies (RPCs + payload shapes)
+- Existing DB schema for payments/vouchers/invoice allocation/accounting
+So we can implement PV without guessing.
+
+OUTPUT FORMAT (STRICT):
+Return only:
+1) Tables (markdown) and 2) Raw command outputs/snippets.
+No summaries beyond required tables.
+
+================================================================================
+A) ROUTE + UI MAP (NO CHANGES)
+================================================================================
+1) List the Purchasing sidebar route(s) for Payment Vouchers.
+2) Map each route → component file path.
+3) In the component, identify:
+   - list query function(s)
+   - create/update/void action handlers
+4) Print the exact TS functions called from the write service (file path + function name).
+
+REQUIRED TABLE:
+Route | Component | Read Service Functions | Write Service Functions
+
+================================================================================
+B) RPC MAP (NO CHANGES)
+================================================================================
+1) From the write service(s), list all RPC names used by PV.
+2) For EACH RPC:
+   - show the exact callsite line(s)
+   - show the exact payload object shape being passed (keys)
+   - show whether it wraps payload inside p_payload or not
+
+REQUIRED TABLE:
+RPC Name | Callsite File:Line | Payload Shape Keys | Notes
+
+================================================================================
+C) READ DEPENDENCIES MAP (NO CHANGES)
+================================================================================
+From PV page + its read service(s), list all tables/view endpoints used for reads:
+- vouchers list source
+- suppliers
+- invoices for allocation
+- account settings / app_settings
+- company settings if used for print
+
+REQUIRED TABLE:
+Read Item | Source (table or endpoint) | Select fields | Filters/Order | Where used
+
+================================================================================
+D) DB SCHEMA AUDIT (PSQL) — RAW OUTPUTS ONLY
+================================================================================
+Run and paste RAW psql outputs (do NOT paraphrase):
+1) Identify relevant tables (payments/vouchers/allocation):
+   - \dt
+   - SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename ILIKE '%payment%';
+   - SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename ILIKE '%voucher%';
+   - SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename ILIKE '%alloc%';
+
+2) Describe candidate tables (paste raw):
+   - \d+ payments (if exists)
+   - \d+ payment_account_settings (if exists)
+   - \d+ invoices AND/OR purchase_invoices (whichever exists)  (paste raw)
+   - \d+ journal_entries
+   - \d+ journal_entry_lines
+   - \d+ any allocation table found
+
+3) Show relevant columns presence (raw selects):
+   - SELECT column_name, data_type FROM information_schema.columns
+     WHERE table_schema='public' AND table_name IN ('payments','invoices','purchase_invoices')
+     ORDER BY table_name, ordinal_position;
+
+4) Check existing PV-related functions:
+   - SELECT proname FROM pg_proc WHERE proname ILIKE '%payment%voucher%' ORDER BY 1;
+   - SELECT proname FROM pg_proc WHERE proname ILIKE '%generate%payment%' ORDER BY 1;
+
+================================================================================
+E) SERVER ROUTING CHECK (NO CHANGES)
+================================================================================
+Paste raw snippets from server/routes.ts showing:
+- RPC endpoint path(s) and body parsing (the handler used by dataGateway.rpc)
+- RPC_ALLOWLIST entries for PV-related RPCs
+- Any NOT_IMPLEMENTED guard list entries affecting PV
+
+================================================================================
+F) FAILURE MODES (EVIDENCE-BASED)
+================================================================================
+Based on the above, list ONLY factual blockers for PV implementation:
+- Missing tables/columns
+- Missing functions
+- Mismatched payload/expected keys
+- Allocation model absent
+
+REQUIRED TABLE:
+Blocker | Evidence (file/psql output reference) | Impact
+
+STOP after outputting the tables and raw outputs.

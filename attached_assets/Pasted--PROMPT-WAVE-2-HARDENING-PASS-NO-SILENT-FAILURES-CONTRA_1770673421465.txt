@@ -1,0 +1,86 @@
+✅ PROMPT — WAVE-2 HARDENING PASS (NO SILENT FAILURES) | CONTRACT + SCHEMA PROOF | MINIMIZE ENDPOINTS | STOP
+
+ROLE: Senior Full-Stack Engineer / Architect
+MODE: Fix-only with evidence. No guessing. No new features.
+
+GOAL:
+Harden Wave-2 migration so it is safe long-term:
+- No silent empty arrays masking missing tables/columns
+- Stable, documented response contracts per page
+- Minimal, non-duplicated endpoints
+- Strict session + allowlist protection
+- Clear failure signals (HTTP status + error codes) for not-ready schemas
+
+SCOPE (Wave-2):
+Frontend files:
+1) src/pages/production/WorkOrderDetailsPage.tsx
+2) src/pages/production/WIPPage.tsx
+3) src/pages/TransferRequestsPage.tsx
+4) src/pages/sales/SalesReturnFormPage.tsx
+5) src/pages/SerialTrackingPage.tsx
+6) src/pages/RolesPage.tsx
+
+Backend: Only endpoints introduced/modified for those pages.
+
+HARD RULES:
+1) Absolutely NO "return []" on schema-missing conditions in production code paths.
+   - If table/column missing: return HTTP 501 with JSON { error_code:"SCHEMA_NOT_READY", error:"...", details:{table/column} }
+2) Do NOT invent aliases. If UI expects branch_name but DB has name:
+   - Either update UI to use real column names OR
+   - Provide explicit contract mapping AND prove it via SQL introspection output.
+3) Any endpoint must be requireSession unless explicitly public (default: requireSession ON).
+4) Remove duplicate/overlapping endpoints. Prefer reusing existing generic read endpoints ONLY if:
+   - allowlisted
+   - requireSession protected
+   - supports needed filtering/ordering
+5) Evidence required for every claim.
+
+SECTION A — ENDPOINT INVENTORY (RAW)
+A1) List all endpoints added/changed for Wave-2 (route path + line numbers) from server/routes.ts.
+A2) For each endpoint, show whether requireSession is applied (raw grep output).
+
+SECTION B — SCHEMA PROOF (RAW SQL)
+For every table/column referenced by Wave-2 endpoints:
+B1) Prove table existence:
+SELECT to_regclass('public.<table>') AS table_regclass;
+B2) Prove columns used (no guessing):
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='<table>'
+ORDER BY ordinal_position;
+
+OUTPUT must include raw SQL results.
+
+SECTION C — CONTRACT LOCK (NO GUESSING)
+For EACH of the 6 pages:
+C1) List the exact frontend fields consumed from each API response (derive from code: destructuring / render usage).
+C2) For each backend endpoint used by that page:
+   - Provide exact JSON shape returned (example from live curl)
+   - Ensure stable keys (no optional alias hacks without contract)
+
+SECTION D — FIXES (ONLY WHERE EVIDENCE FAILS)
+If schema missing:
+- Change endpoint to return 501 SCHEMA_NOT_READY (not []).
+- Optionally guard UI to show “Feature not configured” message ONLY if endpoint returns SCHEMA_NOT_READY (no other UX changes).
+
+If columns mismatch:
+- Either update frontend to match real column names OR explicitly map in backend and document contract.
+- Must prove mapping correctness with schema proof.
+
+If too many endpoints:
+- Consolidate per page into max 1–2 endpoints (where safe) and remove duplicates.
+
+SECTION E — PROOFS (LIGHT BUT REAL)
+E1) git diff --stat
+E2) rg proof: no supabase usage in the 6 files
+E3) curl -i for each Wave-2 endpoint (status + Content-Type + first 20 lines JSON)
+E4) Negative auth proof for 2 endpoints: curl without cookie returns 401
+E5) “No silent failure” proof: for any schema-not-ready endpoint, curl returns 501 + error_code SCHEMA_NOT_READY
+
+OUTPUT FORMAT:
+- A) raw outputs
+- B) raw SQL proofs
+- C) per-page contract table
+- D) list of fixes applied with diffs
+- E) evidence pack
+NO narrative. STOP.

@@ -1,0 +1,58 @@
+✅ PROMPT — PHASE-3A | Fix POS Return endpoints to use sales_invoice_items + unique_items | SERVER ONLY | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Backend Engineer
+
+MODE: SERVER ONLY (server/routes.ts only)
+Allowed: Edit existing route handlers ONLY
+Forbidden: DB migrations / schema changes / touching POS UI / touching dataGateway
+
+TARGET ENDPOINTS
+1) GET /api/sale-items?sale_id=<uuid>
+2) GET /api/sale-items-by-barcode?barcode=<text>
+
+REQUIREMENT: Preserve response shapes expected by POSReturnPage.tsx
+
+CURRENT EXPECTED SHAPES
+A) /api/sale-items-by-barcode
+Return: Array<{ sale_id: uuid }>
+
+B) /api/sale-items
+Return rows shaped like:
+{ id, item_id, sale_price, jewelry_items: { id, item_code, model, description, type, metal, g_weight, d_weight, b_weight, clarity, stone, tag_price, sold_at, stockcode, cost, supp_ref } }
+
+IMPLEMENTATION RULES
+- Do NOT query sale_items at all.
+- Use sales_invoice_items as the source of sold items.
+- Link to the sale via sales_invoice_items.invoice_id -> invoices.id -> invoices.sale_id (if invoices.sale_id exists), OR directly via invoices.sale_id.
+- Use unique_items via sales_invoice_items.jewelry_item_id = unique_items.id
+- For /api/sale-items:
+  - Filter by sale_id using invoices.sale_id = $1
+  - Return:
+    id := sales_invoice_items.id
+    item_id := sales_invoice_items.jewelry_item_id
+    sale_price := sales_invoice_items.unit_price (or total_price if needed)
+    jewelry_items := json_build_object(...) based on unique_items columns
+- For /api/sale-items-by-barcode:
+  - Find sale_ids where any linked unique_item matches barcode:
+    (unique_items.stockcode ILIKE %barcode% OR unique_items.serial_no ILIKE %barcode%)
+  - Return DISTINCT invoices.sale_id as sale_id (ensure non-null)
+
+EVIDENCE REQUIRED
+A) git diff --stat
+B) git diff (FULL) — ONLY server/routes.ts changes
+C) SQL query correctness notes (brief): show final SQL strings used
+
+GATE TESTS (MANDATORY)
+Use existing sold data from GT2 (sales_invoice_items=2, unique_items_sold=2):
+GT1) Call /api/sale-items?sale_id=<sale_id from GT2>:
+- Must return array length >=1
+- Each row must include jewelry_items.stockcode or serial_no populated
+
+GT2) Call /api/sale-items-by-barcode?barcode=SN-00000019 (or the sold item serial):
+- Must return array containing {sale_id:<same sale_id>}
+
+GT3) Regression: Call endpoints with missing params:
+- /api/sale-items without sale_id -> []
+- /api/sale-items-by-barcode without barcode -> []
+
+STOP after evidence + gate test outputs. No further edits.

@@ -1,0 +1,46 @@
+✅ PROMPT 2 — P1 | WAVE 3 MIGRATION (BUSINESS CRITICAL READS) — NO SUPABASE.from/rpc | EVIDENCE PER FILE | STOP
+
+ROLE: Full-stack Engineer (React + Express/Neon)
+MODE: Execute file-by-file with proofs. No guessing.
+
+GOAL:
+Migrate these Supabase-heavy business pages to Neon/Express reads:
+1) src/pages/sales/CreateSalesInvoicePage.tsx
+2) src/pages/CashVaultPage.tsx
+3) src/pages/inventory/InventoryCountDetailPage.tsx
+4) src/pages/inventory/InventoryCountReportPage.tsx
+5) src/pages/inventory/RawMaterialsPage.tsx
+6) src/pages/gold/GoldPricesPage.tsx
+7) src/pages/gold/GoldVaultPage.tsx
+8) src/components/purchasing/monitoring/PurchasingDrillDownDialog.tsx
+
+HARD RULES:
+1) NO guessing response shapes: derive from existing supabase queries in each file.
+2) Do NOT change UI behavior (state, filters, labels) except replacing data source.
+3) Prefer EXISTING Neon endpoints/dataGateway patterns. If missing, add MINIMAL explicit GET endpoints in server/routes.ts.
+4) All sensitive endpoints MUST use requireSession.
+5) Every migrated file must end with:
+   - zero supabase imports
+   - zero supabase.from / supabase.rpc usage
+6) Evidence REQUIRED per file.
+
+PROCEDURE FOR EACH FILE (repeat 8 times):
+B1) Paste the exact Supabase query blocks VERBATIM from the file.
+B2) Map each query to:
+   - existing endpoint (show endpoint + where defined), OR
+   - create a new explicit GET endpoint with equivalent SELECT (filters/order/limit/joins)
+B3) Update/extend src/lib/dataGateway.ts (or use apiClient.get) to call endpoints.
+B4) Replace the supabase calls in the file.
+B5) Evidence pack:
+   - git diff --stat
+   - git diff (only touched file + routes.ts + dataGateway.ts if used)
+   - curl -i (with cookie) for each new/used endpoint: show status + first 20 lines of JSON
+   - rg proof: rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <file> -S returns nothing
+   - workflow/browser logs lines for that route showing no errors
+
+GLOBAL EVIDENCE AFTER ALL 8 FILES:
+1) Updated TOTAL_FILES and TOTAL_CALLS for remaining supabase.from/rpc across src (multiline-aware).
+2) Confirm no duplicate route definitions shadowing requireSession endpoints:
+   - script/command that lists duplicate app.get same-path occurrences in server/routes.ts.
+
+STOP after the 8 files are migrated and evidence is printed.

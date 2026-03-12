@@ -1,0 +1,334 @@
+✅ PROMPT كامل لريبلت (Seller Selection + Attribution + Branch Assignment + Reports) — Audit-First / No Guessing / Safe
+
+You must follow STRICT rules:
+
+NO GUESSING. If a table/field/endpoint doesn’t exist, you must prove it by searching the codebase and DB schema first.
+
+Do NOT break existing flows. POS sales creation must keep working as-is.
+
+Audit-First. Start with discovery + evidence queries before migrations.
+
+Minimize scope. Only touch files you must touch. Provide a diff list and evidence for every change.
+
+No destructive operations. No deletes, no mass updates, no resets. Only additive schema changes unless explicitly required.
+
+Keep i18n Arabic/RTL using existing translation pattern. No hardcoded English labels in UI.
+
+Security: Enforce branch constraints server-side (seller must be allowed in the current branch).
+
+Business requirements (must implement exactly)
+
+In POS screen header (where it currently shows logged-in “Admin”), replace it with:
+
+A dropdown to select the seller (البائع) from a list allowed for the selected branch.
+
+This is NOT login. It’s “seller attribution”.
+
+The selected seller must be stored in the created sale invoice.
+
+Persist selection per branch in localStorage so the cashier doesn’t reselect each time.
+
+Every sale invoice must be attributed to:
+
+created_by_user_id (the authenticated user, already exists or add if missing)
+
+seller_id (the selected seller)
+
+branch_id
+
+Add an admin settings screen:
+
+Manage which sellers are available in each branch
+
+CRUD: assign/unassign seller to branch
+
+Show seller stats:
+
+total sales amount
+
+count of invoices
+
+period filters (today / week / month / custom range)
+
+view seller history (invoice list)
+
+Add a “Sales by Seller” report page:
+
+Filter by branch + date range + seller
+
+Table: seller name, invoices count, gross total, VAT total, net total (if available)
+
+Drill-down: click seller → list invoices → open invoice view
+
+Backward compatibility:
+
+Old invoices without seller_id must remain viewable.
+
+For missing seller_id: show “غير محدد” (Unassigned).
+
+Phase 0 — Discovery (NO changes yet)
+0A) Codebase search
+
+Find these (or prove not exists):
+
+POS page component and where sales are created (RPC/endpoint)
+
+sales tables (sales_invoices, sale_items, etc) + existing columns: branch_id, created_by, user_id, cashier_id, etc.
+
+how branch is selected in POS (current branch context)
+
+existing Users management page & user-branches mapping tables (if any)
+
+Deliver a short “Reality Map”:
+
+Which tables exist + key columns
+
+How sale invoice is created (RPC name / endpoint)
+
+Where invoice totals are stored
+
+0B) DB schema evidence
+
+Run:
+
+\dt for sales/account tables
+
+\d <table> for invoice table and users table(s)
+Return raw outputs.
+
+STOP if schema is unclear.
+
+Phase 1 — Minimal schema additions (safe)
+
+Goal: add seller attribution without refactoring everything.
+
+1A) Data model (choose the safest based on discovery)
+
+Preferred option (if you already have users table and roles):
+
+Use existing users (or profiles) as sellers (role = seller).
+
+Create mapping table: branch_sellers
+
+id uuid pk default gen_random_uuid()
+
+branch_id uuid not null
+
+seller_user_id uuid not null (FK to users/profiles)
+
+unique(branch_id, seller_user_id)
+
+is_active boolean default true
+
+created_at timestamptz default now()
+
+If your system already has user_branches or similar, reuse it (NO duplicate mapping) and just add a is_seller flag or role mapping if appropriate—BUT only if proven by discovery.
+
+1B) Invoice attribution columns
+
+On the sales invoice table (whatever it’s called):
+
+Add seller_user_id uuid null
+
+Add index (branch_id, seller_user_id, created_at)
+
+Keep existing created_by untouched.
+
+1C) Migration
+
+Create SQL migration file(s) with:
+
+table creation (if needed)
+
+column addition
+
+indices
+
+constraints
+
+NO data backfill unless explicitly required
+
+Provide:
+A) git diff --stat
+B) git diff
+
+Phase 2 — Server API / RPC (strict)
+2A) Seller list endpoint (branch-scoped)
+
+Add read endpoint:
+
+GET /api/branches/:branchId/sellers
+Returns: [{ seller_user_id, display_name }] only active.
+
+2B) Assign/unassign sellers (admin-only)
+
+Add endpoints:
+
+POST /api/branches/:branchId/sellers body: { seller_user_id }
+
+DELETE /api/branches/:branchId/sellers/:sellerUserId
+
+Enforce:
+
+branch exists
+
+seller exists
+
+uniqueness
+
+only admins can manage (use existing auth checks pattern in this app; do NOT invent new auth system)
+
+2C) Update sale creation
+
+Where sale invoice is created (RPC/endpoint):
+
+Accept seller_user_id (nullable)
+
+Validate: if provided, seller must be assigned to the branch (branch_sellers contains it)
+
+Store it on invoice row.
+
+This must be atomic with invoice creation.
+
+Phase 3 — POS UI changes (minimal)
+3A) Replace header “Admin” with seller selector
+
+In POS page:
+
+Show a dropdown labeled “البائع”
+
+Fetch sellers for current branch via the new endpoint.
+
+If none: show warning “لا يوجد بائعين مُسجلين لهذا الفرع”
+
+Persist selected seller per branch in localStorage key:
+
+pos:seller:${branchId}
+
+3B) Sale submission payload
+
+When completing sale:
+
+include seller_user_id = selected seller
+
+If missing seller selection:
+
+Either block sale with message (preferred) OR allow with seller null (decide based on requirement; default: block with clear message)
+
+Add i18n keys for all new labels/messages.
+
+Phase 4 — Admin Settings screen (branches & sellers)
+
+Create a new page under Settings:
+
+“إدارة بائعين الفروع”
+Features:
+
+Select branch
+
+List assigned sellers
+
+Add seller (search dropdown)
+
+Remove seller
+
+Show stats panel per seller for date range:
+
+total invoices count
+
+total gross
+
+total tax
+
+total net (if stored)
+
+Provide drill-down list of invoices (click invoice → open invoice page)
+
+Implementation:
+
+Use existing UI components (Card, Table, Dialog)
+
+Use existing routing structure and permissions pattern
+
+Phase 5 — Sales by Seller report
+
+Create page:
+
+/reports/sales-by-seller
+Filters:
+
+branch
+
+date range
+
+optional seller
+Table:
+
+seller
+
+invoices_count
+
+gross_total
+
+tax_total
+
+net_total
+Click seller → show invoice list.
+
+Server endpoint:
+
+GET /api/reports/sales-by-seller?branchId=&from=&to=&sellerUserId=
+Do aggregation in SQL with indexes.
+
+Evidence pack (MANDATORY)
+
+After implementation provide:
+
+Evidence 1 — Schema
+
+SQL showing new tables/columns exist
+
+Evidence 2 — Seller list works
+
+Curl/Fetch response for branch sellers list
+
+Evidence 3 — Sale invoice contains seller_user_id
+
+Query last 5 invoices showing seller_user_id populated
+
+Evidence 4 — Reports
+
+Query output for aggregated sales by seller
+
+Screenshot or console log demonstrating UI renders
+
+Evidence 5 — Backward compatibility
+
+Load an old invoice without seller_user_id → UI shows “غير محدد” and no crash
+
+Output format
+
+At the end produce:
+
+Summary of changes
+
+Files changed list
+
+git diff --stat
+
+git diff
+
+Evidence queries and outputs
+
+Do NOT include any “maybe” statements. If something is unknown, stop and ask for the missing fact with exact file/table name needed.
+
+ملاحظة تصميمية مهمة (علشان ما نغيرش السيستم كله)
+
+التغيير ده مش معناه هنعمل نظام مستخدمين جديد.
+إحنا فقط بنضيف Seller Attribution فوق الـ authenticated user الحالي.
+يعني:
+
+الـ “اليوزر اللي فاتح السيستم” = مسؤول/كاشير (Auth)
+
+الـ “البائع المختار” = اسم الشخص اللي باع (Attribution)
+وده يخليك تطلع تقارير دقيقة “لكل بائع” بدون ما تلعب في نظام الدخول كله.

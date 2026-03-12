@@ -1,0 +1,90 @@
+✅ PROMPT — WAVE 4 MIGRATION (TOP PROD FILES) | SUPABASE → NEON | EVIDENCE PACK | NO GUESSING | STOP
+
+ROLE: Full-stack Engineer (React/Vite + Express + Neon)
+MODE: Execute migrations file-by-file with raw evidence. No speculation. No new DB tables. No redesign.
+
+GOAL:
+Reduce Production-path Supabase usage by migrating the next highest-impact PROD files (exclude DEV-only health folder).
+Replace ALL supabase.from / supabase.rpc in the selected Wave 4 files with Express/Neon endpoints + dataGateway/apiClient/fetch.
+
+HARD RULES:
+1) NO guessing response shapes. Derive from existing supabase queries in each file.
+2) Do NOT change UI logic/UX/state besides changing the data source.
+3) Every new endpoint must return JSON only and be protected with requireSession (default ON).
+4) If a referenced table does not exist: return HTTP 501 with JSON:
+   { "error_code":"SCHEMA_NOT_READY", "error":"Table '<table>' does not exist" }
+   and update the frontend file to handle 501 gracefully (show Arabic “الميزة غير مفعلة بعد” and avoid crashes).
+5) No duplicate same-method same-path routes.
+6) Evidence required per file and per new endpoint.
+
+SECTION A — POST-WAVE3 INVENTORY (RAW)
+A1) Multiline-aware supabase counts for PROD PATH (exclude health):
+node - <<'NODE'
+const fs=require('fs'), path=require('path');
+function walk(dir){ let out=[]; for(const e of fs.readdirSync(dir,{withFileTypes:true})){ const p=path.join(dir,e.name);
+  if(e.isDirectory()) out=out.concat(walk(p));
+  else if(p.endsWith('.ts')||p.endsWith('.tsx')) out.push(p); } return out; }
+const re=/supabase\s*\.\s*(from|rpc)\s*\(/g;
+const files=walk('src').filter(f=>!f.includes('src/components/health/'));
+let per=[]; let total=0;
+for(const f of files){ const s=fs.readFileSync(f,'utf8'); const m=s.match(re); if(m){ per.push([m.length,f]); total+=m.length; } }
+per.sort((a,b)=>b[0]-a[0]);
+console.log('PROD_FILES',per.length);
+console.log('PROD_CALLS',total);
+console.log('TOP20'); per.slice(0,20).forEach(([n,f])=>console.log(String(n).padStart(3,' '),f));
+NODE
+
+A2) Pick Wave 4 = TOP 8 PROD files from A1 that are real production screens/components (exclude anything dev/test).
+Print the chosen list explicitly.
+
+SECTION B — MIGRATION EXECUTION (WAVE 4 = 8 FILES)
+For EACH chosen file:
+
+B1) Paste the exact supabase query blocks VERBATIM (only the blocks relevant to reads/rpc).
+B2) Check if an equivalent Neon endpoint already exists:
+- search server/routes.ts for an endpoint that matches the same tables/filters/joins.
+If exists: reuse it (no changes).
+If missing: create minimal explicit GET endpoint(s) that replicate the query (filters/order/limit/joins).
+B3) Add/extend a typed wrapper in src/lib/dataGateway.ts ONLY if it improves reuse; otherwise use apiClient.get or fetch directly.
+B4) Replace the file’s supabase usage with the endpoint(s). Remove supabase import.
+B5) If any endpoint hits missing tables, implement SCHEMA_NOT_READY (501) and add frontend 501 handling.
+
+B6) Evidence pack per file:
+- git diff --stat
+- git diff (only: that file + server/routes.ts + dataGateway.ts if touched)
+- rg proof:
+  rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <FILE> || true   (must be empty)
+  rg -n "from\\s*['\"]@/integrations/supabase/client['\"]" <FILE> || true (must be empty)
+- Endpoint security proof (for each new endpoint):
+  show the exact route definition line(s) containing requireSession
+- Runtime proof:
+  curl -i without cookie → must be 401
+  curl -i with cookie → 200 JSON OR 501 SCHEMA_NOT_READY JSON
+  show status + Content-Type + first 20 lines of JSON
+
+SECTION C — DUPLICATE ROUTE GATE (RAW)
+After all Wave 4 edits:
+node - <<'NODE'
+const fs=require('fs');
+const s=fs.readFileSync('server/routes.ts','utf8');
+const re=/app\.(get|post|put|delete)\("([^"]+)"/g;
+const m=new Map(); let x;
+while((x=re.exec(s))){ const k=x[1]+' '+x[2]; m.set(k,(m.get(k)||0)+1); }
+const dup=[...m.entries()].filter(([k,v])=>v>1);
+console.log('DUP_COUNT',dup.length);
+dup.slice(0,200).forEach(([k,v])=>console.log(v,k));
+NODE
+
+SECTION D — POST-WAVE4 COUNTS (RAW)
+Repeat the PROD-path counter from Section A1 and show new numbers.
+
+SECTION E — BUILD (RAW)
+npm run build
+
+OUTPUT FORMAT (STRICT):
+1) A1 raw output + chosen Wave 4 list (8 files)
+2) For each file: B1..B6 evidence pack
+3) C duplicate route output
+4) D post-wave counts output
+5) E build output
+NO narrative. NO new prompts. STOP.

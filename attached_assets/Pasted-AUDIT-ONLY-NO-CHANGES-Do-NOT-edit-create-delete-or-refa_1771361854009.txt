@@ -1,0 +1,100 @@
+AUDIT ONLY — NO CHANGES.
+Do NOT edit, create, delete, or refactor any code or DB schema.
+Allowed: reading files, rg, and read-only SQL (SELECT / information_schema / pg_catalog).
+Disallowed: migrations, ALTER/CREATE/DROP, update/delete/insert.
+
+Goal:
+Map Users / Roles / Permissions end-to-end:
+- DB model (profiles/users/roles/permissions/branches/screens/modules)
+- Backend enforcement points (requireSession + role/permission checks)
+- Frontend gating (sidebar filtering + route guards)
+Then identify POS route and Unique Items Return route for MVP roles.
+
+Return output in Arabic, with file paths + key code snippets + line numbers.
+
+========================
+A) DB / Tables Map (Read-only)
+========================
+1) List actual tables found in this project related to auth/users/roles/permissions/branches/screens/modules.
+Use pg_catalog to discover table names (public schema), then filter to relevant ones.
+
+2) For EACH relevant table:
+- columns (name/type/nullability)
+- PK, unique constraints
+- FKs (to build an FK map)
+
+Provide the SQL you used.
+
+3) Provide counts + sample:
+- COUNT(*) per table
+- 1 sample row (LIMIT 1) — redact sensitive values if needed
+
+========================
+B) Backend / Enforcement
+========================
+4) Identify where requireSession is defined and how it attaches user identity (req.user? req.session?).
+Show the exact code.
+
+5) Identify all endpoints for:
+- users admin management
+- roles/custom roles
+- role permissions
+- user branch assignment
+List endpoint path + method + where enforced.
+
+6) Search and open key files:
+rg -n "requireSession|authMiddleware|session|req\\.user|req\\.session" server src backend
+rg -n "role_permissions|user_roles|custom_roles|permissions|screens|modules|user_branches" server src backend
+rg -n "isAdmin|authorize|hasPermission|canAccess|policy|403|forbidden" server src backend
+
+Open and summarize the 5 most relevant files (path + purpose + snippets).
+
+7) Backend Enforcement Matrix:
+For each users/roles endpoint:
+- Endpoint
+- requireSession? (yes/no)
+- Role/permission required? (how)
+- Behavior on deny (403/401)
+
+========================
+C) Frontend / UI Gating
+========================
+8) Identify the source of truth for permissions in frontend:
+- fetched at login? (/me? /session? roles endpoint?)
+- stored in context/hook (useAuth/usePermissions)?
+Show the exact code path.
+
+9) Search:
+rg -n "Sidebar|Navigation|navItems|menu|screens|modules" src
+rg -n "routes\\s*=|App\\.tsx|createBrowserRouter|Route\\b" src
+rg -n "RequireAuth|ProtectedRoute|PrivateRoute|guard|policy|permissions|roles|canAccess" src
+
+Open and summarize:
+- Sidebar builder
+- Route config
+- Any guard/policy evaluator
+
+10) Frontend Gating Matrix:
+- Route path
+- Sidebar visibility rule
+- Route guard rule
+- Data dependency (permissions payload)
+
+========================
+D) MVP Discovery
+========================
+11) Identify:
+- POS route/screen component (path + file)
+- Unique Items Return route/screen component (path + file)
+If multiple candidates, list them with rationale.
+
+========================
+E) Final Report
+========================
+12) Provide the final audit report in 4 sections:
+(1) Data Model
+(2) Permission Model (screen/module/role/hybrid)
+(3) Enforcement Points (backend + frontend + source of truth)
+(4) Risks/Gaps (UI hiding only, unguarded routes, missing checks)
+
+AUDIT ONLY. NO CHANGES.

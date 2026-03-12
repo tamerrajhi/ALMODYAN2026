@@ -1,0 +1,107 @@
+PROMPT — P5A (Branch Accounts + POS Entry Points) — Clarification + Implementation Plan
+Constraint: enterprise / no legacy / keep Atomic principles intact. Prefer minimal blast radius. If a change is UI-only, do UI-only. If backend change needed, keep it small and guarded (requireSession + requireAdminRole). Provide evidence (rg, diff stats, smoke tests).
+
+Context (current state)
+1) Branches management UI exists:
+- src/pages/BranchesPage.tsx exists (~652 lines) and already handles: list/create/edit/delete branches using apiClient + react-query.
+- Existing endpoints:
+  - GET /api/branches
+  - POST /api/branches (calls branch_create_atomic RPC)
+  - GET /api/branches/:branchId/sellers
+  - GET /api/branches-list
+
+2) Branch Authentication is already implemented (separate from users/cashiers):
+- Tables: branch_accounts (branch_id UNIQUE, username UNIQUE, password_hash, is_active) + branch_sessions
+- Endpoints (admin governance):
+  - GET  /api/admin/branch-accounts
+  - POST /api/admin/branch-accounts/set-credentials
+  - POST /api/admin/branch-accounts/revoke-sessions
+- Branch runtime auth endpoints:
+  - POST /api/branch/login
+  - GET  /api/branch/context
+  - POST /api/branch/logout
+- Frontend gate exists: BranchLoginGate wraps /pos and /pos/return.
+
+3) POS cashier PIN system exists:
+- user_pins + pos_sessions + /api/pos/cashiers + /api/pos/cashier/enter + /api/pos/session/context + /api/pos/cashier/exit
+- Supervisor override exists: /api/pos/override + supervisor_overrides table
+- Frontend POSCashierGate exists and POSReturnPage confirm requires supervisor PIN approval.
+
+What I need you (Replit) to do NOW
+A) Answer (Audit) — do NOT guess, cite exact file/line or rg results
+1) Is the Branch Accounts Admin UI actually present inside src/pages/BranchesPage.tsx right now?
+   - If yes: provide the exact section/component name + where it renders (line range).
+   - If no: confirm there is no UI that calls:
+     - GET /api/admin/branch-accounts
+     - POST /api/admin/branch-accounts/set-credentials
+     - POST /api/admin/branch-accounts/revoke-sessions
+   - Provide `rg "branch-accounts|set-credentials|revoke-sessions" src -n` results.
+
+2) Entry point question:
+   - Which links are intended for branches to open POS?
+   - Confirm current routing paths for POS and POS Return (e.g., /pos and /pos/return).
+   - Confirm these pages are behind user login + BranchLoginGate + POSCashierGate.
+   - Provide route evidence from App.tsx / router map.
+
+B) Implementation — minimal, enterprise, no legacy
+Goal: Do NOT create “one link per branch”. Use fixed links:
+- /pos (sales)
+- /pos/return (returns)
+Branch selection is done via BranchLoginGate (branch username/password), not by URL.
+
+Implement these items (only if missing / or incomplete):
+
+B1) Add/complete Branch Accounts Admin Section (Admin only)
+- Location: src/pages/BranchesPage.tsx
+- Visible only for isAdmin (use existing useModules() or equivalent).
+- UI must show list of branches with:
+  - Branch name/code
+  - “Has account?” badge (yes/no)
+  - username (or —)
+  - status (active/inactive)
+  - Actions:
+    - “Set/Change Credentials” (dialog: username, password, confirm, active toggle)
+    - “Revoke Sessions” (confirm dialog)
+- Must call existing endpoints using apiClient.get/apiClient.post.
+- Must never display password_hash.
+- Must handle 403 with clear message “صلاحيات المشرف مطلوبة”.
+
+B2) Add “Open POS” and “Open POS Return” buttons (simple operational UX)
+- Add two buttons in BranchesPage (or a small “POS Entry” card) that:
+  - Open /pos and /pos/return in same tab.
+- DO NOT ask user to choose branch in this screen.
+- Branch selection happens inside BranchLoginGate when opening /pos or /pos/return.
+- Make it clear in UI text:
+  “بعد فتح نقطة البيع سيتم طلب بيانات دخول الفرع (يوزر/باسورد الفرع)”
+
+B3) Enterprise governance hardening (recommended default)
+- When POST /api/admin/branch-accounts/set-credentials succeeds,
+  automatically revoke existing sessions for that branch (call revoke endpoint after success).
+  (If you prefer backend-side atomicity: propose a minimal backend change, but only if needed.
+   UI-only call-chain is acceptable.)
+
+B4) Operational warning
+- In the branches list, show a warning badge for branches that have NO branch account configured.
+- Text: “لا يوجد حساب دخول للفرع — لن يتم فتح POS قبل إعداد الحساب”.
+
+C) Evidence required (must include all)
+1) git diff --stat
+2) rg proofs:
+   - rg "branch-accounts|set-credentials|revoke-sessions" src -n
+3) Smoke tests (manual steps checklist is fine):
+   - Admin opens Branches page → sees Branch Accounts section.
+   - Admin sets credentials for a branch → success toast + sessions revoked.
+   - Admin clicks Open POS → navigates to /pos → BranchLoginGate prompts for branch credentials.
+   - After login → POSCashierGate prompts cashier selection + 4-digit PIN.
+   - Non-admin user: Branch Accounts section hidden and endpoints return 403.
+
+Important constraints
+- Do NOT touch atomic RPC patterns.
+- Do NOT introduce legacy roles or user_roles.
+- Keep changes focused to src/pages/BranchesPage.tsx unless strictly necessary.
+- If you need to add a small helper component inside the same file, ok.
+- No database schema changes in this task.
+
+Deliverable
+- Implement B1–B4, or explain precisely what is already present and only implement missing items.
+- Provide evidenc

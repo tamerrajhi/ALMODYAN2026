@@ -1,0 +1,91 @@
+تنفيذ Unified POS Login (Enterprise) مع POS Admin username/password مستقل عن ERP.
+
+الهدف النهائي:
+- AuthPage فيها خيارين فقط: دخول النظام (ERP) + دخول نقطة البيع (POS).
+- داخل /pos: بعد BranchLoginGate يظهر اختيار نوع الدخول:
+  (1) كاشير/مشرف  -> اختيار بائع + PIN + supervisor override للمرتجع
+  (2) أدمن نقطة البيع -> username/password (POS Admin مستقل) + صلاحية كاملة داخل POS (reports/settings)
+- POS Admin ليس ERP admin، ويمكن وجود عدة POS Admin.
+
+المطلوب:
+
+(1) AuthPage (src/pages/AuthPage.tsx)
+- اعرض خيارين فقط:
+  1) "دخول النظام" (ERP) كما هو
+  2) "دخول نقطة البيع" -> يوجّه إلى /pos
+- احذف/لا تضف خيار منفصل باسم POS Admin في AuthPage.
+
+(2) Database (POS Admin Accounts)
+أنشئ جدول جديد:
+pos_admin_accounts (
+  id uuid primary key default gen_random_uuid(),
+  username text unique not null,
+  password_hash text not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+)
+
+أضف seed أدمن واحد (اختياري الآن) باسم:
+username: posadmin
+password: POS_ADMIN_ChangeMe123!
+(استخدم hash بنفس طريقة hashing في النظام)
+
+(3) Backend API
+A) POST /api/pos/admin/login
+Body: { username: string, password: string }
+Guards:
+- requireBranchSession (لازم branch login تم)
+- (لو عندكم requirePosSession موجود للكاشير فقط، لا تفرضه هنا؛ admin login ينشئ/يربط pos session لاحقاً)
+Logic:
+- lookup pos_admin_accounts by username AND is_active=true
+- verify password مقابل password_hash
+- عند النجاح:
+  - ensure pos session موجودة (إن لم توجد، أنشئ pos_session_id مرتبط بالـ branch_id الحالي)
+  - اربط session context بـ:
+     pos_admin=true
+     pos_admin_id=<admin.id>
+  - اكتب/حدّث cookie __pos (path=/api/pos) إن لزم لربط السياق
+Response: { ok: true }
+
+B) GET /api/pos/session/context
+- أرجع إضافات:
+  pos_admin: boolean
+  pos_admin_id: uuid|null
+
+(4) Frontend — POS entry selection
+في /pos (POSPage أو gate قبل الدخول):
+- بعد نجاح BranchLoginGate، اعرض شاشة اختيار نوع الدخول:
+  - زر: "كاشير / مشرف"
+  - زر: "أدمن نقطة البيع"
+- اختيارات UI بسيطة وواضحة.
+
+A) مسار "كاشير/مشرف":
+- احتفظ بالـ flow الحالي كما هو (اختيار بائع + PIN + supervisor override للمرتجع)
+
+B) مسار "أدمن نقطة البيع":
+- اعرض Form username/password داخل POS (بدون ERP auth)
+- عند submit: call POST /api/pos/admin/login
+- عند النجاح: اعمل refresh لـ /api/pos/session/context ثم ادخل POSLayout
+
+(5) POSLayout Navigation + Guards
+- sidebar الأساسي دائماً 3 روابط:
+  /pos
+  /pos/invoices
+  /pos/returns
+- أظهر روابط إضافية فقط إذا pos_admin=true من /api/pos/session/context:
+  /pos/reports
+  /pos/settings
+- Guard routes:
+  /pos/reports و /pos/settings => لو pos_admin=false redirect إلى /pos
+
+(6) Evidence إلزامي (بدون شرح)
+- git diff --stat
+- Screenshot AuthPage: خيارين فقط (ERP / POS)
+- Screenshot /pos بعد branch login: شاشة اختيار (كاشير/مشرف) أو (أدمن)
+- Screenshot دخول POS Admin (username/password form)
+- Screenshot POS sidebar بعد POS Admin login: 5 روابط
+- Screenshot POS sidebar للكاشير/مشرف: 3 روابط
+- Response snippet من /api/pos/session/context قبل/بعد admin login يوضح pos_admin false ثم true
+ارجع بالـEvidence فقط.
+"```
+::contentReference[oaicite:0]{index=0}

@@ -1,0 +1,109 @@
+✅ PROMPT — SUPABASE-REMAINING-AUDIT + IMPACT + FIX | EVIDENCE-PACK ONLY | THEN EXECUTE CHOSEN FIX | NO GUESSING | STOP
+
+ROLE: Auditor + Implementer
+MODE:
+1) Produce RAW evidence pack (commands + outputs).
+2) Decide between Fix Track A or Fix Track B BASED ONLY on evidence.
+3) Execute the selected track with full diffs + gates.
+NO speculation. If something is not proven by raw output, label it UNPROVEN and do not act on it.
+
+GOAL:
+Answer: “Is anything still running on Supabase DB/Functions/Storage?” and “Which screens are affected and how to restore them?”
+
+--------------------------------------------------------------------
+SECTION 1 — EVIDENCE: ENV + RUNTIME (MUST)
+1.1) Show Supabase env presence (frontend + runtime):
+Print raw outputs:
+- (A) ls -la | sed -n '1,200p'
+- (B) rg -n "VITE_SUPABASE_URL|VITE_SUPABASE_PUBLISHABLE_KEY" -S . || true
+- (C) node -e "console.log('VITE_SUPABASE_URL=',process.env.VITE_SUPABASE_URL); console.log('VITE_SUPABASE_PUBLISHABLE_KEY=',process.env.VITE_SUPABASE_PUBLISHABLE_KEY);"
+- (D) If on Replit, also print whether Secrets exist (raw method available in this environment; if not possible, explicitly say NOT POSSIBLE).
+
+1.2) Runtime proof of supabase free-variable error:
+We must prove whether `supabase` is defined at runtime or not.
+Do BOTH:
+- (E) npm run dev
+- (F) In browser console (or headless), run:
+  typeof supabase
+  window.supabase
+  globalThis.supabase
+Paste exact console outputs.
+Then open ONE affected page AFTER login (choose Dashboard route actually used).
+If login is needed, perform login using the app's normal UI; then reload Dashboard.
+Capture:
+- Console errors (raw)
+- Network calls (only the failing ones) showing stacktrace or error response
+
+IMPORTANT: If no console access is possible, mark this subsection NOT POSSIBLE and do NOT claim ReferenceError.
+
+--------------------------------------------------------------------
+SECTION 2 — EVIDENCE: SUPABASE USAGE INVENTORY (MUST)
+2.1) Canonical scan (single-line + multiline aware):
+Provide raw outputs:
+- rg -n "supabase\.(from|rpc)\(" src --hidden --no-ignore-vcs
+- rg -nU "supabase\s*(\r?\n)\s*\.from\(" src --hidden --no-ignore-vcs
+- rg -nU "supabase\s*(\r?\n)\s*\.rpc\(" src --hidden --no-ignore-vcs
+
+2.2) Import chain proof:
+Provide raw outputs:
+- rg -n "export\s+const\s+supabase" src --hidden --no-ignore-vcs
+- rg -n "import\s+\{\s*supabase\s*\}\s+from\s+['\"].*integrations/supabase/client['\"]" src --hidden --no-ignore-vcs
+- rg -n "globalThis\.supabase|window\.supabase" src --hidden --no-ignore-vcs
+
+2.3) Build artifact proof (only if build exists):
+- npm run build
+- rg -n "supabase\.from|supabase\.rpc" dist -S || true
+Paste raw outputs.
+
+--------------------------------------------------------------------
+SECTION 3 — IMPACT MAP (NO GUESSING)
+Output two lists ONLY from grep results:
+3.1) Affected PAGES = files under src/pages/** that contain supabase.from/rpc
+3.2) Affected SHARED = files under src/components/**, src/lib/**, src/core/** that contain supabase.from/rpc
+For each file: show
+- filepath
+- count of occurrences
+- table/function names if present in the same line (otherwise leave blank)
+
+--------------------------------------------------------------------
+SECTION 4 — DECISION LOGIC (STRICT)
+Based ONLY on Section 1 evidence:
+IF (typeof supabase === 'undefined') OR (ReferenceError appears in console) THEN
+  Choose FIX TRACK A (Import + runtime stabilization)
+ELSE
+  Choose FIX TRACK B (Migration-first; do NOT add mass imports)
+
+Explain the decision in 3 bullet points, each bullet must cite a specific raw evidence line from Section 1.
+
+--------------------------------------------------------------------
+SECTION 5 — EXECUTE SELECTED FIX
+FIX TRACK A — (ONLY IF CHOSEN)
+A1) Add explicit import to every file that references supabase and lacks import:
+Add exactly this line near top imports:
+  import { supabase } from '@/integrations/supabase/client';
+Do not change logic.
+A2) Evidence required:
+- git diff --stat
+- git diff (untruncated)
+- rg -nU "supabase\s*(\r?\n)\s*\.from\(" src must still show calls but now each file has import
+A3) Runtime gate:
+- npm run build must pass
+- After login open Dashboard; show console: typeof supabase and confirm no ReferenceError
+
+FIX TRACK B — (ONLY IF CHOSEN)
+B1) Do NOT add mass imports.
+B2) Produce a prioritized migration plan (P0/P1/P2) based on Impact Map ONLY:
+- P0 pages: Dashboard, POS/Sales, Purchasing, Accounting core screens
+- Provide per-page “replace supabase.from() reads” target: dataGateway/apiClient GET endpoints list (names only, no guessed payloads)
+B3) Output an “evidence pack” for 3 pilot pages:
+For each pilot page: list each supabase query line and the exact table(s) it hits.
+STOP after plan.
+
+--------------------------------------------------------------------
+FINAL OUTPUT FORMAT (STRICT)
+1) Section 1 raw outputs
+2) Section 2 raw outputs
+3) Section 3 impact lists
+4) Section 4 decision + chosen track
+5) Section 5 execution evidence (diffs + gates)
+STOP

@@ -1,0 +1,59 @@
+ROLE: Auditor (No Guessing)
+MODE: READ-ONLY EVIDENCE (NO CODE/DB CHANGES)
+
+QUESTIONS:
+Q1) Is table sale_items actively used or legacy?
+Q2) Does POS write to invoices today (create/update/post)?
+
+DELIVERABLES (Evidence Only):
+
+A) DB Evidence (counts + newest rows)
+1) Row counts:
+   SELECT 'sales' as t, count(*) c FROM sales
+   UNION ALL SELECT 'sale_items', count(*) FROM sale_items
+   UNION ALL SELECT 'invoices', count(*) FROM invoices
+   UNION ALL SELECT 'sales_invoice_items', count(*) FROM sales_invoice_items
+   UNION ALL SELECT 'returns', count(*) FROM returns;
+
+2) Latest rows (show 5 each, include created_at if exists):
+   SELECT * FROM sales ORDER BY created_at DESC NULLS LAST LIMIT 5;
+   SELECT * FROM sale_items ORDER BY created_at DESC NULLS LAST LIMIT 5;
+   SELECT * FROM invoices WHERE invoice_type IN ('sale','sales') ORDER BY created_at DESC NULLS LAST LIMIT 5;
+   SELECT * FROM sales_invoice_items ORDER BY created_at DESC NULLS LAST LIMIT 5;
+
+B) Schema Evidence (foreign keys)
+Show FKs for sale_items and sales_invoice_items:
+- Provide SQL that lists constraints from pg_constraint/pg_class
+OR use \d sale_items and \d sales_invoice_items
+Paste output (must show FK targets).
+
+C) Code Evidence (who writes what)
+Run these rg searches and paste raw output (paths + line numbers):
+
+1) Who writes to sale_items:
+   rg -n "sale_items" server src | rg -n "insert|update|delete|rpc\\(|POST|create|upsert"
+
+2) POS create flow: find POS create/post calls and their targets:
+   rg -n "POSPage|CreateSale|create.*sale|post.*sale|sale_id|sales_channel|invoice_id|invoices" src/pages server
+
+3) Invoices created from POS?:
+   rg -n "insert into invoices|invoices\\)|from\\('invoices'\\)|/api/.*invoices|invoice_type.?=.?('sale'|'sales')" server src
+
+D) Runtime linkage evidence (most important)
+Prove whether a POS sale creates a row in invoices:
+- Pick 1 recent sale from sales table (from section A2) and show any linkage columns:
+  (sale.invoice_id, sale.journal_entry_id, etc if present)
+
+- Then run SQL:
+  SELECT * FROM invoices WHERE sale_id = '<SALE_ID>' OR id = '<INVOICE_ID_FROM_SALES_IF_EXISTS>';
+  (use whichever column exists; do not guess—inspect columns first)
+
+OUTPUT FORMAT:
+- A) Counts + latest rows (raw outputs)
+- B) FK outputs
+- C) rg outputs (raw)
+- D) Linkage proof query + outputs
+- Final verdict (2 lines only):
+  Q1: sale_items USED or LEGACY (based on A+B+C)
+  Q2: POS WRITES invoices YES/NO (based on D + C)
+STOP.

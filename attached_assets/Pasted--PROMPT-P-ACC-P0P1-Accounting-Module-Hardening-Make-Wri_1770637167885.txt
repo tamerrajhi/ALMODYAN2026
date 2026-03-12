@@ -1,0 +1,143 @@
+✅ PROMPT — P-ACC-P0P1 | Accounting Module Hardening + Make Writes Functional | STRICT | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Full-Stack Auditor/Engineer (Neon/Postgres + Express + React)
+
+MODE: BUILD (You may change code + run SQL) BUT STRICT SCOPE
+
+GOAL
+Fix Accounting module so:
+1) No ungoverned direct-write endpoints exist (esp. /api/chart-of-accounts POST).
+2) JournalEntriesPage becomes functional (create/post/unpost/reverse/update) via atomic RPCs (DB functions) NOT forbidDirectWrite.
+3) Add missing DB constraints + indexes + FK hardening required by audit.
+4) Add session/permission guard to accounting endpoints (at least requireSession like /api/customers).
+
+ABSOLUTE RULES (NO EXCEPTIONS)
+- Provide RAW evidence for every change.
+- Do NOT change unrelated modules (Purchasing/Unique Import/POS flows) unless explicitly required by accounting fixes.
+- Do NOT silently refactor; minimal changes only.
+- Any DB DDL must be captured as exact SQL statements.
+- STOP after Evidence Pack + Gate Tests (no extra commentary).
+
+SCOPE (Allowed files)
+Frontend:
+- src/pages/accounting/JournalEntriesPage.tsx
+- src/pages/accounting/ChartOfAccountsPage.tsx
+- any directly referenced components/utilities ONLY if required
+Backend:
+- server/routes.ts (accounting endpoints + RPC proxy)
+DB:
+- Create/replace Postgres functions for atomic operations
+- Add constraints/indexes/FKs ONLY listed in tasks below
+
+OUT OF SCOPE
+- UI redesign, styling, translations
+- Report engine rewrite (FinancialReportsPage computation) unless asked later
+- Major schema redesign of journal entries or invoices beyond explicit constraints below
+
+========================
+PHASE P0 (CRITICAL) — MUST DO FIRST
+========================
+
+P0-1) Eliminate ungoverned direct INSERT endpoint:
+- Current: POST /api/chart-of-accounts does direct INSERT bypassing atomic RPC.
+Action:
+A) Either REMOVE the POST route entirely OR
+B) Enforce requireSession + permission + route calls dataGateway RPC equivalent (create_chart_of_account_atomic) server-side.
+Constraint:
+- There must be ONLY ONE authoritative write path for COA creation (atomic).
+Deliverable:
+- prove route behavior (reject unauth or forbidden; allow with session + permission).
+
+P0-2) Make JournalEntriesPage writes WORK (remove forbidDirectWrite blocks)
+Current:
+- JournalEntriesPage create/post/unpost/reverse/update are blocked by forbidDirectWrite.
+Action:
+Implement DB atomic RPC functions (jsonb signature) + wire UI to dataGateway.rpc:
+Required RPCs (exact names; if already referenced in UI keep same):
+- create_journal_entry_atomic(p_payload jsonb) returns jsonb
+- post_journal_entry_atomic(p_payload jsonb) returns jsonb
+- unpost_journal_entry_atomic(p_payload jsonb) returns jsonb
+- reverse_journal_entry_atomic(p_payload jsonb) returns jsonb
+- update_journal_entry_atomic(p_payload jsonb) returns jsonb
+Rules:
+- Each must be fully transactional.
+- Posting must validate JE is balanced (sum debit == sum credit) before status='posted'.
+- Reversal creates a new JE with inverted lines and links reversal_of_je_id/reversed_by_je_id.
+- Update allowed only when status='draft' (reject posted/voided edits).
+- Preserve existing columns: status is free-text currently; do not rely on it being enum unless you also add CHECK (see P0-3).
+- Every function must return a stable JSON response: {success, ... , error_code?, error?}
+
+P0-3) Enforce journal_entries.status validity
+Add CHECK constraint:
+status IN ('draft','posted','voided')
+Also ensure existing rows comply (migrate/normalize if needed with minimal safe update).
+Provide before/after counts of invalid values.
+
+P0-4) Add essential auth guard on accounting endpoints
+Add requireSession middleware (same cookie hashing logic used in /api/customers) to:
+- GET /api/chart-of-accounts
+- GET /api/journal-entries
+- GET /api/journal-entries/:id
+- GET /api/journal-entries/:entryId/with-lines
+- GET /api/payments
+- GET /api/invoices
+(If you have a permission system, enforce "accounting:read" at least; if not, session-only is acceptable for P0)
+Must prove:
+- Without session => 401 JSON error Arabic
+- With session => 200
+
+========================
+PHASE P1 (HIGH) — DO AFTER P0
+========================
+
+P1-1) COA update/delete become atomic (replace forbidDirectWrite)
+Implement:
+- update_chart_of_account_atomic(p_payload jsonb)
+- delete_chart_of_account_atomic(p_payload jsonb)
+Rules:
+- Prevent deleting system accounts or accounts referenced by JE lines (return error_code).
+- Update allowed fields: name/name_en/is_active/parent_id (no changing account_code if it’s unique key unless you handle safely).
+Wire ChartOfAccountsPage to use these RPCs.
+
+P1-2) Add missing uniqueness
+- credit_notes.credit_note_number UNIQUE index
+- invoices.invoice_number UNIQUE (at least for sales; purchase has partial unique already)
+Provide rationale + ensure no duplicates exist (if duplicates exist, STOP and report them with sample rows).
+
+P1-3) Add performance indexes
+- journal_entry_lines(journal_entry_id)
+- journal_entry_lines(account_id)
+- journal_entries(branch_id, entry_date)
+- payments(branch_id, payment_date)
+Provide EXPLAIN or at least show index existence after.
+
+P1-4) Add FK hardening for sales_invoice_items (minimum safe)
+Add:
+- FK (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+- FK (jewelry_item_id) REFERENCES unique_items(id)  (if safe; if existing rows violate, STOP and show orphans)
+If constraints cannot be added due to dirty data, output orphan counts and STOP (do not "delete data" silently).
+
+========================
+EVIDENCE REQUIREMENTS (MANDATORY)
+For each phase output:
+
+A) git diff --stat
+B) git diff (FULL) — no truncation
+C) SQL DDL statements executed (exact)
+D) Proof queries:
+- show constraints/indexes existence (pg_constraint/pg_indexes)
+- counts of impacted rows
+E) Gate Tests (must run and paste raw outputs)
+Minimum Gate Tests P0:
+GT0: Unauthed accounting endpoint => 401
+GT1: Create draft JE via UI path or direct RPC call => returns success + entry_id
+GT2: Add JE lines + post => status posted, totals balanced
+GT3: Attempt post imbalanced => fails with error_code IMBALANCED_JE (no partial writes)
+GT4: Reverse posted JE => creates reversal JE, links set, totals balanced
+GT5: Unpost posted JE (if allowed) => status draft and lines preserved OR explicitly forbid and prove error response
+
+STOP AFTER EVIDENCE PACK.
+
+IMPORTANT: If at any step you discover dependency gaps (missing tables/columns or conflicting constraints), STOP and output a "BLOCKERS" section with raw evidence queries and no fixes.
+
+BEGIN NOW.

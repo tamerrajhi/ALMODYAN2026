@@ -1,0 +1,80 @@
+✅ PROMPT — P1-CN | Implement POS Credit Note (complete_pos_credit_note_atomic + void_credit_note_atomic) | DB ONLY | EVIDENCE + SQL GATE TESTS | STOP
+
+ROLE: Database Engineer
+
+MODE: DB ONLY (SQL FUNCTIONS ONLY)
+Allowed: CREATE OR REPLACE FUNCTION فقط
+Forbidden: server/routes.ts changes / UI changes / schema migrations
+
+BACKGROUND
+- POSCreditNotePage.tsx calls:
+  dataGateway.rpc('complete_pos_credit_note_atomic', { p_payload })
+  dataGateway.rpc('void_credit_note_atomic', { p_payload or args })
+- These RPCs are whitelisted but missing in DB -> 500 undefined_function
+
+STEP 0 (MANDATORY AUDIT BEFORE WRITING FUNCTIONS)
+A) Extract payload contracts from UI (NO code changes):
+1) Paste the exact payload object keys built in POSCreditNotePage.tsx for:
+   - complete_pos_credit_note_atomic
+   - void_credit_note_atomic
+2) Confirm how the RPC proxy passes args:
+   - Is it default $1::jsonb via args.p_payload?
+   - Ensure function signatures match actual call pattern.
+
+OUTPUT: Write the contract in a clear JSON shape (keys + types).
+
+IMPLEMENTATION REQUIREMENTS
+1) Create:
+- public.complete_pos_credit_note_atomic(p_payload jsonb) RETURNS jsonb
+- public.void_credit_note_atomic(p_payload jsonb) RETURNS jsonb
+(If UI calls void with named args, adapt signature ONLY if proven by contract evidence)
+
+2) Idempotency MUST (same as sale/return):
+- Use pos_workflow_requests with client_request_id (workflow_type='pos_credit_note')
+- Return cached result if succeeded; return retry if processing; mark failed on exception.
+
+3) Data writes (expected tables from schema audit):
+- credit_notes (header) MUST be created on complete
+- If there is a credit_note_items table, use it; otherwise store items in a JSON column if exists.
+- payments row MUST be created for refund/credit movement (payment_type = 'credit_note_refund' or similar)
+- journal_entries + journal_entry_lines MUST be posted and balanced.
+
+4) Accounting convention:
+Credit Note is a refund/credit to customer:
+- Reverse revenue (DEBIT revenue)
+- Reverse VAT output (DEBIT VAT output) if VAT applies
+- Refund out:
+  - cash/bank/card => CREDIT cash/bank account (asset decreases)
+  - customer credit (if supported) => CREDIT a liability account (ONLY if mapping exists; otherwise BLOCK with error_code)
+- If credit note returns inventory pieces (piece-based) you must update unique_items; BUT ONLY if the payload includes unique item ids.
+If payload is amount-based (not piece ids), DO NOT touch unique_items.
+
+5) Validation:
+- Require branch_id
+- Require customer_id
+- Validate refund_method and required bank_account_id when method is bank/card
+- Reject unsupported methods with Arabic error_code/message.
+- If linked_sale_id provided, validate it exists (optional).
+
+EVIDENCE REQUIRED
+A) Contract evidence from STEP 0 (exact code snippet lines pasted)
+B) Full CREATE OR REPLACE FUNCTION bodies for both functions
+C) Proof existence:
+SELECT proname, pg_get_function_identity_arguments(p.oid)
+FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid
+WHERE n.nspname='public' AND p.proname IN ('complete_pos_credit_note_atomic','void_credit_note_atomic')
+ORDER BY p.proname;
+
+D) SQL Gate Tests (paste commands + JSON outputs)
+GT1) Create credit note (cash refund) with a small test payload:
+- Must return success true + credit_note_id/number + journal_entry_id/number
+GT2) Idempotency: repeat same client_request_id -> idempotent true
+GT3) Void credit note: call void_credit_note_atomic referencing that credit_note_id
+- Must flip credit_notes.status to voided (or set voided_at)
+- Must create reversal JE or mark JE voided consistently
+GT4) Regression checks:
+- credit_notes row exists
+- journal entry balanced debit=credit
+- payments created/updated correctly
+
+STOP after evidence + gate tests. No further edits.

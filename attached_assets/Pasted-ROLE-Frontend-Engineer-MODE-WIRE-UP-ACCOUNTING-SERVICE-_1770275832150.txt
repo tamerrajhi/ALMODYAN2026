@@ -1,0 +1,76 @@
+ROLE: Frontend Engineer
+MODE: WIRE-UP ACCOUNTING (SERVICE ONLY) — STOP AFTER DONE
+
+GOAL:
+Replace forbidDirectWrite() blocks in src/lib/accounting.ts with calls to the already-built atomic RPCs:
+- je_create_atomic
+- je_update_atomic
+- je_post_atomic
+- je_void_atomic
+- je_reverse_atomic
+
+SCOPE:
+- src/lib/accounting.ts ONLY (and any direct imports it requires).
+- Do NOT change DB.
+- Do NOT change other modules.
+
+RULES:
+- Keep function signatures the same so UI pages don't need refactors.
+- Generate p_client_request_id via crypto.randomUUID() for each operation.
+- Preserve existing validation in TS if present, but final authority is RPC validation.
+- Ensure returned shape matches what callers expect (map RPC jsonb if needed).
+
+IMPLEMENTATION:
+1) Locate the 3 main blocked areas in accounting.ts:
+   - cleanup orphan delete (line ~260)
+   - JE header insert (line ~290)
+   - JE lines insert (line ~315)
+   And any other forbidDirectWrite usages in this file.
+
+2) Replace them as follows:
+A) When creating a JE:
+   - Build p_lines jsonb from existing line items in the code:
+     array of { account_id, debit, credit, description }
+   - Call:
+     const { data, error } = await supabase.rpc('je_create_atomic', {
+       p_client_request_id: clientRequestId,
+       p_branch_id: branchId,
+       p_je_date: jeDate,
+       p_memo: memo,
+       p_lines: linesJson,
+     });
+   - Return je_id/je_no/totals mapped to existing return contract.
+
+B) Posting:
+   - Call je_post_atomic with p_je_id.
+
+C) Voiding:
+   - Call je_void_atomic with p_je_id + reason.
+
+D) Reversing:
+   - Call je_reverse_atomic with p_je_id + reason.
+   - Map reversal_je_id / reversal_je_no back to caller.
+
+3) For the "cleanup orphan delete" path:
+   - Do NOT perform direct delete. Replace with NO-OP + warning log OR convert to a safe RPC if one already exists.
+   - Since we must not create new DB, choose NO-OP and return success=false with message "cleanup disabled in atomic-only mode".
+   - Keep this change local to accounting.ts.
+
+4) Error handling:
+   - If RPC returns {success:false,error:...} throw Error with that message.
+   - Preserve Arabic errors when present.
+
+EVIDENCE (MANDATORY):
+A) Paste accounting.ts snippets with line numbers showing:
+   - je_create_atomic call
+   - je_post_atomic call
+   - je_reverse_atomic call
+   - the orphan-cleanup path handled without direct delete
+B) Paste a list of exported functions in accounting.ts that now call RPCs.
+C) Run and paste (must be EMPTY):
+   grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+D) Minimal runtime verification (non-UI):
+   - From an existing code path or a tiny node script, call the service create+post once and paste console output (je_no + status).
+STOP AFTER OUTPUT.
+NO EXTRA MODULES.
+NO GUESSING.

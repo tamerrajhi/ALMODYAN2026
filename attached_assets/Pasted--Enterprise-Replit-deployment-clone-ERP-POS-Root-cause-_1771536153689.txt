@@ -1,0 +1,107 @@
+نفّذ الآن حل Enterprise داخل نفس Replit deployment (بدون clone) لعزل ERP عن POS جذريًا.
+
+Root cause مؤكد:
+__branch و __pos cookies على path="/" فتتسرب لكل /api/* وتسبب خلط ERP/POS. لكن POS endpoints تحت /api/pos/* تقرأ __branch (requireBranchSession). إذن لازم نجعل __branch و __pos يرسلان فقط لطلبات /api/pos/*.
+
+المطلوب (Fix كامل):
+
+(1) نقل Branch endpoints تحت /api/pos/branch/*
+غيّر مسارات branch الخاصة بالـPOS فقط كالتالي:
+- POST /api/branch/login   -> POST /api/pos/branch/login
+- GET  /api/branch/context -> GET  /api/pos/branch/context
+- POST /api/branch/logout  -> POST /api/pos/branch/logout
+
+مهم:
+- لا تترك أي endpoint يقرأ __branch خارج /api/pos/*.
+- أي middleware requireBranchSession يبقى كما هو، لكن استخدم المسارات الجديدة تحت /api/pos/branch/*.
+
+(2) تعديل cookies paths + تنظيف legacy cookies القديمة
+في branch login handler (كان يكتب __branch على path="/"):
+- امسح legacy cookie على path="/"
+- ثم اكتب cookie جديدة على path="/api/pos"
+
+استخدم نفس options الحالية (httpOnly/secure/sameSite/expires):
+const isProd = process.env.NODE_ENV === "production";
+
+res.clearCookie("__branch", {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: "lax",
+  path: "/",
+});
+
+res.cookie("__branch", rawToken, {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: "lax",
+  path: "/api/pos",
+  expires: expiresAt,
+});
+
+في POS cashier enter handler (كان يكتب __pos على path="/"):
+res.clearCookie("__pos", {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: "lax",
+  path: "/",
+});
+
+res.cookie("__pos", rawToken, {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: "lax",
+  path: "/api/pos",
+  expires: expiresAt,
+});
+
+(3) تحديث Frontend لاستعمال المسارات الجديدة
+أي استدعاء للـBranch endpoints من الفرونت:
+- /api/branch/login   -> /api/pos/branch/login
+- /api/branch/context -> /api/pos/branch/context
+- /api/branch/logout  -> /api/pos/branch/logout
+
+أما /api/public/branches-list يظل كما هو.
+
+(4) إضافة POS Logout (بدون لمس ERP)
+أضف endpoint:
+POST /api/pos/logout
+يمسح __pos و __branch على path="/api/pos" فقط:
+
+app.post("/api/pos/logout", (req,res) => {
+  const isProd = process.env.NODE_ENV === "production";
+  res.clearCookie("__pos", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    path: "/api/pos",
+  });
+  res.clearCookie("__branch", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    path: "/api/pos",
+  });
+  res.json({ ok: true });
+});
+
+(5) Evidence إلزامي بعد التنفيذ (بدون نقاش)
+A) اطبع:
+git rev-parse HEAD
+git diff --stat
+
+B) أثبت Set-Cookie headers:
+- بعد POST /api/pos/branch/login لازم Set-Cookie __branch فيه Path=/api/pos
+- بعد POST /api/pos/cashier/enter لازم Set-Cookie __pos فيه Path=/api/pos
+(انسخ فقط سطور Set-Cookie من Response headers)
+
+C) أثبت العزل:
+- أضف log مؤقت داخل ERP endpoint مثل /api/purchases/* يطبع:
+  Boolean(req.cookies.__branch), Boolean(req.cookies.__pos)
+المفروض: false/false
+(ثم احذف اللوج بعد إثباته)
+
+D) أثبت POS مازال يعمل:
+- في /api/pos/session/context اطبع Boolean(req.cookies.__pos) (بدون طباعة القيمة)
+المفروض: true بعد دخول POS.
+
+ارجع بالـEvidence فقط (diff + headers + logs). ممنوع تغييرات إضافية غير المذكور.

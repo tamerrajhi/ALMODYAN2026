@@ -1,0 +1,189 @@
+✅ PROMPT to Replit (Copy/Paste)
+
+Context / Constraints (DO NOT VIOLATE):
+
+Keep Atomic RPC principles unchanged.
+
+Do NOT change POS business RPC payloads.
+
+AuthPage.tsx currently uses fetch (keep style consistent).
+
+We already have:
+
+Branch auth: POST /api/branch/login, GET /api/branch/context, POST /api/branch/logout (cookie __branch)
+
+POS session: /api/pos/cashiers, POST /api/pos/cashier/enter, GET /api/pos/session/context, POST /api/pos/cashier/exit (cookie __pos)
+
+POS pages already gated by BranchLoginGate + POSCashierGate.
+
+Goal
+
+Implement POS entry from the main login page (/auth) for cashiers, with:
+
+POS tab on AuthPage (ERP login stays default, unchanged behavior).
+
+POS tab requires Branch selection (searchable) + branch credentials.
+
+After successful branch login, redirect to /pos. User still can’t perform any operations until they select cashier + PIN inside POS.
+
+After cashier enters PIN (POS session exists), sidebar must show only 3 screens (POS-only mode).
+
+A) Branch selector on /auth without user session (REQUIRED)
+
+Problem: current /api/branches-list needs requireSession, so it fails on /auth.
+
+✅ Fix: add a public minimal endpoint that returns only safe info:
+
+GET /api/public/branches-list (NO requireSession)
+
+returns: [ { branch_id, name, code, is_active } ] for active branches only
+
+Must NOT return financial settings, COA accounts, etc.
+
+Add basic safety:
+
+only active branches
+
+no secrets
+
+optional simple rate-limit if already present patterns exist (otherwise skip).
+
+Response format should be consistent with current API shape { data, error }.
+
+Then in AuthPage POS tab:
+
+Fetch branches from /api/public/branches-list when POS tab opens.
+
+Implement search-as-you-type filter:
+
+filter by name or code (case-insensitive)
+
+user can type and list filters immediately
+
+Branch selection is REQUIRED before enabling “Login to POS” button.
+
+IMPORTANT: selection is UX only, BUT we must validate it:
+
+On submit call /api/branch/login with username/password.
+
+Then call /api/branch/context
+
+If returned branch_id != selected branch_id:
+
+Treat as “wrong credentials for this branch”
+
+Show error: “بيانات الدخول لا تخص الفرع المختار”
+
+Do NOT allow entry.
+
+If match: success → redirect /pos.
+
+If branch list fetch fails:
+
+Show fallback: manual input for branch code (still require selection) OR “Retry”.
+
+Do NOT silently skip selector.
+
+B) AuthPage UI (tabs)
+
+Add 2 tabs:
+
+“دخول النظام” (default, existing ERP login untouched)
+
+“دخول نقطة البيع”
+
+Switching tabs clears the other tab fields.
+
+POS tab fields:
+
+Branch selector (required, searchable)
+
+Branch username
+
+Branch password
+
+Submit
+
+On success:
+
+POST /api/branch/login (credentials include)
+
+GET /api/branch/context
+
+redirect /pos
+
+C) Sidebar restriction must depend on POS session (__pos), not branch session
+
+Current proposal checks /api/branch/context and filters sidebar — WRONG per ops requirement.
+
+✅ Correct rule:
+
+“POS mode” in UI should be active only when GET /api/pos/session/context returns 200.
+
+If __pos missing/expired → full sidebar (or at least normal ERP layout).
+
+Once POS session exists → restrict sidebar to ONLY:
+
+/pos
+
+/sales/pos-invoices (POS invoices)
+
+/sales/returns?mode=pos (POS returns shortcut)
+
+Note: /pos/return is route, but sidebar item is /sales/returns?mode=pos — keep menu definitions unchanged, just filter correctly.
+
+Implementation location:
+
+In MainLayout.tsx (or wherever sidebar menu sections are built):
+
+add useEffect on location/pathname change:
+
+call /api/pos/session/context with credentials include
+
+if 200 → isPosSessionActive=true
+
+else → false
+
+Filter sidebar items when isPosSessionActive === true.
+
+Also:
+
+Do NOT block deep routes globally here (routing guards already exist). This is UI restriction.
+
+D) Acceptance tests (must pass)
+
+/auth opens → ERP tab default works unchanged.
+
+Switch to POS tab → branches list loads (public endpoint).
+
+Search filters branches by typing.
+
+User selects Branch A, enters Branch B credentials:
+
+/api/branch/login may succeed, but /api/branch/context branch_id mismatch
+
+result: show error “بيانات الدخول لا تخص الفرع المختار”، stay on POS tab.
+
+Correct branch credentials + correct selected branch:
+
+success → redirect /pos
+
+Before cashier PIN: sidebar is NOT restricted by POS session (since __pos not created yet).
+
+After cashier enters PIN (POS session exists):
+
+sidebar shows ONLY 3 items: POS, POS invoices, POS returns.
+
+Exiting cashier (/api/pos/cashier/exit) returns sidebar to normal automatically.
+
+Deliverables / Files
+
+Backend: add one endpoint GET /api/public/branches-list in server/routes.ts (minimal).
+
+Frontend:
+
+src/pages/AuthPage.tsx add POS tab + selector + login logic (fetch).
+
+MainLayout.tsx (or sidebar builder) add POS session detection via /api/pos/session/context and filter sidebar accordingly.
+
+No other behavior changes.

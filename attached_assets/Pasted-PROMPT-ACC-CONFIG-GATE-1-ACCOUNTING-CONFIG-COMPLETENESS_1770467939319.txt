@@ -1,0 +1,53 @@
+PROMPT — ACC-CONFIG-GATE-1 | ACCOUNTING CONFIG COMPLETENESS (DATA ONLY) | NO LOGIC CHANGES | EVIDENCE | STOP
+
+ROLE: DB Operator (Neon/Postgres)
+MODE: DATA/CONFIG ONLY (NO FUNCTION CHANGES, NO server/routes.ts, NO UI edits)
+
+GOAL:
+Ensure accounting configuration is complete so operational flows (products/purchasing inventory postings) do not fail with "account not found".
+
+STEP 1 — COA INVENTORY/AP/VAT/CASH/BANK CHECK (READ ONLY)
+Paste outputs:
+A) SELECT account_code, account_name, account_type
+   FROM chart_of_accounts
+   ORDER BY account_code
+   LIMIT 200;
+
+B) If chart_of_accounts has a column like category/subtype/parent_id, include it in the query too.
+
+STEP 2 — DETECT MISSING REQUIRED ACCOUNTS (READ ONLY)
+Based on existing conventions in your DB (account codes already used by PV, purchasing, etc.), identify the required set:
+- Inventory
+- Accounts Payable (Suppliers/AP)
+- VAT Input
+- VAT Output
+- COGS (if used)
+- Cash
+- Bank
+
+Show:
+- which codes exist
+- which are missing
+
+STEP 3 — DATA FIX (IDEMPOTENT UPSERTS ONLY)
+Insert ONLY missing required accounts using IF NOT EXISTS by account_code.
+- Do NOT modify existing accounts.
+- Use the same account_type enum values that existing accounts use.
+- Set minimal required fields (account_code, account_name, account_type, parent_id if required).
+
+If the system uses settings keys for defaults, also upsert required keys:
+- app_settings keys for inventory/vat/cogs defaults (ONLY if such keys already exist in schema conventions)
+Do NOT invent new settings keys unless you confirm they are read somewhere.
+
+STEP 4 — PROOF (READ ONLY)
+Paste outputs:
+A) SELECT account_code, account_name FROM chart_of_accounts
+   WHERE account_code IN (<list of inserted codes>)
+   ORDER BY account_code;
+
+B) Pick ONE account_id for Inventory and show it's usable:
+   SELECT id, account_code, account_name FROM chart_of_accounts WHERE account_code = '<inventory_code>' LIMIT 1;
+
+STOP.
+EVIDENCE REQUIRED:
+- All SQL outputs + exact INSERT/UPSERT statements used.

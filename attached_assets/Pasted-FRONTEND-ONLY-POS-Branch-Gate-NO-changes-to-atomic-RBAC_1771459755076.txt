@@ -1,0 +1,59 @@
+FRONTEND-ONLY — POS Branch Gate (NO changes to atomic/RBAC)
+
+STRICT RULES:
+- Modify ONLY frontend files (src/**).
+- Do NOT modify backend.
+- Do NOT change any atomic RPC payload formats except ensuring branch_id uses branch context.
+- No localStorage required unless already used; prefer in-memory React state.
+- Keep changes minimal and reversible.
+- Evidence: git diff --stat + git diff + manual test notes.
+
+GOAL:
+Before allowing POS screens, require Branch session:
+- If no __branch cookie session -> show Branch Login form.
+- On success -> fetch /api/branch/context to get branch_id and set POS selectedBranch automatically.
+- Add "Change Branch" button to re-auth branch (shows same Branch Login dialog).
+
+IMPLEMENTATION PLAN:
+1) Create a small component: BranchLoginGate.tsx (or inline in POSPage if minimal)
+   - It should:
+     a) call GET /api/branch/context on mount
+        - if 200 => hasBranch=true and store branchId
+        - if 401 => hasBranch=false
+     b) show login form when hasBranch=false:
+        - username + password inputs
+        - POST /api/branch/login
+        - on success => re-fetch /api/branch/context and set branchId
+     c) provide "Change Branch" button when hasBranch=true:
+        - opens dialog with username/password
+        - calls POST /api/branch/login again (switch by re-login)
+        - then refresh context and update branchId
+
+2) Wire it into:
+   - src/pages/POSPage.tsx
+   - src/pages/POSReturnPage.tsx
+   Behavior:
+   - If gate not satisfied, do not render POS UI; render gate.
+   - Once branchId obtained, force selectedBranch = branchId (override old auto-select based on user_branches).
+   - Ensure sellers list query uses selectedBranch (already does).
+   - Ensure sale payload uses selectedBranch (already does).
+
+3) UI:
+- Keep it simple: Card with 2 inputs + login button.
+- Show errors from server.
+- Do NOT log password.
+- Show current branch badge/label if branches list exists; otherwise show branch_id.
+
+MANUAL TESTS:
+A) Open /pos without branch session:
+- See Branch Login UI
+- Login works -> POS loads and selectedBranch is set to returned branch_id
+B) Change Branch:
+- Click Change Branch -> login other branch -> POS reloads sellers list for that branch
+C) /pos/return should also be gated similarly.
+
+EVIDENCE:
+A) git diff --stat
+B) git diff
+C) Manual test notes
+STOP.

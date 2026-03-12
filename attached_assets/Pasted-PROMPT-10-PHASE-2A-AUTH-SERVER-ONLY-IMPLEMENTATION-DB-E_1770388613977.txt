@@ -1,0 +1,89 @@
+PROMPT 10 — PHASE-2A AUTH | SERVER-ONLY IMPLEMENTATION (DB + ENDPOINTS) | FEATURE FLAG | EVIDENCE | STOP
+
+ROLE: Backend Engineer
+MODE: SERVER ONLY (NO FRONTEND CHANGES IN THIS PROMPT)
+
+SCOPE (ONLY SERVER + DB MIGRATION FILES):
+- server/index.ts, server/routes.ts (or where routes are registered)
+- server/db.ts (if needed)
+- add new server/auth/* files if needed
+- add ONE SQL migration file (e.g., migrations/phase2_auth_sessions.sql) OR equivalent DB init script used in this repo
+
+GOAL:
+Implement session-based auth endpoints behind feature flag SESSION_AUTH_ENABLED:
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET  /api/auth/me
+with HTTP-only cookie "__session" storing raw token; DB stores token_hash.
+
+STRICT RULES (NO EXCEPTIONS):
+- Do NOT change any frontend code.
+- Do NOT remove or modify existing endpoints behavior.
+- Endpoints MUST return 501 when SESSION_AUTH_ENABLED is false.
+- Must use crypto-random tokens, hash with SHA-256 before DB storage.
+- Must set cookie flags: HttpOnly, SameSite=Lax, Path=/.
+  Secure=true only when NODE_ENV=production.
+- Must do Origin check (or Referer) on POST endpoints as CSRF defense-in-depth.
+- Password verification: bcryptjs (preferred) OR argon2 (if already installed).
+- Reuse profiles table; DO NOT create auth_users table.
+- Add profiles.password_hash only if missing.
+- Create auth_sessions table with token_hash unique, expires_at, user_id FK.
+- IMPORTANT: Decide user_id FK target correctly:
+  Use profiles.user_id (Supabase UUID) OR profiles.id (internal UUID) — choose ONE and be consistent.
+  (Preferred: use profiles.user_id because downstream code treats that as canonical user ID.)
+- Return response shape:
+  { user, profile, roles, branches } minimal,
+  but MUST include enough for /api/auth/me to power useAuth later (id, email, username, full_name, default_branch_id).
+
+IMPLEMENTATION DETAILS (REQUIRED):
+1) DB Migration:
+   - CREATE TABLE auth_sessions (...)
+   - ALTER TABLE profiles ADD COLUMN IF NOT EXISTS password_hash TEXT;
+2) Server utilities:
+   - hashToken(raw) => sha256 hex
+   - setSessionCookie(res, rawToken, expiresAt)
+   - clearSessionCookie(res)
+3) Endpoint behaviors:
+   POST /api/auth/login:
+     - input: { email_or_username, password }
+     - resolve: if no "@", lookup email by profiles.username
+     - find profile by email (or username)
+     - verify bcrypt against profiles.password_hash
+     - on success: create session (token_hash, user_id, expires_at, ip, user_agent)
+     - set cookie "__session"
+     - return 200 with payload
+   GET /api/auth/me:
+     - read cookie "__session"
+     - lookup session by token_hash and expires_at > now
+     - load profile + roles(user_roles) + branches(user_branches join branches)
+     - return 200 payload; else 401
+   POST /api/auth/logout:
+     - read cookie token
+     - delete session row (by token_hash) if present
+     - clear cookie
+     - return 200 { ok:true }
+4) Feature Flag:
+   - if SESSION_AUTH_ENABLED != "true": endpoints return 501 consistently.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff --
+C) Show migration file content (cat ...)
+D) Show route registration (grep):
+   - rg -n "/api/auth/(login|logout|me)" -S server
+E) Typecheck/build:
+   - If TypeScript server: tsc --noEmit (Exit 0)
+   - If JS server: run existing server build/lint step if present; otherwise skip but say why.
+F) Runtime verification (manual curl is fine):
+   With SESSION_AUTH_ENABLED=false:
+     - GET /api/auth/me returns 501
+   With SESSION_AUTH_ENABLED=true:
+     - GET /api/auth/me returns 401 (no cookie)
+     - POST /api/auth/login with wrong password returns 401
+     - POST /api/auth/login with correct creds returns 200 and Set-Cookie __session
+     - GET /api/auth/me after login returns 200 (cookie sent)
+     - POST /api/auth/logout returns 200 and cookie cleared
+Provide the exact curl commands + status codes + small JSON snippets.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

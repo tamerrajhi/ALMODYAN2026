@@ -1,0 +1,181 @@
+✅ PROMPT — Fix Unique Purchase Return (Atomic + Idempotency Safe)
+Context
+
+Unique Purchase Return creation currently fails with:
+
+null value in column "client_request_id" of relation "atomic_workflow_requests"
+violates not-null constraint
+
+
+Root cause:
+The RPC expects client_request_id but frontend does not pass it.
+
+Goal:
+Make Unique Purchase Return creation idempotent, safe, and non-breaking.
+
+STRICT RULES
+
+Do NOT change business logic.
+Do NOT change table schemas.
+Do NOT rename statuses.
+Do NOT modify accounting logic.
+
+Only:
+
+ensure client_request_id is always supplied
+
+ensure RPC handles missing ID safely
+
+ensure retries are safe
+
+ensure workflow rows close correctly.
+
+TASK 1 — Frontend Fix (Mandatory)
+
+Locate the call creating purchase return:
+
+Search for:
+
+unique_purchase_return_create_atomic
+
+
+or:
+
+dataGateway.rpc(...)
+
+
+inside:
+
+Purchasing → Unique Returns page
+
+Add idempotency key generation
+
+Before calling RPC:
+
+const KEY = `upr:return:create:${invoiceId}`;
+let clientRequestId = localStorage.getItem(KEY);
+
+if (!clientRequestId) {
+  clientRequestId = crypto.randomUUID();
+  localStorage.setItem(KEY, clientRequestId);
+}
+
+
+Then pass it to RPC:
+
+await dataGateway.rpc(
+  "unique_purchase_return_create_atomic",
+  {
+    ...payload,
+    client_request_id: clientRequestId
+  }
+);
+
+
+On successful creation:
+
+localStorage.removeItem(KEY);
+
+TASK 2 — RPC Guard Fix
+
+Inside RPC:
+
+unique_purchase_return_create_atomic(jsonb)
+
+
+At start of function:
+
+v_client_req_id := args->>'client_request_id';
+
+IF v_client_req_id IS NULL OR length(v_client_req_id) = 0 THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', 'MISSING_CLIENT_REQUEST_ID',
+    'message_ar', 'client_request_id مطلوب لإنشاء المرتجع'
+  );
+END IF;
+
+TASK 3 — Ensure workflow rows close
+
+All error returns must update:
+
+atomic_workflow_requests
+
+
+Example:
+
+UPDATE atomic_workflow_requests
+SET
+  status = 'completed',
+  result_payload = v_result,
+  completed_at = now()
+WHERE client_request_id = v_wf_key;
+
+
+Do this on:
+
+validation errors
+
+lock failures
+
+config errors
+
+success path
+
+TASK 4 — Verify recompute status call exists
+
+After items are returned:
+
+PERFORM recompute_unique_invoice_status(v_invoice_id);
+
+
+Must already exist; ensure not removed.
+
+TASK 5 — Evidence Queries (Run after deployment)
+Check workflow row creation
+SELECT client_request_id, status, created_at
+FROM atomic_workflow_requests
+ORDER BY created_at DESC
+LIMIT 10;
+
+Ensure return document created once
+SELECT return_number, created_at
+FROM unique_purchase_returns
+ORDER BY created_at DESC
+LIMIT 5;
+
+
+Retry action should NOT create duplicates.
+
+Ensure invoice status correct
+SELECT invoice_number, status
+FROM unique_purchase_invoices
+ORDER BY created_at DESC
+LIMIT 5;
+
+Expected Result
+
+After fix:
+
+✔ Purchase return works
+✔ No client_request_id error
+✔ Retry safe
+✔ No duplicate returns
+✔ Status updates correctly
+✔ No schema change
+✔ No accounting impact
+
+SUCCESS CRITERIA
+
+Purchase return creation:
+
+works first time
+
+works after refresh retry
+
+never duplicates documents
+
+never throws NOT NULL error again
+
+إذا حاب، الخطوة القادمة الأفضل هندسياً:
+نضيف شاشة Audit Log للـ Atomic workflows عشان أي مشكلة مستقبلية تتشخص في ثواني بدل ساعات.

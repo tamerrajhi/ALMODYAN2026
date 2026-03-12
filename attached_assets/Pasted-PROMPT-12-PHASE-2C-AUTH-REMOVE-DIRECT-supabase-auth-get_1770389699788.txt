@@ -1,0 +1,56 @@
+PROMPT 12 — PHASE-2C AUTH | REMOVE DIRECT supabase.auth.getUser() CALLS (PAGES ONLY) | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+MODE: FRONTEND ONLY
+
+GOAL:
+Eliminate direct usage of supabase.auth.getUser() from production pages by switching to useAuth().user.
+This enables session-mode auth without hidden Supabase dependencies.
+
+SCOPE:
+- ONLY modify production pages/components that currently call supabase.auth.getUser() directly.
+- Target count: exactly the “9 pages” identified in your audit.
+- DO NOT modify:
+  - src/contexts/AuthContext.tsx
+  - server/*
+  - health/tests files under src/components/health/*
+  - Edge Functions callers (supabase.functions.invoke) in hooks/services
+
+STRICT RULES (NO EXCEPTIONS):
+- Replace supabase.auth.getUser() with useAuth().user (from AuthContext).
+- If code needs user id:
+  use const userId = user?.id;  (or user?.id ?? null)
+- If user is required to proceed:
+  keep existing behavior (redirect/guard) — but add a defensive check:
+    if (!user?.id) { return; } or throw existing error pattern.
+- DO NOT change business logic beyond sourcing the user id.
+- Remove supabase import ONLY if it becomes unused in that file after change.
+- Do not add new dependencies.
+
+PROCESS (DO IN ORDER):
+1) Identify exact files:
+   rg -n "supabase\\.auth\\.getUser\\(" -S src/pages src/components src/lib src/hooks
+2) From matches, pick ONLY production pages/components (not health/tests).
+3) Modify those files:
+   - add: import { useAuth } from "@/contexts/AuthContext"; (or correct path)
+   - replace getUser() usage with:
+       const { user } = useAuth();
+       const userId = user?.id;
+     and use userId where needed.
+4) Ensure no remaining getUser() in production pages.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) Before/After grep:
+   A1) rg -n "supabase\\.auth\\.getUser\\(" -S src/pages
+   A2) rg -n "supabase\\.auth\\.getUser\\(" -S src/pages  (after changes)  --> must be NO MATCHES
+B) List of modified files (should be 9; if not 9, explain precisely why and what you found)
+C) git diff --stat
+D) git diff -- (ok to truncate, but show changes for at least 3 files + confirm pattern)
+E) Typecheck:
+   tsc --noEmit (Exit 0)
+F) Runtime note (text only):
+   - With VITE_AUTH_BACKEND=supabase: app loads, no new errors.
+   - With VITE_AUTH_BACKEND=session (server enabled): key pages open without crashing due to missing user id.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

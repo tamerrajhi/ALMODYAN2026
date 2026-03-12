@@ -1,0 +1,205 @@
+MODE: AUDIT-FIRST THEN IMPLEMENT (PRO POS REPORTS CENTER). NO GUESSING.
+
+GOAL
+Build a fully independent POS Reports Center at /pos/reports (POS Admin only), with a complete suite of POS reports. This Reports Center must NOT depend on the POS Dashboard content or its widget visibility settings. Dashboard and Reports are separate products.
+
+NON-NEGOTIABLE (HARD RULES)
+1) Do NOT touch ERP endpoints under /api/admin/* (leave them unchanged).
+2) All new POS Reports endpoints MUST be under /api/pos/admin/reports/* and MUST use requirePosAdminToken.
+3) Do NOT break existing POS flows (branch login gate, cashier gate, POS session).
+4) NO GUESSING:
+   - If a report needs data that does not exist, you must prove the gap with evidence and mark the report BLOCKED.
+   - Only propose minimal additive changes AFTER proving gaps, and only via the repo’s official migration mechanism.
+5) Keep response convention:
+   - Success: { data: <payload>, error: null }
+   - Failure: { data: null, error: { message: "..." } }
+6) Reports Center MUST be independent:
+   - /pos/reports must not read pos_dashboard_widgets or any dashboard settings.
+   - Remove any dashboard→reports drill-down links if present.
+
+PHASE A — AUDIT ONLY (EVIDENCE PACK). STOP AFTER THIS PHASE.
+IMPORTANT: In Phase A, do NOT implement or modify code. Do NOT run DB writes. Read-only only.
+
+A1) Locate and document authentication boundary:
+- Prove requirePosAdminToken implementation (file + lines).
+- Prove which cookie it reads and how it validates.
+- Prove where POS admin routes are registered.
+
+A2) Data Model Evidence (DB + code)
+Collect evidence for these tables and how they link (with proof):
+- sales, invoices, sales_invoice_items
+- returns, return_items
+- payments
+- unique_items, unique_item_movements
+- branches, profiles, user_branches
+- pos_sessions (and any POS admin tables)
+For each table:
+- columns (name/type/nullability) for relevant fields
+- primary keys
+- foreign keys (prove via constraints or schema)
+- row counts (COUNT(*)) to sanity check existence
+
+A3) Attribution Evidence (seller/branch/cashier/session)
+Prove with evidence:
+- Seller attribution for sales (seller_profile_id in sales and/or invoices/payments)
+- Seller attribution for returns (via returns.original_sale_id → sales.seller_profile_id, and/or returns.original_invoice_id → invoices.seller_profile_id)
+- Branch attribution across sales/returns/payments/unique_items
+- Cashier/session attribution:
+  - Is there a pos_session_id on sales/invoices/payments?
+  - If not, explicitly mark cash session close reports as BLOCKED and prove the gap.
+
+A4) Tax/Discount/VAT Evidence
+Prove:
+- Where tax_amount exists (sales vs invoices vs returns)
+- Where discount_amount exists (sales/invoices/lines)
+- Any VAT rate settings usage (vat_rate in app_settings)
+State whether VAT reporting can be computed reliably without assumptions.
+
+A5) Existing report/dashboard endpoints audit
+- List existing /api/pos/admin/dashboard/* endpoints (if any) and patterns used.
+- List existing /api/pos/admin/reports/* endpoints (if any).
+- Identify shared helper patterns for SQL building and filtering.
+
+A6) Feasibility Matrix (MANDATORY OUTPUT)
+Create a table:
+Report Name | READY (no changes) / READY w/ proven derivation / BLOCKED | Evidence | Required Params | Notes
+Include at least:
+FINANCIAL/SALES:
+- Seller Performance (sales count, revenue, discounts, tax, net)
+- Seller Net Profit (COGS + returns deduction)
+- Branch Performance
+- Branch Net Profit
+- Sales Trend (daily totals)
+- Top Sellers/Top Branches (by revenue/profit)
+RETURNS:
+- Returns Summary (count/amount) grouped by seller+branch, reasons if available
+PAYMENTS:
+- Payment Mix
+- Invoice vs Payments Reconciliation (delta != 0)
+- Outstanding / remaining_amount aging (if available)
+INVENTORY:
+- Inventory Valuation (in_stock)
+- Inventory Aging buckets
+- Sold Items Margin (per unique item)
+- Inventory Ledger (movements)
+TAX/VAT:
+- VAT Summary (sales tax - returns tax)
+CASHIER/SESSION:
+- POS Session Summary
+- Cashier Close Variance
+If BLOCKED, specify the exact missing columns/links with evidence.
+
+PHASE A DELIVERABLE (STOP)
+Output:
+1) Evidence Pack (file paths + DB evidence + key SQL proofs)
+2) Feasibility Matrix
+3) Recommendation: minimal-risk implementation plan (high-level only), but DO NOT implement.
+
+PHASE B — IMPLEMENTATION (ONLY AFTER PHASE A IS ACCEPTED)
+IMPORTANT: Do not start Phase B until after Phase A is fully output.
+
+B1) Backend: Implement POS Reports endpoints (READ-ONLY) under /api/pos/admin/reports/*
+All require requirePosAdminToken.
+
+Minimum required endpoints (implement only those marked READY in Phase A):
+R1 GET /api/pos/admin/reports/seller-performance?start=&end=&branch_id=&seller_id=
+- Output per seller: sale_count, revenue, discounts, tax, net_total (define net_total with evidence)
+
+R2 GET /api/pos/admin/reports/seller-net-profit?start=&end=&branch_id=&seller_id=
+- revenue from sales_invoice_items totals
+- cogs from unique_items.cost joined via sales_invoice_items.jewelry_item_id -> unique_items.id
+- returns deduction derived via returns.original_sale_id + return_items + unique_items.cost
+- output: revenue, cogs, gross_profit, return_amount, return_cost, net_profit, margin_percent
+
+R3 GET /api/pos/admin/reports/branch-performance?start=&end=&branch_id=
+R4 GET /api/pos/admin/reports/branch-net-profit?start=&end=&branch_id=
+R5 GET /api/pos/admin/reports/sales-trend?start=&end=&branch_id=&seller_id=
+- daily totals (date bucket) with count + revenue + net
+
+R6 GET /api/pos/admin/reports/returns-summary?start=&end=&branch_id=&seller_id=
+- grouped by derived seller + branch
+- include top reasons if return_items.reason exists
+
+R7 GET /api/pos/admin/reports/payment-mix?start=&end=&branch_id=&seller_id=
+- grouped by payment_method: amount, count, percent
+
+R8 GET /api/pos/admin/reports/reconciliation?start=&end=&branch_id=&limit=
+- invoices.total_amount vs SUM(payments.amount) where payments.reference_type='invoice' AND reference_id=invoices.id
+- return only rows with delta != 0
+
+R9 GET /api/pos/admin/reports/inventory-valuation?branch_id=
+- unique_items where status='in_stock'
+- grouped by branch: item_count, total_cost_value, total_tag_value, potential_margin
+
+R10 GET /api/pos/admin/reports/inventory-aging?branch_id=
+- buckets by unique_items.created_at: 0-30,31-60,61-90,90+
+- per-branch + overall totals
+
+R11 GET /api/pos/admin/reports/sold-items-margin?start=&end=&branch_id=&seller_id=&limit=
+- per unique item sold: serial_no, invoice_number, sale_date, branch, seller, sale_price, cost, margin, margin_percent
+
+R12 GET /api/pos/admin/reports/inventory-ledger?start=&end=&branch_id=&limit=
+- from unique_item_movements joined with unique_items and branches and reference fields
+
+If Phase A proves more READY reports (VAT summary, outstanding aging, session summary), add them.
+
+Validation rules:
+- start/end required for date-based reports.
+- branch_id/seller_id optional.
+- limit optional, with safe default.
+
+Performance:
+- Add LIMIT on heavy lists.
+- Avoid N+1 loops; do grouping in SQL.
+- Use consistent ordering.
+
+B2) Frontend: Create a professional Reports Center UI
+Route: /pos/reports (POSAdminGuard + POSRoute)
+
+UI requirements:
+1) Left panel: categories + search
+   - Categories: Sales, Profit, Returns, Payments, Inventory, Tax/VAT, Sessions
+2) Main panel: selected report with:
+   - Filter bar: date range quick selectors + custom start/end
+   - Optional dropdowns: branch, seller, payment_method (only if relevant)
+   - Summary KPIs row (for each report)
+   - Table/chart area (as appropriate)
+3) Saved Views (independent of dashboard):
+   - LocalStorage-based first (no DB writes):
+     save: {name, selected_report, filters}
+     load/delete
+4) Export:
+   - CSV export for tables (client-side generation)
+   - Print/PDF friendly view for executive summaries (CSS print styles ok)
+
+Important:
+- Reports page must not read dashboard widget settings.
+- Reports must not rely on ERP-only endpoints like /api/branches or /api/profiles unless they are POS-admin equivalents.
+- If a dropdown needs data (branches/sellers), use POS-admin-safe endpoints already available (or add POS-admin equivalents).
+
+B3) Sidebar + Navigation
+- Ensure "التقارير" is a dedicated admin-only item.
+- Ensure it is independent from the dashboard.
+- Ensure no dashboard→reports drilldown is required.
+
+PHASE C — VERIFICATION / GATES
+C1) Auth:
+- Without __pos_admin cookie: all /api/pos/admin/reports/* return 401
+C2) Functional:
+- Each READY report returns 200 and renders without crashes (empty-state ok)
+- Filters work (date + branch + seller)
+- Saved Views work across refresh
+- CSV exports correctly
+C3) Build:
+- npx tsc --noEmit
+- npm run build
+C4) Deliverables:
+- Files changed list
+- Sample 200 responses for at least: seller-net-profit, inventory-valuation, reconciliation
+- Clear list of BLOCKED reports + minimal evidence-based schema proposal (if any)
+
+FINAL DELIVERABLE
+- Evidence Pack + Feasibility Matrix (Phase A)
+- Implemented Reports list (Phase B)
+- Verification proof (Phase C)
+- Confirmation: No schema changes unless explicitly proven necessary and approved in the matrix

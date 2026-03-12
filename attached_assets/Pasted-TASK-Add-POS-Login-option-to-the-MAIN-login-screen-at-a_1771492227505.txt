@@ -1,0 +1,96 @@
+TASK: Add "POS Login" option to the MAIN login screen at /auth using FETCH ONLY.
+File: src/pages/AuthPage.tsx
+Route: /auth
+
+FACTS (current AuthPage uses fetch directly; do NOT introduce apiClient)
+Existing fetch calls in AuthPage:
+- /api/users/profile-checks
+- /api/auth/send-otp
+- /api/auth/verify-otp
+- /api/auth/me
+- /api/auth/logout
+
+POS/Branch backend already exists (DO NOT MODIFY BACKEND):
+- POST /api/branch/login
+- GET  /api/branch/context
+- POST /api/branch/logout
+POS pages already gated by BranchLoginGate + POSCashierGate.
+
+STRICT RULES
+1) POS entry from /auth authenticates ONLY using branch credentials.
+2) Wrong branch credentials => stay on /auth, show error, DO NOT navigate.
+3) No backend/DB/schema/RPC changes. Frontend-only.
+4) NO "branch mismatch" acceptance: if user selected Branch A but creds not valid => treat as invalid (do NOT auto-switch branches).
+5) After successful branch login => navigate to /pos. Operations remain blocked until cashier PIN (POSCashierGate).
+6) Keep ERP login untouched 100% (no changes to OTP/login/logout behavior).
+
+NEW UX CONSTRAINTS (critical)
+7) Default tab = "دخول النظام" (ERP) ALWAYS.
+8) Switching tabs:
+   - If user leaves POS tab -> CLEAR POS fields immediately:
+     selectedBranchId, posUsername, posPassword, posError.
+   - If user leaves ERP tab -> DO NOT clear ERP fields unless already done by existing logic (keep as-is).
+9) Branch selection in POS tab is REQUIRED (must pick a branch before submitting).
+   - Even though the true authority is /api/branch/login success, we still require selection to prevent operator confusion.
+
+IMPLEMENTATION
+
+A) UI: Add mode switch at top of login card
+- Tab 1: "دخول النظام" => keep existing flow EXACTLY as-is
+- Tab 2: "دخول نقطة البيع" => new POS flow
+
+B) POS Mode UI fields
+1) Branch selector (REQUIRED, searchable / type-to-filter)
+   - Fetch list from GET /api/branches-list
+   - Use fetch with credentials:'include' only if needed; prefer plain if endpoint works public.
+   - UI: user can type; list filters each keystroke by name/code.
+   - Store selectedBranchId in state. (UX only; DO NOT trust it as auth)
+2) Branch Username (text)
+3) Branch Password (password)
+4) Button: "فتح نقطة البيع"
+
+C) POS Login logic (FETCH ONLY)
+On click:
+1) Validate:
+   - selectedBranchId must be set (required)
+   - username/password non-empty
+   - If invalid -> show inline Arabic message and stop.
+2) POST /api/branch/login
+   fetch('/api/branch/login', {
+     method: 'POST',
+     headers: {'Content-Type':'application/json'},
+     credentials: 'include',
+     body: JSON.stringify({ username: posUsername, password: posPassword })
+   })
+3) If !res.ok:
+   - Show Arabic error: "بيانات دخول الفرع غير صحيحة"
+   - DO NOT navigate
+4) If OK:
+   - Confirm session:
+     fetch('/api/branch/context', { credentials:'include' })
+   - If 200 and has branch_id => navigate to /pos
+   - Else show: "تعذّر فتح نقطة البيع، حاول مرة أخرى"
+
+D) Sidebar restriction after cashier enters (POS-only)
+When POS mode is active (branch session exists AND cashier session exists):
+Show ONLY these sidebar routes:
+- /pos
+- /sales/pos-invoices
+- /pos/return
+Outside POS mode => existing sidebar unchanged.
+
+Implementation details:
+- Detect branch session via GET /api/branch/context (fetch, credentials include)
+- Detect pos session via GET /api/pos/session/context (fetch, credentials include)
+- No localStorage.
+- Cache state in memory (React state). Light polling optional; prefer on mount + after successful logins.
+
+EVIDENCE REQUIRED in reply
+1) git diff --stat (src/ only)
+2) Manual tests:
+   T1 wrong branch creds => stays /auth + error
+   T2 POS tab requires branch selection => blocks submit without selection
+   T3 correct branch creds => goes /pos, shows cashier PIN gate
+   T4 after cashier PIN => POS loads
+   T5 POS sidebar shows only 3 routes
+   T6 Switching POS->ERP clears POS fields immediately

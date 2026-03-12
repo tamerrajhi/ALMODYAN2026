@@ -1,0 +1,201 @@
+ROLE: Senior full-stack engineer (Postgres + Express + React). You MUST be extremely conservative. No guessing.
+
+CONTEXT:
+We have Purchasing invoices screens:
+- List: /purchasing/invoices
+- New: /purchasing/invoices/new
+- View: /purchasing/invoices/:id/view
+- Edit route already exists: /purchasing/invoices/:id
+We want to ENABLE DIRECT EDITING for UNIQUE purchase invoices ONLY when safe (no accounting/movements/returns/sales/transfers). 
+We deleted/ignore any Correction Center. We want edits to reflect immediately in the system.
+
+NON-NEGOTIABLE RULES:
+1) NO DB direct writes from frontend. All writes via ONE atomic RPC (transaction).
+2) No migrations that modify existing tables (ADD ONLY functions/RPC). Do not alter existing semantics.
+3) Editing must be HARD-GATED inside the RPC (do not trust UI).
+4) If NOT safe → refuse edit and return explicit reasons (Arabic+English if available).
+5) Idempotency required via atomic_workflow_requests using client_request_id pattern.
+6) Provide RAW EVIDENCE:
+   A) git diff --stat
+   B) git diff
+   C) SQL evidence outputs (queries listed below)
+7) Do not touch posted accounting. If invoice has journal_entry_id or any downstream refs → editing is forbidden.
+
+PHASE 0 — AUDIT FIRST (READ ONLY) + EVIDENCE:
+A) Discover the exact tables used for “unique purchases”:
+- unique_purchase_invoices (status, journal_entry_id, totals, supplier_id, branch_id, vat_rate, etc.)
+- unique_purchase_invoice_items (unique_invoice_id, unique_item_id, unit_cost, line_total, etc.)
+- unique_items (unique_invoice_id, serial_no UNIQUE, status, sale_id, branch_id, etc.)
+- unique_item_movements (movement_type, reference_type, reference_id)
+- unique_purchase_returns + unique_purchase_return_items
+- sales table(s) that reference unique items (sale_items or equivalent)
+- transfer tables (transfer_items or equivalent)
+B) Output the DDL column lists for these tables (SELECT column_name,data_type FROM information_schema.columns ...).
+C) Pick ONE sample invoiceId from /purchasing/invoices/:id/view and run these evidence queries (paste outputs):
+1) Invoice snapshot:
+   SELECT id, invoice_number, status, journal_entry_id, supplier_id, branch_id, vat_rate, subtotal, tax_amount, total_amount
+   FROM unique_purchase_invoices WHERE id = $1;
+2) Items count:
+   SELECT count(*) AS items
+   FROM unique_purchase_invoice_items
+   WHERE unique_invoice_id = $1;
+3) Movements count (must be 0 to allow edit):
+   SELECT count(*) AS movements
+   FROM unique_item_movements m
+   JOIN unique_items ui ON ui.id = m.unique_item_id
+   WHERE ui.unique_invoice_id = $1;
+4) Returns refs (must be 0):
+   SELECT count(*) AS return_refs
+   FROM unique_purchase_return_items r
+   JOIN unique_items ui ON ui.id = r.unique_item_id
+   WHERE ui.unique_invoice_id = $1;
+5) Sales refs (must be 0):
+   -- Discover correct table name first; then:
+   SELECT count(*) AS sold_refs
+   FROM sale_items s
+   JOIN unique_items ui ON ui.id = s.unique_item_id
+   WHERE ui.unique_invoice_id = $1;
+6) Transfer/downstream refs (must be 0):
+   -- Discover correct tables then query similarly.
+If any of these tables do not exist, STOP and explicitly report what you found; do not assume names.
+
+PHASE 1 — ADDITIVE DB FUNCTIONS (NO TABLE CHANGES):
+Create ONE migration SQL file:
+migrations/unique_purchase_invoice_edit_gate_and_rpc.sql
+
+Inside it, create:
+
+1) Gate function:
+   CREATE OR REPLACE FUNCTION can_edit_unique_purchase_invoice(p_invoice_id uuid)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+   AS $$
+   -- Return: { ok:boolean, reasons:text[], details:jsonb }
+   -- Rules (ALL required):
+   -- - invoice exists
+   -- - journal_entry_id IS NULL
+   -- - invoice.status in editable set (DEFAULT: 'draft' only; MUST confirm existing statuses from audit)
+   -- - no movements for invoice items
+   -- - no return refs
+   -- - no sales refs
+   -- - no transfers/downstream refs
+   -- details must include counts for each check
+   $$;
+
+2) Atomic edit RPC:
+   CREATE OR REPLACE FUNCTION unique_purchase_invoice_edit_atomic(args jsonb)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+   AS $$
+   -- Required args:
+   -- client_request_id (text)
+   -- invoice_id (uuid)
+   -- header_updates (jsonb) optional: supplier_id, invoice_date, vat_rate, notes, etc. ONLY if columns exist.
+   -- items (jsonb array) REQUIRED: final desired state (REPLACE MODE ONLY to avoid complex patch ambiguity)
+   -- Each item entry:
+   --   Either existing_unique_item_id (uuid) with updated fields (unit_cost, weight, etc.)
+   --   Or new item object with required fields (serial_no, unit_cost, weight, etc.)
+   --
+   -- STRICT BEHAVIOR:
+   -- - Idempotency via atomic_workflow_requests:
+   --   wf_key := client_request_id || '::unique_purchase_invoice_edit'
+   --   If exists completed => return cached result_payload
+   --   Else insert pending, and ALWAYS update to completed before returning (success OR failure)
+   --
+   -- - Start TX (function body is atomic):
+   --   (A) Validate input presence.
+   --   (B) Call can_edit_unique_purchase_invoice(invoice_id). If ok=false:
+   --       result := {success:false, error:'NOT_EDITABLE', reasons:[...], details:{...}}
+   --       UPDATE atomic_workflow_requests SET status='completed', result_payload=result, completed_at=now() WHERE client_request_id=wf_key;
+   --       RETURN result;
+   --   (C) Lock invoice row: SELECT ... FOR UPDATE.
+   --   (D) Apply header_updates (only allowed columns that exist; do NOT guess).
+   --   (E) Replace items set deterministically:
+   --       - Read current invoice items list.
+   --       - Build target set from args.items.
+   --       - For each existing item kept: update allowed fields in unique_purchase_invoice_items and/or unique_items.
+   --       - For each new item: INSERT unique_items (enforce unique serial_no), then INSERT unique_purchase_invoice_items mapping.
+   --       - For removals: DELETE from unique_purchase_invoice_items mapping.
+   --         IMPORTANT: Do NOT delete unique_items row unless you can PROVE it has zero refs anywhere (movements/returns/sales/transfers) — otherwise keep it but detach is impossible because unique_items.unique_invoice_id invariant; so safest: forbid removing if it would require deleting unique_items and that item has any refs. Since gate ensures no refs, you MAY delete the unique_items row ONLY if it is tied solely to this invoice and has no refs.
+   --   (F) Recompute totals from final invoice items:
+   --       subtotal := sum(line_total) (line_total derived from unit_cost fields; define exact formula based on existing schema)
+   --       tax_amount := subtotal * vat_rate (or existing tax logic if present)
+   --       total_amount := subtotal + tax_amount
+   --     Update unique_purchase_invoices totals.
+   --   (G) Return snapshot:
+   --       {success:true, invoice_id, invoice_number, totals:{subtotal,tax_amount,total_amount}, changes:{added,updated,removed}}
+   --   (H) Update atomic_workflow_requests to completed with result_payload.
+
+   $$;
+
+NOTES:
+- Do NOT create journal entries here.
+- Do NOT create movements here.
+- This is edit-only, allowed only for pre-post / no-effects invoices.
+
+PHASE 2 — BACKEND INTEGRATION (Express):
+In server/routes.ts:
+1) Add allowlist entry for 'unique_purchase_invoice_edit_atomic' (follow existing RPC allowlist pattern).
+2) Add a read-only endpoint to check gate:
+   GET /api/purchasing/invoices/:id/can-edit
+   returns json from can_edit_unique_purchase_invoice(id).
+   (This is for UI enable/disable and showing reasons.)
+
+PHASE 3 — FRONTEND (React) USING EXISTING ROUTES:
+Target pages:
+- Edit page: /purchasing/invoices/:id  (must become the edit form)
+- View page: /purchasing/invoices/:id/view (add “Edit” button that navigates to edit page if gate ok)
+
+Implementation requirements:
+1) On View page (/purchasing/invoices/:id/view):
+   - Call GET /api/purchasing/invoices/:id/can-edit
+   - If ok=true show primary button "تعديل الفاتورة" that navigates to /purchasing/invoices/:id
+   - If ok=false show disabled button with tooltip listing reasons.
+
+2) On Edit page (/purchasing/invoices/:id):
+   - Load invoice + items (same source used by view).
+   - Load gate and if ok=false show a blocking panel with reasons and DO NOT render edit inputs.
+   - Provide:
+     A) Header edit fields (only those that exist in schema and are safe)
+     B) Items editor:
+        - Add row (new serial, cost, etc.)
+        - Edit row (cost/fields)
+        - Remove row
+     C) “Save” button:
+        - Build args with client_request_id stable (localStorage) like: upi:edit:${invoiceId}
+        - Call dataGateway.rpc('unique_purchase_invoice_edit_atomic', args)
+        - On success: clear client_request_id, navigate back to view page, show toast.
+        - On failure: show returned reasons/details without guessing.
+
+3) i18n:
+   - Add Arabic/English keys for:
+     - canEdit / cannotEdit
+     - reasons rendering labels
+     - Save / Saving / Saved
+     - “Editing is locked” message
+   - No hardcoded Arabic inside logic; use translation keys.
+
+PHASE 4 — VERIFICATION (MUST RUN AND PASTE OUTPUTS):
+A) For a safe invoice: show gate ok=true and counts all zero.
+B) Run edit RPC:
+   - Add 1 item, update 1 item cost, remove 1 item.
+C) Re-run evidence queries:
+   - journal_entry_id still NULL
+   - movements still 0
+   - returns/sales/transfers still 0
+   - totals reflect recompute
+D) Negative test on non-editable invoice:
+   - invoice with journal_entry_id not null OR movements>0
+   - gate ok=false
+   - edit RPC refuses and still completes atomic_workflow_requests with cached failure payload.
+
+DELIVERABLES:
+1) migrations/unique_purchase_invoice_edit_gate_and_rpc.sql
+2) server/routes.ts updates (allowlist + can-edit endpoint)
+3) Frontend changes for:
+   - /purchasing/invoices/:id/view (Edit button + gate display)
+   - /purchasing/invoices/:id (Edit form + save via RPC)
+4) Evidence:
+   - git diff --stat
+   - git diff
+   - SQL evidence outputs for Phase 4

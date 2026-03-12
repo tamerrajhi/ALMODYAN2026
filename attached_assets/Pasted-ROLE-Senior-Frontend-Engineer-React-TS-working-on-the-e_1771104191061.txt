@@ -1,0 +1,64 @@
+ROLE: Senior Frontend Engineer (React + TS) working on the existing ERP codebase.
+GOAL: UI-only refactor on the Purchase Invoice View page to reclaim vertical space and avoid duplicated summary sections, without breaking any existing flows.
+
+STRICT RULES (NO EXCEPTIONS):
+- UI ONLY. Do NOT modify server/routes.ts, DB, migrations, RPCs, allowlist, or any backend code.
+- Do NOT change any business logic, status logic, calculations, or API calls.
+- Keep existing data sources exactly as-is (reuse existing invoice object / already-fetched fields).
+- No new dependencies.
+- Preserve RTL + Arabic/English behavior.
+- Provide raw git evidence: `git diff --stat` and `git diff`.
+
+TARGET FILE:
+- src/pages/purchasing/PurchaseInvoiceViewPage.tsx
+(Only touch this file unless a tiny translation tweak is absolutely required — but prefer reusing existing keys; if you must add keys, add to both ar.ts and en.ts and keep it minimal.)
+
+WHAT I WANT (UI Changes):
+A) REMOVE “Due Date / تاريخ الاستحقاق” FROM DETAILS
+- In the “التفاصيل / Details” card that shows invoice metadata, remove the Due Date row entirely.
+- Do not leave a blank placeholder.
+
+B) MAKE THE DETAILS CARD MORE COMPACT
+- Reduce vertical padding and spacing inside the Details card so it takes less height.
+- Example changes (pick the best matching existing design tokens):
+  - Header padding smaller (e.g., py-2 instead of py-4, and reduced px)
+  - Row spacing tighter (e.g., space-y-1 or space-y-1.5 instead of space-y-2)
+  - Labels smaller (text-xs), values readable (text-sm)
+- Do not change the overall layout direction (RTL must remain correct).
+
+C) REMOVE/REPLACE THE “Invoice Summary / ملخص الفاتورة” BIG BLOCK SO IT DOESN’T WASTE SPACE
+Context: Under the tabs there is a large “ملخص الفاتورة” section that duplicates info already visible below (pricing/summary exists in another section).
+Decision:
+- Remove the large “ملخص الفاتورة” block entirely OR make it minimal to near-zero height.
+Preferred solution:
+- Remove that block and move ONLY the important two values into the Details card:
+  1) Number of items (عدد القطع)
+  2) Total amount (الإجمالي) OR keep only item count if total is already clearly shown below (choose the safest minimal duplication).
+Constraints:
+- Must reuse already available values on the page (e.g., invoice totals and count).
+- No new queries. No new API calls.
+- If a value is missing, show “-” as safe fallback.
+
+D) PROFESSIONAL TOUCH: SHOW ITEM COUNT ON THE “Item Details / تفاصيل القطع” TAB LABEL
+- Next to the “تفاصيل القطع” tab label, append the count in parentheses:
+  - Arabic: "تفاصيل القطع (968)"
+  - English: "Items (968)" or the existing English label + "(968)"
+- If count is missing, do NOT show parentheses.
+- No new data fetching — reuse the same count used in (C).
+
+ACCEPTANCE CRITERIA:
+- Due Date row is gone from details.
+- The top details card is visibly shorter/compact.
+- The big redundant “Invoice Summary” block is removed or reduced so it doesn’t consume vertical space.
+- Item count appears in the details card (and/or total if you chose to include it) with safe fallback.
+- The “Item Details” tab shows count in parentheses, safe fallback.
+- No LSP/TypeScript errors.
+- No backend changes.
+- App runs.
+
+EVIDENCE REQUIRED (RAW):
+A) `git diff --stat`
+B) `git diff`
+Also add a short “Before/After” explanation (2-5 bullets) describing what was removed and where the values moved.
+
+START NOW.

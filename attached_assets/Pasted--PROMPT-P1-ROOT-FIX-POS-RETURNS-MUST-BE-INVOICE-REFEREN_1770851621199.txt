@@ -1,0 +1,103 @@
+✅ PROMPT — P1 ROOT FIX (POS RETURNS MUST BE INVOICE-REFERENCE FIRST) | DB + RPC + BACKFILL + CONSTRAINT | NO GUESSING | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Database Engineer (Postgres/Supabase)
+
+MODE: DB ONLY (SQL + Functions). No UI edits. No route edits. No frontend changes.
+
+GOAL (NON-NEGOTIABLE):
+- كل مرتجع مبيعات POS لازم يُسجَّل ويرتبط بالفاتورة الأصلية عبر:
+  returns.original_invoice_id  (REQUIRED)
+- مرجع النظام الأساسي = invoice (INV-...), وليس sale_id.
+- original_sale_id يبقى اختياري (مفيد للتتبع) لكن لا يعتمد عليه كمرجع أساسي.
+
+FACTS FROM AUDIT (DO NOT ASSUME ANYTHING ELSE):
+- returns has: original_sale_id (uuid), original_invoice_id (uuid), return_type (text NOT NULL)
+- sales has: invoice_id (uuid) column (proven)
+- invoices has: id (uuid), invoice_number, sale_id (uuid), invoice_type, return_id (uuid)
+
+STRICT RULES:
+1) ممنوع التخمين: قبل أي تعديل، أثبت بالعينة أن sales.invoice_id موجود ومملوء عند عمليات POS.
+2) مسموح فقط:
+   - CREATE OR REPLACE FUNCTION
+   - DO $$ ... $$ blocks
+   - UPDATE statements for backfill
+   - ALTER TABLE فقط لإضافة CONSTRAINT/INDEX (لا تعيد تسمية أعمدة)
+3) ممنوع حذف أو تغيير semantics لأي عمود قائم.
+4) كل خطوة لازم معها Evidence (queries + outputs) + Gate Tests.
+5) اكتب النتائج بالعربية.
+
+TASKS (execute in order):
+
+A) PRE-CHECKS (EVIDENCE FIRST)
+1) إثبات الربط: sales.invoice_id موجود ويشير لفاتورة صحيحة:
+   - اعرض 5 أمثلة حديثة:
+     SELECT s.id AS sale_id, s.invoice_id, i.invoice_number
+     FROM sales s
+     JOIN invoices i ON i.id = s.invoice_id
+     ORDER BY s.created_at DESC
+     LIMIT 5;
+2) حصر مرتجعات POS الحالية التي original_invoice_id فيها NULL لكن original_sale_id موجود:
+   SELECT COUNT(*) AS cnt
+   FROM returns
+   WHERE original_sale_id IS NOT NULL
+     AND (original_invoice_id IS NULL);
+3) تحقق من القيم الحالية في returns.return_type:
+   SELECT return_type, COUNT(*) FROM returns GROUP BY return_type;
+
+STOP AND REPORT if (1) fails (e.g., invoice_id nulls) — do not proceed.
+
+B) PATCH THE POS RETURN RPC (ROOT FIX)
+Locate the POS RPC used for POS returns (from audit: complete_pos_piece_return_atomic).
+1) Read its current definition (evidence: function body).
+2) Modify it so that when inserting into returns:
+   - Set original_invoice_id = (SELECT invoice_id FROM sales WHERE id = v_sale_id)
+   - Keep original_sale_id = v_sale_id
+   - Keep return_type unchanged (do NOT invent new values unless proven existing contract supports it)
+3) Add a hard guard:
+   - If sales.invoice_id is NULL for the given sale -> RAISE EXCEPTION with Arabic message
+   (prevents creating POS returns without invoice reference)
+
+C) BACKFILL EXISTING POS RETURNS (DATA CONSISTENCY)
+1) Update existing returns rows:
+   UPDATE returns r
+   SET original_invoice_id = s.invoice_id
+   FROM sales s
+   WHERE r.original_sale_id = s.id
+     AND r.original_sale_id IS NOT NULL
+     AND r.original_invoice_id IS NULL
+     AND s.invoice_id IS NOT NULL;
+2) Evidence: show how many rows were updated:
+   - SELECT COUNT(*) with same filter before/after.
+
+D) ADD CONSTRAINTS (ENFORCE CONTRACT)
+Add constraints that enforce invoice-first reference, without guessing.
+1) For POS-like returns (identified by original_sale_id IS NOT NULL):
+   - Ensure original_invoice_id IS NOT NULL whenever original_sale_id IS NOT NULL.
+   Implement as CHECK constraint:
+     CHECK (original_sale_id IS NULL OR original_invoice_id IS NOT NULL)
+2) Add helpful indexes (optional but recommended):
+   - index on returns.original_invoice_id
+   - index on returns.original_sale_id
+Only if they do not already exist (prove with pg_indexes).
+
+E) GATE TESTS (MANDATORY)
+GT1) Create POS return via RPC (call with a known sale_id that has invoice_id):
+- After execution, verify the new returns row has:
+  original_sale_id = sale_id
+  original_invoice_id = sales.invoice_id
+GT2) Negative test:
+- Try calling the RPC with a sale_id whose sales.invoice_id is NULL (if any exist) or simulate by selecting such sale:
+  Expected: RPC raises exception with clear Arabic message.
+GT3) Backfill verification:
+- Query returns where original_sale_id IS NOT NULL and original_invoice_id IS NULL
+  Expected: 0 rows (or explain remaining with evidence).
+GT4) Constraint validation:
+- Show that inserting/updating a row violating the check fails (demonstrate safely in a transaction and rollback).
+
+EVIDENCE REQUIRED (RAW):
+1) Function definition before and after (snippets).
+2) SQL statements executed.
+3) Counts before/after backfill.
+4) Constraint DDL + pg_indexes output.
+
+STOP after completing tasks and providing evidence. Do NOT propose UI changes in this prompt.

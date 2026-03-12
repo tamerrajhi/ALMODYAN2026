@@ -1,0 +1,60 @@
+IMPLEMENTATION — 6B (READ RBAC, PURCHASES+INVENTORY)
+
+STRICT RULES:
+- Use the existing requireRoleKeys middleware (do not redesign).
+- Do NOT change SQL or payloads.
+- Apply RBAC ONLY by inserting requireRoleKeys([...]) after requireSession.
+- Keep diff mechanical and minimal.
+- Evidence required: git diff --stat + git diff + smoke tests.
+
+Policy:
+- Admin bypass unchanged.
+- Purchases/Inventory read bucket allowed ONLY for:
+  role_key = 'branch_supervisor_pos_plus_unique_returns'
+  (Seller must be denied 403)
+
+Apply to these GET endpoints (use exact existing paths; if any are missing, list them and skip — no guessing):
+
+Suppliers / Purchasing:
+- GET /api/suppliers
+- GET /api/suppliers-list (if exists)
+- GET /api/supplier-account-code/:supplierId
+- GET /api/purchasing/invoices-list
+- GET /api/purchasing/invoice-with-relations/:id
+- GET /api/purchasing/unique-invoice-items/:invoiceId
+- GET /api/purchasing/returns-list
+- GET /api/purchase-batches
+- GET /api/purchase-batches/:id
+- GET /api/purchase-invoice-lines
+- GET /api/purchase-batches (and related batch endpoints like /api/batch-items, /api/batch-movement-count)
+
+Inventory:
+- GET /api/jewelry-items
+- GET /api/inventory/unified-items-search
+- GET /api/inventory/item-by-id/:id
+- GET /api/inventory/item-movements/:itemId
+- GET /api/inventory/items-by-invoice/:invoiceId
+- GET /api/inventory/search-purchase-invoices
+- GET /api/inventory/document-details
+- GET /api/inventory/imported-pieces
+- GET /api/inventory/imported-pieces/export
+- GET /api/batch-items
+- GET /api/batch-movement-count
+
+For each applied endpoint:
+app.get('/api/...', requireSession, requireRoleKeys(['branch_supervisor_pos_plus_unique_returns']), async ...)
+
+Smoke tests (create sessions as needed):
+1) Seller -> /api/suppliers => 403
+2) Seller -> /api/purchasing/invoices-list => 403
+3) Seller -> /api/inventory/unified-items-search => 403
+4) Supervisor -> /api/suppliers => 200
+5) Supervisor -> /api/purchasing/returns-list => 200
+6) Supervisor -> /api/inventory/unified-items-search => 200
+7) Admin -> /api/suppliers => 200
+
+Evidence:
+A) git diff --stat
+B) git diff
+C) Smoke test results (status codes)
+STOP.

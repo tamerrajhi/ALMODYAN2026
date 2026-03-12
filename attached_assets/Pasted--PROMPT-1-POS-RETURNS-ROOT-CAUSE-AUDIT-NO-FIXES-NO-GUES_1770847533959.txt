@@ -1,0 +1,58 @@
+✅ PROMPT 1 — POS RETURNS ROOT-CAUSE AUDIT (NO FIXES) | NO GUESSING | EVIDENCE REQUIRED | STOP
+
+ROLE: Senior Full-Stack Auditor (React + Supabase/Postgres + Node/Express routes)
+
+MODE: AUDIT ONLY (READ-ONLY). DO NOT APPLY ANY FIXES.
+
+STRICT RULES (NO EXCEPTIONS):
+1) ممنوع التخمين. أي استنتاج لازم يكون مدعوم بـ Evidence من الكود/الـ DB/اللوجز.
+2) ممنوع تعديل أي ملف أو تشغيل auto-fix أو refactor. قراءة فقط.
+3) لا تغيّر Routes أو Navigation أو query params. الهدف الآن تشخيص فقط.
+4) المطلوب الحفاظ على مسارات المرتجعات بدون لخبطة:
+   - ERP Sales Returns: /sales/returns/new?invoice_id=...
+   - POS Returns: /pos/return?invoice_id=... (أو legacy sale_id فقط للتوافق)
+5) اكتب الرد بالعربية.
+6) لا تذكر “أعتقد/غالبًا/يمكن”. لو شيء غير مؤكد قل: “غير مثبت” واذكر ما يلزم لإثباته.
+
+TASKS (نفّذها بالترتيب):
+A) CAPTURE FAILURE (أول خطأ حقيقي)
+- افتح POSReturnPage في المتصفح وسجّل أول Error يمنع عرض الفواتير.
+- اعرض: console stacktrace + network request/response (status + message) المرتبط بالخطأ.
+- حدّد الملف/الدالة/السطر المسؤول (path + line-range).
+
+B) DB SCHEMA REALITY (بدليل صريح)
+- استخرج schema فعلي (columns فقط) لجدولي:
+  1) returns
+  2) sales
+- أثبت بالأوامر/النتائج (information_schema.columns أو describe equivalent).
+- ركّز تحديدًا على:
+  - returns.sale_id هل موجود؟ returns.original_sale_id هل موجود؟
+  - sales.final_amount هل موجود؟ sales.total_amount هل موجود؟
+
+C) MISMATCH REGISTER (جدول تعارضات)
+أنشئ جدول فيه:
+- Requested Column (في الكود)
+- Exists in DB? (نعم/لا)
+- Correct Column Name (إن وجد)
+- File(s) + snippet يثبت الاستخدام
+- Severity (Blocks page / minor)
+
+D) IMPACT MAP (نطاق التأثير)
+- اعمل Search في المشروع عن النصوص التالية واذكر كل النتائج مع paths:
+  - "returns.sale_id"
+  - "original_sale_id"
+  - "sales.final_amount"
+  - "total_amount"
+- الهدف: نعرف هل المشكلة محصورة في POSReturnPage ولا منتشرة.
+
+OUTPUT FORMAT (مطلوب الالتزام):
+1) Summary (3–5 نقاط فقط)
+2) Evidence Pack:
+   - E1: Console Error (raw)
+   - E2: Network Error (raw)
+   - E3: DB Schema proof (raw snippets)
+   - E4: Code snippets with paths/lines
+3) Mismatch Register table
+4) Impact Map list
+
+STOP AFTER AUDIT. DO NOT SUGGEST FIXES. DO NOT EDIT ANY FILES.

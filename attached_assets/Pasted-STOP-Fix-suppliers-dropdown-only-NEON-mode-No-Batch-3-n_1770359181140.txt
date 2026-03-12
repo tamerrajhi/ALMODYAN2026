@@ -1,0 +1,48 @@
+STOP — Fix suppliers dropdown only (NEON mode). No Batch-3, no extra migrations.
+
+Problem:
+On /import with NEON override, suppliers dropdown fails. Console shows repeated POST 500 (Internal Server Error).
+But NEON data exists: GET /api/suppliers returns rows like:
+[{ id, supplier_code, name:"مورد تجريبي", is_active:true, ... }]
+
+Goal:
+Make suppliers dropdown load successfully in NEON without changing business logic.
+Fix the server-side 500 and ensure the response shape matches what the UI expects.
+
+Do this in the smallest safe patch:
+
+1) Identify which endpoint the Import suppliers fetch uses in NEON:
+- Check dataGateway.fetchSuppliers() (or supplier hook used by Import page)
+- Confirm the exact URL it calls (likely POST /api/table-read with {table:"suppliers", ...})
+
+2) Fix the 500 at the source (server/routes.ts):
+- Add explicit try/catch around /api/table-read and return {data:null,error:{message,detail}} with status 500 (no crash).
+- Log the error server-side with the request payload (table, filters, order, limit, offset).
+
+3) Ensure supplier name fields are compatible:
+Option A (preferred): Standardize the API to return alias fields the UI expects:
+- In /api/suppliers and in /api/table-read when table="suppliers", return:
+  name AS supplier_name,
+  supplier_code,
+  id,
+  is_active
+Keep original name too if needed, but supplier_name must exist.
+
+Option B (acceptable): Fix frontend mapping ONLY in dataGateway.fetchSuppliers():
+- Map row.name -> row.supplier_name when missing
+- Map row.supplier_code -> row.supplier_code (already)
+No other pages touched.
+
+4) If /api/table-read uses ordering/filtering:
+- Make sure suppliers ordering supports "supplier_name" (alias) and/or "name" (real).
+- If order column not allowed, return 400 with clear message (not 500).
+- For active filter, use COALESCE(is_active,true)=true so NULL doesn’t hide rows.
+
+Evidence required (paste raw):
+A) Console/Network: show the failing request URL + payload before fix.
+B) Server log stack trace for the 500 before fix.
+C) git diff --stat and git diff (only files touched).
+D) After fix:
+   - Network: the same request returns 200 with suppliers array.
+   - Screenshot/description: suppliers dropdown shows "مورد تجريبي".
+STOP after evidence. No other changes.

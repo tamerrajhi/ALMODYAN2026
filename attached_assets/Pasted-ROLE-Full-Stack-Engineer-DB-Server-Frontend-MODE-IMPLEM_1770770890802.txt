@@ -1,0 +1,103 @@
+ROLE: Full-Stack Engineer (DB + Server + Frontend)
+MODE: IMPLEMENT P1b (POST + PAYMENT) + EVIDENCE
+SCOPE: ERP Sales ONLY (invoices.sale_id IS NULL)
+
+GOAL:
+Implement posting an ERP sales invoice (sale_id NULL) with:
+1) Journal Entry (journal_entries + journal_entry_lines)
+2) Payment record (payments) if payment provided
+3) Update invoices.paid_amount / remaining_amount / status='posted'
+4) Update unique_items sold state ONLY if that is part of your sales posting rules
+   (No guessing: mirror the POS logic if it exists)
+All in ONE atomic transaction.
+
+HARD RULES:
+- Must NOT touch POS posting flow (complete_pos_sale_atomic) or any POS endpoints.
+- Must NOT allow posting invoices with sale_id NOT NULL (POS) using this new flow.
+- Must NOT change DB schema.
+- Must NOT introduce direct writes from frontend.
+- Must use requireSession + requireAdmin (or equivalent sales permission) on the new endpoint.
+- Must be idempotent: re-posting the same invoice should not double-create JE/payments.
+
+DISCOVERY (NO GUESSING):
+1) Identify current POS posting accounting rules inside complete_pos_sale_atomic:
+   - Which accounts are used (cash/bank/receivables/sales revenue/tax/discount)?
+   - How JE lines are constructed (debit/credit).
+   - How payments are written and linked (invoice_id? journal_entry_id?).
+2) Identify any existing helpers/endpoints used by POS for:
+   - generating JE number
+   - selecting default accounts for payment method
+   - VAT / discount logic
+3) Use those same rules for ERP posting.
+
+IMPLEMENTATION DESIGN:
+A) Add new server endpoint:
+   POST /api/sales-invoices/:invoiceId/post
+   - Only for ERP invoices: verify invoice.sale_id IS NULL and invoice.status='draft'
+   - Payload includes:
+     { payment: { method, amount, account_id?, reference? }, payment_date?, notes? }
+     (Adapt to your system’s existing payment model; do not invent fields unless necessary)
+B) Transaction steps (single DB client transaction):
+   1) SELECT invoice + items (sales_invoice_items) FOR UPDATE
+   2) Validate: items exist, totals consistent, payment.amount <= total_amount
+   3) Create journal_entries row (JE) and journal_entry_lines based on rules
+   4) Insert payment row(s) if amount > 0
+   5) Update invoices:
+      - journal_entry_id = <new JE id>
+      - status = 'posted'
+      - paid_amount = paid_amount + payment.amount (or set to payment.amount if null)
+      - remaining_amount = total_amount - paid_amount
+      - posted_at = now() (if column exists)
+   6) If your POS flow marks unique_items sold on post, apply the same update here:
+      - Update unique_items sold_at (and any sold flags) for the invoice’s jewelry_item_id list
+      - Ensure it won’t re-mark on retries (idempotent)
+C) Idempotency:
+   - If invoice.status already 'posted' OR journal_entry_id is not null:
+     return 200 with a clear message and DO NOT create anything new.
+   - If payment already exists for invoice and matches, do not duplicate.
+   (Define exact checks based on current schema; show them in evidence)
+
+FRONTEND:
+- Add "Post" button in SalesInvoiceViewPage ONLY when:
+  - invoice.sale_id is NULL (ERP)
+  - status is draft
+- On click, call POST /api/sales-invoices/:invoiceId/post with payment payload.
+- After success: refetch invoice and show status posted + paid/remaining updated.
+
+EVIDENCE PACK (REQUIRED):
+A) git diff --stat
+B) git diff (all changed files)
+C) rg proofs:
+   1) ensure endpoint exists:
+      rg -n "/api/sales-invoices/.+post|sales-invoices/:invoiceId/post" server/routes.ts
+   2) ensure POS flow untouched:
+      rg -n "complete_pos_sale_atomic" server/routes.ts src (show no modifications)
+D) DB Proof (RAW SQL + outputs) for one real ERP invoice:
+   Use invoiceId = 69111859-0c96-430f-a07a-2ac71489537e (from earlier evidence)
+   1) Before post:
+      SELECT id, status, sale_id, total_amount, paid_amount, remaining_amount, journal_entry_id
+      FROM invoices WHERE id = '<invoiceId>';
+      SELECT count(*) FROM sales_invoice_items WHERE invoice_id = '<invoiceId>';
+      SELECT count(*) FROM payments WHERE invoice_id = '<invoiceId>';
+   2) Perform Post (via UI or curl with authenticated session; if curl not possible, do it via UI)
+   3) After post:
+      SELECT id, status, sale_id, total_amount, paid_amount, remaining_amount, journal_entry_id
+      FROM invoices WHERE id = '<invoiceId>';
+      SELECT * FROM payments WHERE invoice_id = '<invoiceId>' ORDER BY created_at DESC LIMIT 5;
+      SELECT id, entry_number, created_at FROM journal_entries WHERE id = '<journal_entry_id_from_invoice>';
+      SELECT account_id, debit, credit, description
+      FROM journal_entry_lines WHERE journal_entry_id = '<journal_entry_id>' ORDER BY created_at ASC;
+   4) Idempotency proof:
+      Call post مرة ثانية لنفس invoice:
+      - Confirm NO new payments rows added
+      - Confirm NO new journal_entries created
+      Provide SQL:
+      SELECT count(*) FROM payments WHERE invoice_id = '<invoiceId>';
+      SELECT journal_entry_id FROM invoices WHERE id = '<invoiceId>';
+E) Runtime proof:
+- Screenshot أو logs:
+  - ERP invoice moved to posted
+  - Paid/Remaining updated
+  - POS invoices list unaffected
+
+STOP after evidence. No extra features.

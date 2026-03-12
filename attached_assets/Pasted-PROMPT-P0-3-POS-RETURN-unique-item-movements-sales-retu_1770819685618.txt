@@ -1,0 +1,59 @@
+PROMPT — P0.3 | POS RETURN → unique_item_movements (sales_return_in) | DB ONLY | EVIDENCE | STOP
+
+ROLE: Database Engineer
+MODE: DB ONLY (PostgreSQL functions only)
+
+GOAL
+Add movement ledger write for POS returns so every returned unique item gets a movement row in unique_item_movements with:
+
+movement_type = 'sales_return_in'
+
+reference_type = 'return'
+
+reference_id = return_id (created by the function)
+
+from_branch_id = NULL
+
+to_branch_id = branch_id where item returns to stock (same branch as return processing)
+
+unit_cost = item cost snapshot at time of return (use current unique_items.cost for now)
+
+notes include return number/code if available
+
+SCOPE
+
+Modify ONLY: public.complete_pos_piece_return_atomic(jsonb) using CREATE OR REPLACE
+
+No table changes, no new columns, no route/frontend changes
+
+Must preserve existing idempotency behavior (no duplicate movement rows on replays)
+
+INSERTION POINT (must be correct)
+After the function successfully creates the return row + return_items and resets the item snapshot (unique_items sold_at/sale_id/status back to in_stock), insert movements for each returned item.
+
+MOVEMENT INSERT (per item)
+INSERT INTO unique_item_movements (
+unique_item_id, movement_type, from_branch_id, to_branch_id,
+reference_type, reference_id, unit_cost, notes, created_at
+) VALUES (
+<item_uuid>, 'sales_return_in', NULL, <branch_uuid>,
+'return', <return_uuid>, <cost>, 'مرتجع POS - ' || <return_number_or_code>, now()
+);
+
+EVIDENCE REQUIRED (raw, no narrative)
+A) git diff --stat (or function diff summary if DB-only)
+B) git diff (or exact new SQL block inserted)
+C) BEFORE/AFTER queries for a test item:
+
+movements for item (should add exactly 1 new row)
+
+movement type counts (sales_return_in increments by returned items count)
+D) Gate tests:
+
+Execute POS return once → ensure success
+
+Re-execute same request (same client_request_id) → idempotent=true
+
+Confirm movement count for the item stays exactly 1 (no duplicates)
+
+STOP AFTER EVIDENCE. DO NOT TOUCH ANY OTHER FUNCTION.

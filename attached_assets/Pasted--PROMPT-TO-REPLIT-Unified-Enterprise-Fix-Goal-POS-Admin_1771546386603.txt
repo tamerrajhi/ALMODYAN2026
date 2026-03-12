@@ -1,0 +1,175 @@
+✅ PROMPT TO REPLIT (Unified / Enterprise Fix)
+
+Goal: POS Admin login should NOT stop on an “open POS” screen in /auth. Admin must login first, then enter /pos immediately, and choose branch inside POS (like a standalone app). After selecting a branch, admin has full access to /pos, /pos/invoices, /pos/returns, /pos/reports, /pos/settings. Admin can switch branch any time from inside POS.
+
+1) Backend — Add admin context endpoint (NO branch required)
+(A) Create middleware requirePosAdminToken
+
+Read __pos_admin cookie (path /api/pos)
+
+Hash token, verify in pos_admin_tokens (not revoked, not expired)
+
+Load admin account (pos_admin_accounts) and attach to req.posAdmin = { id, display_name }
+
+If missing/invalid → 401
+
+(B) Add endpoint:
+
+GET /api/pos/admin/context
+
+Uses requirePosAdminToken
+
+Returns:
+
+{ "data": { "admin_id": "...", "display_name": "..." }, "error": null }
+2) Backend — Ensure branch selection works for admin (creates BOTH sessions)
+(A) Add/ensure endpoint:
+
+POST /api/pos/admin/select-branch
+
+Uses requirePosAdminToken
+
+Body: { "branch_id": "uuid" }
+
+Validates branch exists + active
+
+Creates/updates:
+
+branch_sessions row + set cookie __branch path: "/api/pos"
+
+pos_sessions row with pos_admin_id = admin_id (cashier_user_id can be NULL)
+
+pos_session_tokens row + set cookie __pos path: "/api/pos"
+
+Returns:
+
+{
+  "data": {
+    "ok": true,
+    "branch_id": "...",
+    "branch_name": "...",
+    "pos_session_id": "...",
+    "pos_admin": true
+  },
+  "error": null
+}
+
+IMPORTANT: Do NOT require branch cookie for this endpoint. Only admin token.
+
+3) Frontend — Fix UX: Admin goes to /pos immediately, branch picker inside POS
+(A) AuthPage.tsx (POS Admin login)
+
+Keep the “دخول أدمن نقطة البيع” username/password form.
+
+After successful POST /api/pos/admin/login:
+
+Navigate immediately to /pos
+
+Do NOT show “اختر الفرع للمتابعة” inside /auth anymore.
+
+(Remove/disable the /auth step that shows branch dropdown after admin login)
+
+So flow becomes:
+
+/auth → Admin login success → /pos
+
+4) Frontend — Add POSAdminBranchGate inside /pos
+(A) Create component src/components/pos/POSAdminBranchGate.tsx
+
+Behavior:
+
+Try GET /api/pos/session/context
+
+If 200 → POS session exists → render children normally.
+
+If 401:
+
+Call GET /api/pos/admin/context
+
+If 200 → admin is logged in but has NO branch session → show Branch Picker UI
+
+If 401 → not admin → fallback to existing cashier flow (BranchLoginGate)
+
+Branch Picker UI:
+
+Fetch branches using GET /api/public/branches-list (no auth needed, always works)
+
+Show branches as list/cards (not only a dropdown) + search
+
+On clicking a branch:
+
+POST /api/pos/admin/select-branch {branch_id}
+
+On success: window.location.replace('/pos') (hard refresh لضمان context + sidebar يتحدث فوراً)
+
+(B) Wire it in POSPage.tsx
+
+Current structure is something like:
+
+BranchLoginGate → POSEntryGate → POSCashierGate → content
+
+Update to:
+
+POSAdminBranchGate wraps the whole POS entry
+
+If admin token without branch → pick branch
+
+Else cashier normal flow works unchanged
+
+5) POSLayout — Admin branch switcher (Enterprise)
+
+In POSLayout header (admin only):
+
+Add a “تغيير الفرع” dropdown
+
+Source branches from /api/public/branches-list
+
+On select:
+
+call /api/pos/admin/select-branch
+
+then window.location.reload() (or replace) to refresh POS context + data scoped to branch
+
+6) Expected Result (Acceptance Criteria)
+
+/auth shows 2 options:
+
+دخول نقطة البيع (Cashier/Supervisor)
+
+دخول أدمن نقطة البيع (POS Admin)
+
+Admin login success → direct /pos
+
+If admin has not selected a branch yet:
+
+/pos shows Branch Picker inside POS (not in /auth)
+
+After selecting branch:
+
+/pos loads full POSLayout
+
+Admin sees 5 links in sidebar (POS + invoices + returns + reports + settings)
+
+Cashier flow unchanged:
+
+Branch login → seller/PIN → sees 3 links
+
+Admin can switch branch from inside POS anytime
+
+7) Evidence Required
+
+After implementation, provide:
+
+git diff --stat
+
+Grep proof:
+
+no “اختر الفرع للمتابعة” step remains inside AuthPage admin flow
+
+API proof (logs or curl):
+
+/api/pos/admin/context returns 200 after admin login
+
+/api/pos/admin/select-branch returns 200 and sets cookies __branch, __pos with path /api/pos
+
+/api/pos/session/context returns pos_admin:true after branch select

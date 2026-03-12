@@ -1,0 +1,61 @@
+project_id = "czpmpaqdrwqhffqaldcy"
+
+[functions.system-health]
+verify_jwt = false
+
+[functions.send-invoice-email]
+verify_jwt = false
+
+[functions.seed-test-data]
+verify_jwt = false
+
+[functions.zatca-generate]
+verify_jwt = true
+
+[functions.zatca-sign]
+verify_jwt = true
+
+[functions.zatca-submit]
+verify_jwt = true
+
+[functions.zatca-onboard]
+verify_jwt = true
+
+[functions.zatca-validate]
+verify_jwt = true
+
+[functions.upload-set-image]
+verify_jwt = false
+
+[functions.get-set-images]
+verify_jwt = false
+
+[functions.delete-set-image]
+verify_jwt = false
+
+[functions.search-set-models]
+verify_jwt = false
+
+[functions.download-attachment]
+verify_jwt = false
+
+[functions.upload-import-excel]
+verify_jwt = false
+
+[functions.create-batch-invoice]
+verify_jwt = false
+
+[functions.post-invoice-accounting]
+verify_jwt = false
+
+[functions.cleanup-import-batch]
+verify_jwt = false
+
+[functions.post-batch-import-movements]
+verify_jwt = false
+
+[functions.pv3-gate-tests]
+verify_jwt = false
+
+[functions.purchasing-gate-tests]
+verify_jwt = false

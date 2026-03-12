@@ -1,0 +1,74 @@
+PROMPT — PROD-CREATE-VERIFY-0 | VERIFY ONLY | RAW PROOFS | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Neon + Express)
+MODE: VERIFICATION ONLY (NO CODE CHANGES)
+
+GOAL:
+Prove product_create_atomic is correct end-to-end (RPC -> DB -> UI expectations), including inventory account linking and idempotency.
+
+1) SHOW RPC ROUTE + HANDLER (SNIPPET)
+Paste the server route that handles:
+POST /api/rpc/:fnName
+and show the exact SQL executed for Group 3 (jsonb) calls.
+
+2) SHOW DB FUNCTION SIGNATURES
+Run and paste:
+SELECT proname, oidvectortypes(proargtypes) AS args
+FROM pg_proc
+WHERE proname = 'product_create_atomic';
+
+3) CURL PROOF — SUCCESS CREATE
+Print the exact endpoint path, then run:
+curl -i -X POST <BASE_URL>/api/rpc/product_create_atomic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "args": {
+      "p_client_request_id": "prod-proof-001",
+      "p_name_ar": "منتج إثبات 1",
+      "p_name_en": "Proof Product 1",
+      "p_sku": "SKU-PROOF-1",
+      "p_barcode": "BAR-PROOF-1",
+      "p_unit": "PCS",
+      "p_cost_price": 10,
+      "p_sale_price": 15,
+      "p_inventory_account_code": "1301"
+    }
+  }'
+Paste headers + JSON body.
+
+4) DB PROOF — ROW EXISTS + FIELDS CORRECT
+Use the returned product_id (or product_code) and run:
+SELECT id, product_code, name_ar, sku, barcode, unit, cost_price, sale_price,
+       inventory_account_id,
+       created_at
+FROM products
+WHERE sku = 'SKU-PROOF-1' OR barcode = 'BAR-PROOF-1'
+ORDER BY created_at DESC
+LIMIT 1;
+
+Then prove inventory_account_id resolves:
+SELECT p.product_code, a.account_code, a.name_ar
+FROM products p
+LEFT JOIN chart_of_accounts a ON a.id = p.inventory_account_id
+WHERE p.sku = 'SKU-PROOF-1'
+LIMIT 1;
+
+5) IDEMPOTENCY PROOF — SAME client_request_id DOES NOT DUPLICATE
+Re-run the SAME curl (prod-proof-001) and paste output.
+Then:
+SELECT count(*) FROM products WHERE sku = 'SKU-PROOF-1';
+
+6) NEGATIVE PROOF — INVALID INVENTORY ACCOUNT
+Run:
+curl -i -X POST <BASE_URL>/api/rpc/product_create_atomic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "args": {
+      "p_client_request_id": "prod-proof-002",
+      "p_name_ar": "منتج إثبات 2",
+      "p_inventory_account_code": "9999"
+    }
+  }'
+Paste output and confirm it returns a structured Arabic error (not 500).
+
+STOP after raw outputs.

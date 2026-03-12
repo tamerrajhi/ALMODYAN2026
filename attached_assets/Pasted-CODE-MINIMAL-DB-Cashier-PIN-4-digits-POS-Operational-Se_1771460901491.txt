@@ -1,0 +1,77 @@
+CODE+MINIMAL DB — Cashier PIN (4 digits) + POS Operational Session (NO atomic/RBAC changes)
+
+STRICT RULES:
+- Do NOT modify any atomic RPCs or business SQL for sales/returns.
+- Only add new middleware + endpoints for operational POS sessions.
+- Use bcrypt for PIN verify (hash stored in user_pins.pin_hash).
+- Use SHA-256 hashing for pos session token (similar to requireSession/branch).
+- Cookie name for POS session: "__pos"
+- All endpoints must requireBranchSession.
+- Evidence: git diff --stat + git diff + smoke tests.
+
+A) Minimal DB Migration:
+Create table pos_session_tokens:
+- id uuid pk default gen_random_uuid()
+- token_hash text unique not null
+- pos_session_id uuid not null references pos_sessions(id) on delete cascade
+- created_at timestamptz default now()
+- expires_at timestamptz not null
+- revoked_at timestamptz null
+- last_seen_at timestamptz default now()
+Indexes: pos_session_id, expires_at
+
+B) Middleware: requirePosSession(req,res,next)
+- read cookie "__pos"
+- sha256(token) => lookup pos_session_tokens where token_hash=... AND revoked_at IS NULL AND expires_at > now()
+- join pos_sessions to get branch_id + cashier_user_id
+- enforce pos_sessions.branch_id == (req as any).branchId
+- set (req as any).posSessionId and (req as any).cashierUserId
+- update pos_session_tokens.last_seen_at=now()
+
+C) Endpoints:
+1) GET /api/pos/cashiers (requireBranchSession)
+Return staff users for current branch:
+- user_branches (branch_id=req.branchId) JOIN profiles
+- JOIN user_custom_roles + custom_roles to return role_key, is_admin
+- Filter: role_key IN ('branch_seller_pos_only','branch_supervisor_pos_plus_unique_returns') OR is_admin=true
+Return: {data:[{user_id, username, full_name, role_key, is_supervisor:boolean}], error:null}
+
+2) POST /api/pos/cashier/enter (requireBranchSession)
+Body: { cashier_user_id, pin }
+Rules:
+- pin must match exactly 4 digits: /^\d{4}$/
+Flow:
+- verify cashier belongs to branch (user_branches)
+- fetch user_pins row (is_active=true)
+- if none => 400 "PIN غير مضبوط لهذا المستخدم"
+- if locked_until > now => 423 "مقفل مؤقتاً"
+- bcrypt.compare(pin, pin_hash)
+- on fail:
+  failed_attempts += 1
+  if failed_attempts >= 5 => locked_until = now()+10 minutes
+  return 401
+- on success:
+  failed_attempts=0, locked_until=null
+  create pos_sessions row: branch_id=req.branchId, cashier_user_id, created_by_user_id=(req as any).userId
+  create pos_session_tokens row with random token (32+ bytes), store sha256(token), expires_at=now()+12 hours
+  set cookie "__pos" = raw token (httpOnly, sameSite=lax, secure in prod)
+  return {data:{pos_session_id, cashier_user_id}, error:null}
+
+3) POST /api/pos/cashier/exit (requireBranchSession + requirePosSession)
+- revoke token row (revoked_at=now())
+- update pos_sessions.closed_at=now()
+- clear cookie "__pos"
+- return {data:{ok:true}, error:null}
+
+D) Smoke Tests:
+0) Without __branch -> GET /api/pos/cashiers => 401
+1) With __branch -> GET /api/pos/cashiers => 200
+2) Enter wrong pin (non-4digits) => 400
+3) Enter wrong pin (4digits) => 401 and failed_attempts increments
+4) Enter correct pin => 200 sets __pos
+5) Exit with __pos => 200 clears cookie
+6) Exit again => 401 (requirePosSession)
+
+NO hardcoded PINs.
+
+STOP after evidence.

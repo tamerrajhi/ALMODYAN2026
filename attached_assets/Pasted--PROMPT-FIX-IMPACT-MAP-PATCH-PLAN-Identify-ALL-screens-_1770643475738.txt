@@ -1,0 +1,137 @@
+✅ PROMPT — FIX-IMPACT-MAP + PATCH-PLAN | Identify ALL screens affected by direct-write eradication + generate exact patches | EVIDENCE FIRST | NO GUESSING | STOP
+
+ROLE: Auditor + Implementation Planner
+MODE: Evidence-first. Do NOT propose any change unless you have a matching code snippet + exact line refs from grep output.
+
+GOAL
+1) Produce a definitive "Impact Map" of frontend pages/components affected by:
+   - requireSession added on write endpoints
+   - response shape changes (RPC-style {success, data/error} vs legacy rows)
+   - credentials/cookie requirements for fetch()
+2) Produce exact patch diffs ONLY for files proven affected.
+
+STRICT RULES
+- NO guessing. Every claim must cite raw grep results and a pasted code block (pre-change).
+- DO NOT change backend.
+- DO NOT refactor unrelated code.
+- If you can’t prove a file is affected, exclude it.
+
+========================================
+PHASE A — DISCOVERY (RAW EVIDENCE)
+========================================
+
+A1) List all write endpoints that now requireSession
+Paste from server/routes.ts (line numbers required):
+- app.post/put/delete declarations for:
+  /api/branches
+  /api/suppliers
+  /api/customers
+  /api/jewelry-items
+  /api/chart-of-accounts
+  /api/purchase-batches
+  /api/app-settings/:key
+  /api/gold-prices
+  /api/post-invoice-accounting
+  /api/create-batch-invoice
+  /api/cleanup-import-batch
+  /api/users/set-primary-branch
+
+A2) Find ALL frontend call sites for these endpoints (read + write) — raw command + output
+Run and paste outputs:
+
+# Prefer ripgrep; if not available, use grep -RIn
+rg -n --hidden --glob '!**/node_modules/**' "/api/branches" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/suppliers" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/customers" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/jewelry-items" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/chart-of-accounts" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/purchase-batches" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/app-settings" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/gold-prices" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/post-invoice-accounting" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/create-batch-invoice" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/cleanup-import-batch" src/ || true
+rg -n --hidden --glob '!**/node_modules/**' "/api/users/set-primary-branch" src/ || true
+
+A3) For each frontend HIT that is a write (POST/PUT/DELETE), extract the exact code block
+For each file+line from A2 where the request method is POST/PUT/DELETE:
+- Paste 30 lines before and 30 lines after the fetch/apiClient call.
+- Include headers/body parsing/response handling.
+
+A4) Identify global wrappers that might auto-handle cookies/JSON
+Run and paste:
+rg -n --hidden --glob '!**/node_modules/**' "fetch\\(|apiClient\\.|credentials\\s*:" src/lib src/ || true
+Open and paste the full content of:
+- src/lib/apiClient.ts
+- src/lib/dataGateway.ts
+(If files differ, paste their actual paths.)
+
+========================================
+PHASE B — BACKEND RESPONSE CONTRACT (EVIDENCE)
+========================================
+
+B1) For each affected endpoint (write ones that have frontend POST/PUT/DELETE callers),
+paste the backend handler response shape in current routes.ts:
+- The exact code block for res.json(...)
+- Whether it returns:
+  (a) raw row
+  (b) {success, ...}
+  (c) {error: ...} with status codes
+
+B2) If endpoint delegates to DB atomic function, paste the exact SQL call:
+e.g. SELECT public.fn_name($1::jsonb) as result
+and show the parsing logic:
+- JSON.parse vs direct object
+- what happens on !success
+
+========================================
+PHASE C — IMPACT MAP (OUTPUT)
+========================================
+
+C1) Build a table (NO FIXES YET) — screens affected
+Columns:
+- Endpoint
+- Frontend file + exact line
+- Method (POST/PUT/DELETE)
+- Current request sends cookies? (Yes/No proven)
+- Current code expects old response shape? (Yes/No proven)
+- Failure mode expected (401 / parsing / logic)
+
+C2) Decide minimal patch per file, based only on evidence:
+Allowed patch actions:
+- Add credentials: 'include' to fetch() calls
+- Ensure Content-Type JSON header exists where body is JSON
+- Normalize response parsing to accept:
+  - {success:true, data:...} OR direct row
+  - {success:false, error:...} OR {error:...}
+- Surface server error message in UI toast
+
+Forbidden:
+- Refactors
+- New abstractions
+- Changing unrelated endpoints
+
+========================================
+PHASE D — PATCH DIFFS (ONLY FOR PROVEN FILES)
+========================================
+
+D1) For each affected file, output an exact git diff patch:
+- Use the smallest change possible
+- Include credentials:'include' ONLY where the endpoint is session-protected AND the caller uses fetch()
+- If caller uses apiClient and apiClient already includes credentials, do NOT change.
+
+D2) Provide a per-file “Post-patch smoke test”
+For each patched screen:
+- Step-by-step UI test
+- Expected network status codes
+- Expected UI behavior
+
+========================================
+PHASE E — STOP
+========================================
+After producing:
+- A (raw evidence)
+- B (backend contracts)
+- C (impact map)
+- D (exact diffs)
+STOP. No further suggestions.

@@ -1,0 +1,100 @@
+PROMPT — RUN-P1 | OPS SCREENS SMOKE AUDIT + FIX (Purchases/Sales/Accounting) | NEON ONLY | EVIDENCE | STOP
+
+ROLE: Full-Stack Engineer (Replit/Neon)
+MODE: SAFE OPS — ship only what’s needed to make the operational screens work now
+BACKEND: Neon/Express only (no Supabase reads, no Edge Functions)
+GOAL: تشغيل “Tabs التشغيل” في السايدبار:
+
+Purchasing (كل الشاشات تحتها)
+
+Sales (كل الشاشات تحتها)
+
+Accounting (كل الشاشات تحتها)
+بالإضافة إلى: Create Branch و Create Supplier بدون Errors
+
+STRICT RULES
+
+لا تغيّر UI logic (validation/messages/toasts/RTL) إلا لو إصلاح Crash/blocked فقط.
+
+ممنوع supabase.from(...) و supabase.rpc(...) و supabase.auth... داخل ملفات الشاشات المستهدفة.
+
+أي قراءة بيانات لازم تمر عبر:
+
+dataGateway.queryTable(...) (يعتمد على /api/table-read) أو
+
+apiClient.get/post(...) لنقطة Endpoint واضحة
+
+أي Join/aggregation معقد → ضيف Endpoint في server/routes.ts (SQL + aliases لتطابق الـ UI).
+
+أي جدول/عمود ناقص في Neon → Migration SQL فقط داخل migrations/ (idempotent: IF NOT EXISTS).
+
+لا تلمس ملفات خارج “scope” إلا لو لازم لتشغيل route واحد (مثلاً: endpoint جديد أو migration).
+
+SCOPE (targets)
+
+اعمل inventory للـ routes الخاصة بالسايدبار (Purchases/Sales/Accounting) وحدّد Top 8 pages الأكثر استخدامًا (لا تزيد عن 8 في RUN-P1).
+على الأقل لازم تشمل:
+
+Purchasing list/details/create (حسب الموجود)
+
+Sales list/details/returns (حسب الموجود)
+
+Accounting: Chart of Accounts + Journal Entries/Trial Balance (حسب الموجود)
+
+Branches create
+
+Suppliers create
+
+WHAT TO DO (Steps)
+
+Route → Component map
+
+اطلع جدول: Route → Component file path
+
+Smoke test لكل Route
+
+افتح الصفحة في المتصفح داخل Replit (أو run through minimal navigation)
+
+لو فيه Error (API 404/500، runtime exception، empty schema mismatch) سجله كـ “BLOCKER”
+
+Fix Pack (Max 8 pages)
+
+لكل صفحة:
+
+استبدل أي supabase.from/rpc بـ dataGateway.queryTable/rpc أو endpoint جديد
+
+لو الـ UI متوقع field names مش موجودة: اعمل alias في الـ SQL endpoint بدل ما تغيّر UI (قدر الإمكان)
+
+لو DB ناقص Columns/Tables: أضف migration minimal فقط
+
+Verification
+
+لكل صفحة ضمن الـ 8: إثبات إنها تفتح بدون crash + endpoint returns 200 JSON
+
+npx tsc --noEmit لازم Exit 0
+
+EVIDENCE REQUIRED (RAW, SEPARATE)
+
+A) Inventory Table: Route → Component → Supabase usage before → Fix strategy
+B) git diff --stat
+C) git diff -- (كامل لكل الملفات اللي اتلمست)
+D) Grep proofs (لملفات الـ scope فقط):
+
+rg -n "supabase\.from\(|supabase\.rpc\(" <list_of_target_files> → لازم NO MATCHES
+E) Runtime proofs:
+
+curl -i لأهم endpoints الجديدة/المستخدمة (200 + application/json)
+
+Logs خالية من errors أثناء فتح الصفحات المستهدفة
+
+OUTPUT FORMAT
+
+ابدأ بـ Inventory table
+
+بعدين Blockers
+
+بعدين Fix Pack summary (what changed per page)
+
+بعدين Evidence A→E
+
+STOP. WAIT FOR NEXT PROMPT.

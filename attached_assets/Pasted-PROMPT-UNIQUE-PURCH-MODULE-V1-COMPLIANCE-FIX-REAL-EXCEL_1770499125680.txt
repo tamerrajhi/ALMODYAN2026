@@ -1,0 +1,104 @@
+PROMPT — UNIQUE-PURCH-MODULE-V1 | COMPLIANCE FIX + REAL EXCEL PROOFS | NO GUESS | STOP-GATED
+
+ROLE: Senior Engineer
+MODE: Evidence-first. If any evidence missing => STOP and ask for it.
+
+NON-NEGOTIABLE RULES
+1) NO synthetic data. Use the real uploaded file: /mnt/data/Purchase 1 SUPP.xlsx
+2) NO direct SQL in console. ANY DB change must be in migrations/*.sql with apply output.
+3) Respect STOP boundaries: do not edit server allowlists unless a STOP explicitly says SERVER.
+4) Provide RAW outputs only (commands + outputs). No summaries except the final PASS/FAIL line.
+
+========================
+STOP-0 (STATE CHECK — AUDIT ONLY)
+========================
+A) Prove file exists:
+- ls -la /mnt/data | grep -i "Purchase 1 SUPP.xlsx"
+
+B) Show current movement FK state (raw):
+- \d+ public.item_movements
+- SQL:
+  SELECT conname, pg_get_constraintdef(c.oid) AS def
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid=c.conrelid
+  WHERE t.relname='item_movements'
+  ORDER BY conname;
+
+STOP after pasting outputs.
+
+========================
+STOP-1 (DB ONLY — COMPLIANT FIX MIGRATIONS)
+========================
+Goal: If you previously dropped/restored FKs or created unique_item_movements, it must be recorded in a migration (no direct SQL).
+
+Do ONE migration:
+migrations/unique_purch_movements_v1.sql
+
+It must:
+1) Create table public.unique_item_movements (if not exists) with FK to public.unique_items(id)
+2) Ensure public.item_movements has FK item_id -> public.jewelry_items(id) (restore it if missing)
+3) If any orphan rows exist in item_movements that would block FK restore:
+   - delete ONLY those rows referencing non-existing jewelry_items
+4) Update ONLY the unique RPCs to write movements into unique_item_movements (NOT item_movements)
+
+Evidence required (RAW):
+- cat migrations/unique_purch_movements_v1.sql
+- psql apply output
+- \d+ public.unique_item_movements
+- \d+ public.item_movements
+- constraint list query again (same as STOP-0)
+
+STOP.
+
+========================
+STOP-2 (REAL EXCEL “AS-IS” PROOF — FROM FILE)
+========================
+Read /mnt/data/Purchase 1 SUPP.xlsx and prove:
+- raw_headers_json preserves header order
+- raw_values_json preserves value order
+- empty header columns are preserved as "" (or null) IN POSITION (do not drop them)
+
+Evidence (RAW):
+1) Show how you parse the sheet (code snippet or script used) and the extracted arrays length:
+- Print first row: headers array (with empties) + length
+- Print first data row: values array + length
+
+2) Call import RPC with 1 file + 2 rows using those real headers/values arrays (vat_rate=0):
+- curl body must include raw_headers_json/raw_values_json exactly as extracted
+
+3) SQL proof after import:
+- SELECT serial_no, jsonb_array_length(raw_headers_json) AS hlen, jsonb_array_length(raw_values_json) AS vlen
+  FROM unique_items ORDER BY created_at DESC LIMIT 2;
+- SELECT raw_headers_json, raw_values_json
+  FROM unique_items ORDER BY created_at DESC LIMIT 1;
+
+STOP.
+
+========================
+STOP-3 (VAT CALC PROOF)
+========================
+Run two imports:
+A) vat_rate=0
+B) vat_rate=0.15 (decimal rate, NOT percent)
+
+For each import paste RAW:
+- unique_purchase_invoices: subtotal, tax_amount, total_amount
+- journal_entry_lines with account codes (join chart_of_accounts) showing:
+  - inventory debit to <BR>-1301 else 1301
+  - AP credit to <BR>-2101 else 2101 else 2100
+  - VAT input debit to <BR>-2105 else 2105 ONLY when vat_rate>0
+
+STOP.
+
+========================
+STOP-4 (SCOPE COMPLIANCE CHECK)
+========================
+Confirm you did NOT edit server allowlists unless explicitly required.
+If you did, show:
+- git diff --stat
+- git diff --
+Otherwise output:
+SERVER_CHANGES = NONE
+
+FINAL LINE ONLY:
+COMPLIANCE = PASS or FAIL (based strictly on evidence above)

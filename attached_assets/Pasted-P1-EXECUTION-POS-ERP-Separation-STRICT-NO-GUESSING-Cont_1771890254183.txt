@@ -1,0 +1,153 @@
+P1 EXECUTION — POS/ERP Separation (STRICT, NO GUESSING)
+
+Context
+We already ran rg. Use ONLY the evidence below. Do not assume anything outside these exact file:line hits.
+
+Hard Constraints
+- NO DB/schema changes.
+- NO RBAC changes.
+- NO RPC payload/business logic changes.
+- Only frontend routing/layout/navigation refactors.
+- If any referenced route/page is missing, STOP and report with rg evidence.
+
+Primary Goal
+When in POS mode (sourceMode="pos" or mode="pos"), all navigations must stay under /pos/*.
+Eliminate layout switching inside shared pages: SalesInvoicesPage, SalesReturnsListPage, SalesInvoiceViewPage.
+Remove reliance on query param ?source=pos for POS viewing.
+
+Evidence (from rg, must drive changes)
+1) POS invoices route exists already:
+   src/App.tsx:240: <Route path="/pos/invoices" element={<POSRoute><SalesInvoicesPage sourceMode="pos" /></POSRoute>} />
+
+2) POS returns route exists already:
+   src/App.tsx:241: <Route path="/pos/returns" element={<POSRoute><SalesReturnsListPage mode="pos" /></POSRoute>} />
+   POS return execution page exists:
+   src/App.tsx:242: <Route path="/pos/return" element={<POSRoute><POSReturnPage /></POSRoute>} />
+
+3) Cross-contamination leaks:
+   - POS invoice view leak (ERP path + query param):
+     src/pages/sales/SalesInvoicesPage.tsx:294:
+       navigate(`/sales/invoices/${invoice.id}/view${sourceMode === 'pos' ? '?source=pos' : ''}`);
+
+   - POS item movement link leak:
+     src/hooks/useItemMovements.ts:95: pos_sale: '/sales/invoices/{id}/view',
+
+   - POS returns list leak to ERP view:
+     src/pages/sales/SalesReturnsListPage.tsx:262:
+       onPreview={() => navigate(`/sales/returns/${ret.id}/view`)}
+
+4) Layout switching evidence (must be removed):
+   SalesInvoiceViewPage:
+     src/pages/sales/SalesInvoiceViewPage.tsx:35: const isPosSource = searchParams.get('source') === 'pos';
+     src/pages/sales/SalesInvoiceViewPage.tsx:36: const Layout = isPosSource ? POSLayout : MainLayout;
+
+   SalesInvoicesPage:
+     src/pages/sales/SalesInvoicesPage.tsx:394: const Layout = sourceMode === 'pos' ? POSLayout : MainLayout;
+
+   SalesReturnsListPage:
+     src/pages/sales/SalesReturnsListPage.tsx:95: const Layout = mode === 'pos' ? POSLayout : MainLayout;
+
+5) POS back behavior already uses isPosSource:
+   src/pages/sales/SalesInvoiceViewPage.tsx:152:
+     onClick={() => isPosSource ? navigate('/pos/invoices') : navigate(-1)}
+
+6) Existing POS navigation to return page:
+   src/pages/sales/SalesInvoicesPage.tsx:306:
+     navigate(`/pos/return?invoice_id=${invoice.id}`);
+   src/components/sales/invoice-view/QuickActionsBar.tsx:213:
+     navigate(`/pos/return?invoice_id=${invoiceId}`);
+
+Work Plan (execute in this order)
+
+PHASE A — Add POS Invoice View Route (NO query param)
+A1) Add a new route in src/App.tsx:
+   - Path: /pos/invoices/:id/view
+   - Element: <POSRoute><SalesInvoiceViewPage /></POSRoute>
+   Rationale: we need a POS-canonical invoice view route; POSRoute already exists for POS without ERP session.
+   IMPORTANT: Do NOT rely on ?source=pos to detect POS.
+
+A2) Update src/components/auth/ModuleAwareRoute.tsx mapping if needed:
+   Evidence: src/components/auth/ModuleAwareRoute.tsx:21 shows '/pos/invoices': 'sales'
+   Ensure the new path '/pos/invoices/:id/view' does NOT break routing (add mapping if required by that component).
+
+PHASE B — Remove Layout Switching from Shared Pages (content-only)
+B1) In src/pages/sales/SalesInvoicesPage.tsx
+   - Remove imports of MainLayout and POSLayout (evidence lines 5-6).
+   - Remove: const Layout = sourceMode === 'pos' ? POSLayout : MainLayout; (evidence line 394).
+   - Export content-only page body (no layout wrapping).
+   - The route decides layout already:
+     - ERP uses <ModuleRoute><SalesInvoicesPage sourceMode="erp" /></ModuleRoute>
+     - POS uses <POSRoute><SalesInvoicesPage sourceMode="pos" /></POSRoute>
+
+B2) In src/pages/sales/SalesReturnsListPage.tsx
+   - Remove imports of MainLayout and POSLayout.
+   - Remove: const Layout = mode === 'pos' ? POSLayout : MainLayout; (evidence line 95).
+   - Make it content-only.
+   - Routing already decides layout:
+     - POS uses /pos/returns with POSRoute
+     - ERP uses /sales/returns via existing route
+
+B3) In src/pages/sales/SalesInvoiceViewPage.tsx
+   - Remove imports of MainLayout and POSLayout.
+   - Remove query param detection:
+     isPosSource = searchParams.get('source') === 'pos'
+     Layout = isPosSource ? POSLayout : MainLayout
+   - Make it content-only (no layout wrapper).
+   - Update back button logic:
+     Replace isPosSource with a path-based check:
+       const isPosPath = location.pathname.startsWith('/pos/');
+     Then:
+       onClick={() => isPosPath ? navigate('/pos/invoices') : navigate(-1)}
+
+PHASE C — Fix POS navigation leaks (exact lines from rg)
+C1) SalesInvoicesPage.tsx
+   - Fix the invoice view navigate:
+     From:
+       navigate(`/sales/invoices/${invoice.id}/view${sourceMode === 'pos' ? '?source=pos' : ''}`);
+     To:
+       if (sourceMode === 'pos') navigate(`/pos/invoices/${invoice.id}/view`);
+       else navigate(`/sales/invoices/${invoice.id}/view`);
+   - Keep other navigations intact unless they are POS leaking to /sales.
+
+C2) useItemMovements.ts
+   - Fix POS sale link only:
+     pos_sale must become '/pos/invoices/{id}/view'
+   - Do not change sale_invoice (ERP) unless required.
+
+C3) SalesReturnsListPage.tsx
+   - Fix POS preview navigation:
+     Current:
+       onPreview={() => navigate(`/sales/returns/${ret.id}/view`)}
+     Required:
+       if (mode === 'pos') navigate(`/pos/returns/${ret.id}/view`);
+       else navigate(`/sales/returns/${ret.id}/view`);
+   - IMPORTANT STOP RULE:
+     First confirm if /pos/returns/:id/view route exists.
+     We have ERP view route evidence:
+       src/App.tsx:267: <Route path="/sales/returns/:id/view" ... SalesReturnViewPage />
+     We do NOT have evidence for /pos/returns/:id/view.
+     So:
+       - If SalesReturnViewPage can be mounted under POSRoute safely, add route:
+         /pos/returns/:id/view -> <POSRoute><SalesReturnViewPage /></POSRoute>
+       - If SalesReturnViewPage is ERP-only or crashes without ERP session, STOP and report.
+
+PHASE D — Evidence & Verification (MANDATORY)
+D1) Show:
+  - git diff --stat
+D2) Show rg AFTER (exact commands & results):
+  - rg -n "/sales/invoices/.*/view\\?source=pos" src  => must be 0 hits
+  - rg -n "searchParams.get\\('source'\\) === 'pos'" src/pages/sales/SalesInvoiceViewPage.tsx => must be 0 hits
+  - rg -n "const Layout = .*POSLayout.*MainLayout" src/pages/sales/SalesInvoicesPage.tsx src/pages/sales/SalesReturnsListPage.tsx src/pages/sales/SalesInvoiceViewPage.tsx => must be 0 hits
+  - rg -n "pos_sale: '/sales/invoices/\\{id\\}/view'" src/hooks/useItemMovements.ts => must be 0 hits
+D3) Smoke tests (write as a table, not generic):
+  POS:
+   - /pos (no ERP login) stays on /pos, shows BranchLoginGate
+   - After branch + cashier PIN, navigate to /pos/invoices list renders with POSLayout (POSRoute)
+   - Click invoice view => URL becomes /pos/invoices/:id/view and renders without redirect
+   - Back => /pos/invoices
+  ERP:
+   - /sales/invoices and /sales/invoices/:id/view still work inside ModuleRoute/MainLayout
+
+STOP conditions (no guessing)
+- If /pos/returns/:id/view cannot be safely added, STOP with evidence and propose minimal alternative for POS mode:
+  disable preview in POS or redirect to /pos/return?returnId=... ONLY if route exists (must be proven by rg).

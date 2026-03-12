@@ -1,0 +1,63 @@
+PROMPT — AUDIT ONLY | Sales/Returns Movements Ledger (unique_item_movements)
+
+ROLE: Auditor
+MODE: READ ONLY (NO CHANGES)
+
+Goal:
+Prove whether POS/ERP sales and POS/ERP returns write item-level movements into unique_item_movements.
+We need evidence per flow, using real sample IDs.
+
+Rules:
+- Do NOT change code or DB.
+- Only SELECT / pg_catalog / rg / git show.
+- Provide raw outputs.
+
+SECTION 1 — Movement types inventory
+1) List distinct movement types + counts:
+SELECT movement_type, count(*) 
+FROM unique_item_movements
+GROUP BY movement_type
+ORDER BY count(*) DESC;
+
+2) Check if any movement_type looks like sales/returns:
+(we expect something like: SALE_OUT, SALES_RETURN_IN, etc.)
+
+SECTION 2 — Pick one item per flow (real samples)
+Use these already-known examples from prior evidence:
+- ERP invoice: 69111859-0c96-430f-a07a-2ac71489537e
+- ERP return: 14f08294-74b7-43b9-be87-c0165813ec24
+- ERP item: 2ead0bff-6c1f-4093-ba8e-ce5878ae57ca
+
+Also pick:
+- One POS invoice where sale_id IS NOT NULL (give invoice_id and sale_id)
+- One POS return where original_sale_id IS NOT NULL (give return_id)
+
+SECTION 3 — Movement lookup by item_id
+For each selected unique_item_id, run:
+
+3.1) Movements for item:
+SELECT id, unique_item_id, movement_type, reference_type, reference_id, from_branch_id, to_branch_id, created_at
+FROM unique_item_movements
+WHERE unique_item_id = '<UNIQUE_ITEM_ID>'
+ORDER BY created_at ASC;
+
+3.2) If no rows: prove it’s not a filter issue by also checking purchase-related movements for same item (if any):
+SELECT id, movement_type, reference_type, reference_id, created_at
+FROM unique_item_movements
+WHERE unique_item_id = '<UNIQUE_ITEM_ID>' AND movement_type IN ('purchase_in','purchase_return_out','transfer')
+ORDER BY created_at ASC;
+
+SECTION 4 — Code-path evidence (writes)
+4) rg for INSERT into unique_item_movements in:
+- DB functions: complete_pos_sale_atomic, complete_pos_piece_return_atomic, complete_erp_sales_return_atomic
+- server/routes.ts post endpoint
+Use:
+rg -n "INSERT INTO\\s+unique_item_movements" -S server/routes.ts supabase/migrations src
+
+Then, for each of these functions/endpoints, show the exact snippet if found.
+
+SECTION 5 — Conclusion table
+Produce a small table:
+Flow | Writes movements? | Evidence (query result + write snippet yes/no)
+
+END.

@@ -1,0 +1,76 @@
+PROMPT — PURCH-IMPORT-UNIQUE-AUDIT-NOW-0 | AUDIT ONLY | NO CODE CHANGES | RAW PROOFS ONLY | STOP
+
+ROLE: Senior Full-Stack Engineer
+MODE: AUDIT + EVIDENCE ONLY (NO CODE CHANGES, NO MIGRATIONS)
+
+Goal:
+Confirm EXACTLY what the system currently does AFTER uploading the Excel in /import:
+- Does it write jewelry_items?
+- Does it create purchase invoice + lines?
+- Does it post journal entries?
+- Does it create item_movements?
+- Does it store raw rows anywhere?
+No guessing: prove with code references + network traces + DB queries.
+
+A) ROUTE + UI ENTRYPOINT (CODE PROOF)
+1) Find the route(s) to the import screen:
+- rg -n "path=\"/import\"" src
+- rg -n "ImportPage|Import" src/pages src/App.tsx
+Paste the exact <Route ...> lines + file paths.
+
+2) Identify ALL import-related pages (potential duplicates):
+- rg -n "ImportedPiecesPage|ExcelImportDialog|import-payments|PurchaseInvoiceImport" src/pages src/components
+Output list + file paths only.
+
+B) NETWORK / RPC CALLS (CODE PROOF)
+3) In the import page file(s), list every API call and RPC call:
+- rg -n "dataGateway\\.rpc\\(|dataGateway\\.|apiClient\\.|queryTable\\(" <import_page_file>
+Paste the matched lines (with line numbers).
+
+4) Confirm the RPC endpoint format used by the app:
+- Locate server route handling RPC: search in server/routes.ts for "/api/rpc/:fnName"
+Paste the handler snippet that shows request body shape (req.body.args, args.p_payload || args).
+
+C) RUNTIME PROOF — WHAT ACTUALLY FIRES WHEN USER UPLOADS
+5) Add ZERO code. Use server logs or browser network tracing:
+- Run the app, open /import, upload a small Excel file.
+- Collect the RAW Network log list:
+  - URLs called (GET/POST)
+  - status codes
+  - response bodies (first 300 chars for each)
+If you cannot capture browser HAR, then print server request logs for the same time window.
+DO NOT summarize; paste raw.
+
+D) DATABASE PROOF — BEFORE/AFTER COUNTS
+6) BEFORE upload, run these queries (paste outputs):
+- SELECT count(*) FROM jewelry_items;
+- SELECT count(*) FROM invoices WHERE invoice_type='purchase';
+- SELECT count(*) FROM purchase_invoice_lines;
+- SELECT count(*) FROM item_movements;
+- SELECT count(*) FROM journal_entries;
+- SELECT count(*) FROM journal_entry_lines;
+
+7) AFTER upload completes, re-run the same queries and paste outputs.
+Also fetch the latest rows created today:
+- SELECT id,item_code,created_at FROM jewelry_items ORDER BY created_at DESC LIMIT 10;
+- SELECT id,invoice_number,status,created_at FROM invoices WHERE invoice_type='purchase' ORDER BY created_at DESC LIMIT 10;
+- SELECT id,movement_type,item_id,created_at FROM item_movements ORDER BY created_at DESC LIMIT 10;
+- SELECT id,entry_number,entry_date,created_at FROM journal_entries ORDER BY created_at DESC LIMIT 10;
+
+E) TRACE THE WRITE PATH (CODE PROOF)
+8) For each RPC/endpoints observed in network logs, locate the implementation:
+- If RPC: search for "CREATE OR REPLACE FUNCTION <fn_name>"
+- If endpoint: locate in server routes and the downstream service file
+Paste only the relevant function signature and the key INSERT targets (tables).
+
+F) RESULT: BEHAVIOR MATRIX (EVIDENCE-BASED)
+9) Produce a small matrix (no narrative) from the evidence:
+- Upload step: client parse only? (YES/NO + proof line)
+- Inserts jewelry_items? (YES/NO + proof query)
+- Creates invoices? (YES/NO + proof query)
+- Creates item_movements? (YES/NO + proof query)
+- Creates journal entries? (YES/NO + proof query)
+- Stores raw rows? (YES/NO + proof table/query)
+Just a matrix with YES/NO and the proof reference (query output or line number).
+
+STOP.

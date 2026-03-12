@@ -1,0 +1,95 @@
+ROLE: Database + Frontend Engineer
+MODE: ATOMIC MIGRATION (JOURNAL ENTRIES ONLY) — STOP AFTER DONE
+
+GOAL:
+Re-enable essential Accounting operations (Manual Journal Entries create/post/reverse/void) using Atomic RPCs only.
+Keep all direct writes blocked.
+Do NOT re-enable accounting-health-fixes automatic writes (keep them blocked).
+
+SCOPE:
+- Journal Entries only (JE header + lines).
+- Update the minimal UI/service functions currently blocked (accounting.ts and JournalEntriesPage.tsx or equivalent).
+
+STEP 0 — DISCOVER CURRENT READ MODEL (NO GUESSING):
+- Identify existing tables/views used for reading JEs:
+  - journal_entries, journal_entry_lines (or similar)
+- If they do not exist, create minimal ones.
+- Identify existing JE number generator function if exists; reuse it (generate_journal_entry_number).
+
+STEP 1 — CREATE MINIMAL TABLES (ONLY IF MISSING):
+A) journal_entries
+- id uuid pk default gen_random_uuid()
+- je_no text unique
+- branch_id uuid not null
+- je_date date not null default current_date
+- status text not null default 'draft'  -- draft/posted/void/reversed
+- memo text null
+- created_by text null
+- posted_at timestamptz null
+- voided_at timestamptz null
+- void_reason text null
+- totals_debit numeric default 0
+- totals_credit numeric default 0
+
+B) journal_entry_lines
+- id uuid pk default gen_random_uuid()
+- je_id uuid not null references journal_entries(id) on delete cascade
+- account_id uuid not null
+- debit numeric default 0
+- credit numeric default 0
+- line_memo text null
+
+Indexes minimal: je_branch, lines_je.
+
+STEP 2 — ATOMIC RPCs (REQUIRED):
+Use atomic_workflow_requests for idempotency (client_request_id TEXT).
+All return jsonb with ids/codes.
+
+1) je_create_atomic(p_client_request_id uuid, p_branch_id uuid, p_je_date date, p_memo text, p_lines jsonb)
+- Create JE draft + lines from jsonb array.
+- Validate:
+  - Sum(debit)=Sum(credit) and > 0
+  - Each line has either debit>0 XOR credit>0
+- Compute totals and store.
+- Generate je_no using existing function if present; else create minimal generator.
+- Audit log action_type='create', entity_type='je'
+
+2) je_update_atomic(p_client_request_id uuid, p_je_id uuid, p_memo text, p_lines jsonb)
+- Allowed only if status='draft'
+- Replace lines (delete then insert) and recompute totals
+- Audit action_type='update'
+
+3) je_post_atomic(p_client_request_id uuid, p_je_id uuid)
+- Allowed only if status='draft'
+- Set status='posted', posted_at=now()
+- Audit action_type='post'
+
+4) je_void_atomic(p_client_request_id uuid, p_je_id uuid, p_reason text)
+- Allowed only if status in ('draft','posted') per your policy
+- Set status='void', voided_at=now(), void_reason=p_reason
+- Audit action_type='void'
+
+5) je_reverse_atomic(p_client_request_id uuid, p_je_id uuid, p_reason text)
+- Allowed only if status='posted'
+- Create a reversing JE with swapped debits/credits and memo "Reversal of <je_no>"
+- Set original status='reversed'
+- Audit action_type='reverse'
+
+STEP 3 — UI/SERVICE WIRING (MINIMAL):
+- In accounting.ts (or wherever JE writes were blocked):
+  - Replace forbidDirectWrite paths with calls to supabase.rpc('je_*_atomic')
+  - Generate p_client_request_id with crypto.randomUUID()
+- Ensure JournalEntriesPage (or relevant UI) calls these service functions.
+
+STEP 4 — VERIFICATION (MANDATORY):
+A) Paste exact SQL definitions for je_create_atomic + je_post_atomic + je_reverse_atomic (and tables if created).
+B) Paste accounting.ts (or service) snippets with line numbers showing RPC calls.
+C) Prove direct writes still ZERO:
+   grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+D) SQL tests (paste outputs):
+   - select je_create_atomic(gen_random_uuid(), <branch_uuid>, current_date, 'Test JE', '[{"account_id":"<uuid>","debit":100,"credit":0},{"account_id":"<uuid>","debit":0,"credit":100}]'::jsonb);
+   - select je_post_atomic(gen_random_uuid(), <je_id_from_prev>);
+   - select je_reverse_atomic(gen_random_uuid(), <je_id_from_prev>, 'Test reverse');
+STOP AFTER OUTPUT A/B/C/D.
+NO OTHER MODULES.
+NO GUESSING.

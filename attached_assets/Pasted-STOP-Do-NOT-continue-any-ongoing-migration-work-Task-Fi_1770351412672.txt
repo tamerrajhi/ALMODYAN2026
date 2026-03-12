@@ -1,0 +1,62 @@
+STOP. Do NOT continue any ongoing migration work.
+
+Task: Fix and finalize “Gate-1 Safety Switch” ONLY, with zero business-logic changes and zero batch migrations.
+
+Primary goals (must all be true):
+1) Default backend MUST be Supabase.
+2) Neon/Express is enabled ONLY via a runtime UI toggle (localStorage override).
+3) Switching back to Supabase must instantly restore access (no “غير مصرح” issues), since RBAC data in Neon may be empty.
+4) Provide concrete evidence outputs.
+
+Implementation requirements (exact):
+
+A) Default = Supabase
+- Ensure the default selection order is:
+  1) localStorage key "data_backend_override" (values: "supabase" | "neon")
+  2) import.meta.env.VITE_DATA_BACKEND
+  3) fallback "supabase"
+- BUT: even if VITE_DATA_BACKEND is set to "neon" in env, Gate-1 requires DEFAULT to remain supabase.
+  => Set VITE_DATA_BACKEND to "supabase" (or remove it so fallback applies).
+- On startup print ONE line:
+  [ACTIVE_DATA_BACKEND] <supabase|neon> (reason=<override|env|default>, env=<value|none>, override=<value|none>)
+
+B) Runtime Toggle in UI (MainLayout header)
+- Add/keep a simple toggle near the existing badge:
+  Buttons: SUPABASE / NEON / RESET
+- Storage:
+  - Clicking SUPABASE sets localStorage.data_backend_override="supabase"
+  - Clicking NEON sets localStorage.data_backend_override="neon"
+  - RESET removes the key
+- After change, hard reload the page automatically (or show “reload required” and call location.reload()).
+
+C) Single Source of Truth
+- Implement getActiveBackend(): "supabase" | "neon"
+- All read/query/rpc paths must consult ONLY getActiveBackend() (no scattered checks).
+
+D) Health verification behavior
+- If active backend = NEON:
+  - call GET /api/health/fingerprint and show status (badge/toast)
+- If active backend = SUPABASE:
+  - do NOT force fingerprint call (optional manual check only)
+
+E) NO scope creep
+- Do not migrate any supabase.from / supabase.rpc usage in pages/services.
+- Do not add /api/query.
+- Do not edit server/routes.ts except if strictly needed for /api/health/fingerprint (it already exists).
+- Only touch the minimum files needed for Gate-1 switch.
+
+F) Fix current broken state
+- Right now the app shows “غير مصرح” when NEON active because RBAC tables in Neon are empty.
+- Gate-1 must keep DEFAULT = SUPABASE so the app works normally.
+- Do NOT attempt RBAC seeding or admin bootstrapping in this Gate-1 task. Just ensure default is Supabase and Neon is optional.
+
+Evidence to provide (mandatory, paste raw):
+1) git diff --stat
+2) git diff
+3) Startup log line showing default is SUPABASE with reason
+4) Manual UI test notes:
+   - With no override (RESET), app loads and navigation works (Supabase default).
+   - Toggle to NEON: fingerprint call shows OK (or shows unhealthy if backend down) WITHOUT changing auth logic.
+   - Toggle back to SUPABASE: access restored immediately without restart errors.
+
+After evidence: STOP. Do not proceed to Gate-2 or any batch migration.

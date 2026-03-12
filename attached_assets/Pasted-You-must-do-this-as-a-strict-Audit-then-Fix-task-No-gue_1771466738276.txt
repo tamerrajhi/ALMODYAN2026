@@ -1,0 +1,38 @@
+You must do this as a strict Audit-then-Fix task. No guessing. If a step is already implemented, report "Already Done" with file/line evidence and DO NOT change it.
+
+Goal: Enterprise PIN Policy final lock for POS roles (seller/supervisor) and POS access gates.
+Constraints:
+- Do NOT change any atomic RPC payloads or DB schemas.
+- Do NOT add any new legacy paths.
+- Changes allowed: only minimal code changes to enforce existing policy consistently.
+
+PART A — AUDIT (NO CHANGES)
+1) Confirm enforcement points:
+   A1) POSCashierGate: Does it block entry if cashier has no PIN? Show exact behavior and error mapping.
+   A2) UsersPage: Can admin assign role_key in ['branch_seller_pos_only','branch_supervisor_pos_plus_unique_returns'] without PIN? Confirm it is blocked with 409 and UI guidance exists.
+   A3) UsersPage: Can admin activate a user who has POS roles but no PIN? Confirm blocked with 409.
+   A4) Backend: Confirm POST /api/users/:userId/custom-roles and POST /api/users/:userId/active enforce PIN presence for POS roles.
+   A5) Backend: Confirm POST /api/admin/users/set-pin exists + guarded by requireSession + requireAdminRole.
+2) Identify any remaining bypasses:
+   - Any other endpoint that can assign roles or activate users without going through those two endpoints.
+   - Any other UI path that can enable POS roles without PIN.
+3) Provide an "Enterprise PIN Policy Checklist" table with PASS/FAIL and evidence references.
+
+PART B — FIX (ONLY IF ANY FAIL FOUND)
+If ANY item is FAIL, apply the minimal fix:
+- Keep the same UX patterns used elsewhere.
+- Use the existing role_key values only.
+- No new endpoints unless absolutely required (prefer extending existing ones).
+- Add/adjust only the smallest number of lines.
+
+PART C — GATE TESTS (MANDATORY)
+Run these tests (show commands + results):
+T1) Attempt to assign seller role to a user without PIN => expect 409
+T2) Set PIN then assign seller role => expect 200
+T3) Activate user with seller role but no PIN => expect 409
+T4) Set PIN then activate => expect 200
+T5) POSCashierGate: user with no PIN tries to enter => shows "no PIN" message (not generic error)
+Return final output:
+- Audit checklist with PASS/FAIL
+- If fixes were needed: git diff --stat + brief diff summary
+- Gate test report

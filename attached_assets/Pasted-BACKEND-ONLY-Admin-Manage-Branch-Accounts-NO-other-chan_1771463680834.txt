@@ -1,0 +1,66 @@
+BACKEND ONLY — Admin Manage Branch Accounts (NO other changes)
+
+STRICT RULES:
+- Modify ONLY server/** files.
+- Do NOT modify POS flows or atomic RPC payloads.
+- Must be Admin-only: requireSession + requireAdminRole.
+- Use bcrypt hashing (same as branch login verify).
+- Do NOT create default passwords.
+- Evidence: git diff --stat + git diff + smoke tests + DB proof.
+
+ADD 3 ADMIN ENDPOINTS:
+
+1) GET /api/admin/branch-accounts
+- Returns list of branches with any linked branch_accounts info:
+  { branch_id, branch_name, branch_code, has_account, username, is_active }
+- username should be null if no account exists.
+- Must NOT return password_hash.
+
+2) POST /api/admin/branch-accounts/set-credentials
+Body:
+{ "branchId":"<uuid>", "username":"br1", "password":"Abcd1234", "isActive": true }
+Validation:
+- branchId required
+- username required, trimmed, length 3..50
+- password required, length >= 8 (enterprise minimum)
+Behavior:
+- bcrypt hash password
+- UPSERT into branch_accounts:
+  - branch_id UNIQUE
+  - username UNIQUE
+  - password_hash set
+  - is_active = (isActive default true)
+  - updated_at = now()
+  - created_at = now() on insert
+
+3) POST /api/admin/branch-accounts/revoke-sessions
+Body:
+{ "branchId":"<uuid>" }
+Behavior:
+- Set revoked_at = now() for all non-revoked sessions for that branch
+- (Optional) also set expires_at = now() for immediate expiry
+- Does NOT touch credentials
+
+RESPONSES:
+- Use consistent style:
+  200 => { data: {...}, error: null }
+  400 => { data:null, error:{ message:"..." } }
+  403 => { error:"صلاحيات المشرف مطلوبة" } (same as other admin endpoints)
+
+IMPLEMENTATION NOTES:
+- Place endpoints near other admin endpoints in server/routes.ts (or in a new module server/branchAdmin.ts wired into routes).
+- Must reuse requireAdminRole pattern exactly.
+- Ensure username uniqueness error is handled cleanly (return 400 with message).
+
+SMOKE TESTS:
+0) Create admin session + non-admin session (same technique used before).
+1) Non-admin -> GET /api/admin/branch-accounts => 403
+2) Admin -> GET => 200 list returned
+3) Admin -> set-credentials invalid password "123" => 400
+4) Admin -> set-credentials valid => 200
+5) DB proof:
+   SELECT branch_id, username, is_active FROM branch_accounts WHERE branch_id = '<branchId>';
+6) Admin -> revoke-sessions => 200 and DB proof:
+   SELECT count(*) FROM branch_sessions WHERE branch_id='<branchId>' AND revoked_at IS NOT NULL;
+
+STOP after evidence.

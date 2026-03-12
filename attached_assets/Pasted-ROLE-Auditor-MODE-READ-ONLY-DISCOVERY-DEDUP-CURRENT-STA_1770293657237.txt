@@ -1,0 +1,67 @@
+ROLE: Auditor
+MODE: READ-ONLY DISCOVERY (DEDUP CURRENT STATE) — STOP AFTER EVIDENCE
+
+GOAL:
+Discover exactly how purchase invoice duplication is currently checked in the system:
+- Where the dedupe logic exists (UI / RPC / DB constraint / workflow table).
+- What key(s) are used today (invoice_number, payload hash, batch, file hash, supplier+date, etc).
+- Confirm whether SUPP INV exists anywhere and whether it is used.
+
+HARD RULES:
+- NO code changes.
+- NO schema changes.
+- Provide raw evidence outputs + short summary.
+- STOP after output.
+
+A) DB DISCOVERY (paste outputs):
+1) Show invoice header columns (actual table used for purchases):
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='invoices'
+ORDER BY ordinal_position;
+
+2) Check if supplier_invoice_no exists already:
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='invoices'
+AND column_name IN ('supplier_invoice_no','supp_inv','supp_invoice_no','supplier_inv_no');
+
+3) List constraints/indexes on invoices:
+SELECT
+  i.relname AS index_name,
+  ix.indisunique AS is_unique,
+  pg_get_indexdef(ix.indexrelid) AS index_def
+FROM pg_class t
+JOIN pg_index ix ON t.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+WHERE t.relname = 'invoices'
+ORDER BY i.relname;
+
+4) Identify idempotency/workflow tables used by purchase invoice RPCs:
+List tables containing workflow/request/idempotency:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND (table_name ILIKE '%workflow%' OR table_name ILIKE '%request%' OR table_name ILIKE '%idempot%')
+ORDER BY table_name;
+
+Then show columns for pos_workflow_requests (or actual table):
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name ILIKE '%workflow%request%'
+ORDER BY table_name, ordinal_position;
+
+B) CODE DISCOVERY (paste grep outputs):
+Run and paste:
+1) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "purchase_invoice_create_atomic|purchase_invoice_post_atomic|purchase_invoice_void_atomic" src
+2) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "duplicate|dedup|unique|payload_hash|hash|fingerprint|already exists|conflict" src/pages src/domain src/lib
+3) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "SUPP INV|supplier_invoice_no|supp_inv" src
+4) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "stable_payload_hash|begin_workflow_request|pos_workflow_requests" src
+
+C) OUTPUT SUMMARY (mandatory):
+- Where is dedupe enforced today (DB unique? workflow request hash? UI check?)
+- What key(s) are used today for dedupe
+- Is SUPP INV present in DB/UI today? (yes/no + where)
+- List the exact file(s) + function(s) that implement dedupe now
+
+STOP AFTER THIS SUMMARY + ALL PASTED EVIDENCE.

@@ -1,0 +1,71 @@
+FRONTEND-ONLY — Cashier PIN Gate for POS (NO backend changes)
+
+STRICT RULES:
+- Modify ONLY src/** files.
+- Do NOT modify backend or DB.
+- Do NOT change atomic RPC payloads.
+- Keep the existing BranchLoginGate behavior intact.
+- PIN is exactly 4 digits.
+- Evidence: git diff --stat + git diff + manual test notes.
+
+GOAL:
+Gate /pos and /pos/return by POS operational session (__pos):
+- If no POS session -> show Cashier select + PIN entry.
+- If POS session exists -> render the POS page.
+- Provide "Change Cashier" action that exits session and returns to gate.
+
+API:
+- GET  /api/pos/cashiers                -> list users for current branch
+- POST /api/pos/cashier/enter           body {cashier_user_id, pin}
+- POST /api/pos/cashier/exit
+- GET  /api/pos/cashier/context         -> current cashier/session info (used for header)
+
+IMPLEMENTATION:
+1) Create new component: src/components/POSCashierGate.tsx
+   - On mount:
+     a) try GET /api/pos/cashier/context
+        - if 200 => hasPosSession=true, store cashier info, render children
+        - if 401 => hasPosSession=false, show gate UI
+   - When showing gate UI:
+     - fetch cashiers via GET /api/pos/cashiers (requires branch session already)
+     - dropdown select cashier
+     - PIN input (masked, numeric, maxLength=4)
+     - validate /^\d{4}$/ before submit
+     - submit POST /api/pos/cashier/enter
+     - on success: re-fetch /api/pos/cashier/context then render children
+     - show server errors (401 wrong pin, 423 locked, 400 pin not set)
+   - Expose "Change Cashier" callback:
+     - call POST /api/pos/cashier/exit
+     - clear local cashier state
+     - return to gate UI
+
+2) Wire it into:
+   - src/pages/POSPage.tsx
+   - src/pages/POSReturnPage.tsx
+   Placement:
+   - Keep BranchLoginGate outermost as currently implemented.
+   - Inside BranchLoginGate gated area, wrap <MainLayout> content with <POSCashierGate>.
+   - Ensure selectedBranch still forced from BranchLoginGate branchId (unchanged).
+
+3) Header display:
+   - Show current cashier name/username in the POS header area (small badge)
+   - Add "Change Cashier" button (small) next to it.
+
+MANUAL TESTS:
+A) Login user -> BranchGate -> after branch login:
+   - Cashier gate appears
+   - List loads (cashiers)
+   - Wrong PIN => error shown
+   - Correct PIN => POS loads
+B) Refresh page:
+   - If __pos cookie still valid => directly opens POS (no gate)
+C) Click Change Cashier:
+   - Exits and gate returns
+D) /pos/return:
+   - Same gate behavior
+
+EVIDENCE:
+A) git diff --stat
+B) git diff
+C) Manual test notes
+STOP.

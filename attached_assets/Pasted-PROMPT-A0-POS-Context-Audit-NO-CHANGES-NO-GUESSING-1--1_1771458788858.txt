@@ -1,0 +1,118 @@
+PROMPT A0 — POS Context Audit (NO CHANGES / NO GUESSING)
+
+هدف التدقيق:
+نفهم بدقة:
+1) كيف يتم تحديد الفرع (branch_id) داخل POS الآن ولماذا لا يأتي تلقائيًا للبائع.
+2) لماذا "قائمة البياعين" داخل POS لا تعمل / لا تظهر / لا تُفلتر بالفرع.
+3) أين تُفرض الصلاحيات الخاصة بالبيع والمرتجع (Seller vs Supervisor) داخل POS وPOS Return.
+4) ما هي “مصادر الحقيقة” الحالية: access-context؟ profiles.default_branch_id؟ user_branches؟ localStorage؟ query params؟
+ممنوع أي تعديل في هذا البرومبت. AUDIT فقط.
+
+========================
+A) Trace Branch Resolution (Frontend)
+========================
+1) افتح الملفات التالية واقرأ المنطق الذي يحدد الفرع:
+- src/pages/POSPage.tsx
+- src/pages/POSReturnPage.tsx
+- src/components (أي مكون POSHeader / POSContext / BranchSelector إن وجد)
+- src/lib/dataGateway.ts (أي calls تتطلب branch_id)
+- src/components/auth/ModuleContext.tsx أو أي useModules/useAuth/useAccessContext
+
+2) ابحث بالـrg عن الكلمات المفتاحية التالية في src:
+rg -n "branchId|branch_id|default_branch|defaultBranch|user_branches|selectedBranch|branchContext|currentBranch|setBranch|branch_code|branch" src
+
+3) المطلوب في الناتج:
+- أين يتم قراءة branch_id لأول مرة عند فتح /pos؟
+- هل يتم أخذ branch_id من:
+  (a) profiles.default_branch_id
+  (b) user_branches (أول فرع)
+  (c) access-context
+  (d) localStorage/sessionStorage
+  (e) query param
+- ما الذي يحدث لو كان المستخدم مرتبط بأكثر من فرع؟
+- هل هناك UI لتغيير الفرع؟ وإن وجد، كيف يعمل؟
+
+خرج قسم A بصيغة جدول:
+Source | File:Line | How derived | Fallback behavior | Risk/Issue
+
+========================
+B) Trace Cashier / Seller selection list (Frontend)
+========================
+1) ابحث عن أي شاشة/مكون يعرض قائمة مستخدمين للبياعين داخل POS:
+- كلمات مفتاحية:
+rg -n "cashier|seller|users list|pick user|PIN|pin|employee|operator|shift|session|pos_session" src
+
+2) حدد:
+- هل يوجد "تاب البياعين" بالفعل؟ أو مجرد فكرة؟
+- هل يوجد UI لاختيار المستخدم الذي سيبيع؟ أم يعتمد على المستخدم المسجل نفسه؟
+- إن كانت القائمة موجودة: من أين تجلب البيانات؟ أي endpoint؟ وكيف تُفلتر بالفرع؟
+
+خرج قسم B:
+- هل توجد قائمة؟ (Yes/No)
+- إن نعم: File/Line + endpoint + expected payload
+- إن لا: أكد عدم وجودها ببحث rg + أين المنطق الحالي بديلًا عنها.
+
+========================
+C) Backend endpoints used by POS & POS Return (Read-only audit)
+========================
+1) استخرج كل الـfetch/rpc calls من POSPage وPOSReturnPage:
+- ما endpoints GET المستخدمة للبيانات؟ (customers/products/items/barcode/etc)
+- ما RPCs المستخدمة للكتابة؟
+  * complete_pos_sale_atomic
+  * complete_pos_piece_return_atomic
+  * get_customer_credit_balance
+  * أي شيء آخر
+
+2) لكل call:
+- اسم الدالة/المسار
+- هل يتطلب branch_id في الـpayload؟
+- كيف يُمرر branch_id الآن؟ ومن أين يأتي؟
+
+خرج قسم C كجدول:
+Screen | Call type (GET/RPC) | Name | Payload needs branch? | Source of branch now | Notes
+
+========================
+D) Permissions & Enforcement inside POS flows
+========================
+1) Frontend:
+- هل /pos و /pos/return محميين بـscreen_permissions فقط؟
+- هل يوجد أي شرط داخل POSReturnPage يطلب Supervisor؟ أم يعتمد على RBAC/RPC gate فقط؟
+- هل يوجد UI لطلب "Supervisor override" الآن؟ (غالباً لا—لكن لا تفترض، أثبت بالبحث)
+
+2) Backend:
+- هل RPC gate يسمح/يمنع complete_pos_piece_return_atomic بناء على role_key؟
+- هل هناك أي endpoint آخر للمرتجع/البيع يحتاج supervisor؟
+
+خرج قسم D:
+- Current enforcement points (UI/Backend)
+- Gaps (مثلاً: لا يوجد override UI، أو الفرع غير مضبوط، إلخ)
+
+========================
+E) Root Cause Hypotheses (Evidence-based only)
+========================
+بدون تخمين:
+- اذكر 1-3 أسباب محتملة لمشكلة "الفرع لا يأتي تلقائيًا" لكن كل سبب لازم يكون معه دليل File:Line.
+- اذكر 1-3 أسباب محتملة لمشكلة "قائمة البياعين لا تعمل" مع دليل.
+
+========================
+F) Minimal Fix Surface (NO IMPLEMENTATION)
+========================
+اقترح (بدون تنفيذ) أقل نقاط تغيير محتملة لتحقيق:
+- Auto branch selection (وفق الموجود حاليًا)
+- أو إدخال Branch Context layer (كخطوة لاحقة)
+لكن لا تكتب كود ولا تغيّر شيئاً.
+فقط “خريطة التغيير”:
+Component/Endpoint | Change needed | Why | Risk
+
+========================
+OUTPUT FORMAT
+========================
+أعد التقرير النهائي بالعربية بهذه الأقسام:
+A) Branch Resolution Map
+B) Cashier List Map
+C) POS Call Matrix
+D) Permissions/Enforcement
+E) Evidence-based causes
+F) Minimal Fix Surface (proposal only)
+
+ممنوع أي تعديل. AUDIT ONLY.

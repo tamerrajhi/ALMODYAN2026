@@ -1,0 +1,62 @@
+✅ PROMPT — HARDENING CLOSEOUT EVIDENCE PACK (RAW ONLY) | NO NARRATIVE | STOP
+
+ROLE: Full-stack Engineer
+MODE: Evidence-only. Do not explain. Do not summarize. Output raw command outputs only.
+
+GOAL:
+Prove Wave-2 hardening actually landed:
+1) Missing production tables return 501 SCHEMA_NOT_READY (NOT 200 + [])
+2) Sensitive endpoints are protected (401 without auth)
+3) Duplicate routes removed (single definition per method+path)
+4) Supabase usage reduced as claimed (counts)
+
+A) SCHEMA PROOF (RAW SQL)
+Run these 9 lines exactly and paste outputs:
+SELECT to_regclass('public.work_orders');
+SELECT to_regclass('public.work_order_partial_completions');
+SELECT to_regclass('public.work_order_materials');
+SELECT to_regclass('public.work_order_labor');
+SELECT to_regclass('public.production_stages');
+SELECT to_regclass('public.gemstone_inventory');
+SELECT to_regclass('public.gemstone_types');
+SELECT to_regclass('public.raw_materials');
+SELECT to_regclass('public.wip_inventory');
+
+B) ENDPOINT BEHAVIOR PROOF (NO AUTH) — MUST SHOW STATUS + BODY (first 30 lines)
+Run:
+curl -i http://localhost:5000/api/custom-roles | sed -n '1,35p'
+curl -i http://localhost:5000/api/screens | sed -n '1,35p'
+curl -i http://localhost:5000/api/dashboard/branch-stats | sed -n '1,35p'
+
+C) SCHEMA_NOT_READY PROOF (NO AUTH + AUTH OPTIONAL)
+For ONE production endpoint used by WorkOrderDetailsPage AND ONE used by WIPPage:
+1) curl -i (no auth) -> must be 401 OR 501 (explain with status only, no narrative)
+2) curl -i (with auth) -> must be 501 + {"error_code":"SCHEMA_NOT_READY",...}
+Print exact curl commands + outputs.
+
+D) DUPLICATE ROUTE ELIMINATION PROOF
+Show raw grep for duplicates (method+path):
+rg -n 'app\.(get|post|put|delete)\("/api/(custom-roles|screens|gold-karats|gold-prices|purchase-batches)"' server/routes.ts
+
+E) SUPABASE COUNTS (POST-HARDENING)
+python - <<'PY'
+import os,re,collections
+cnt=collections.Counter()
+for root,_,files in os.walk("src"):
+  for fn in files:
+    if not (fn.endswith(".ts") or fn.endswith(".tsx")): 
+      continue
+    p=os.path.join(root,fn)
+    s=open(p,"r",encoding="utf-8",errors="ignore").read()
+    n=len(re.findall(r"supabase\s*\.\s*(from|rpc)\s*\(", s))
+    if n: cnt[p]=n
+print("TOTAL_FILES",len(cnt))
+print("TOTAL_CALLS",sum(cnt.values()))
+for p,n in cnt.most_common(20):
+  print(n,p)
+PY
+
+F) BUILD PROOF
+npm run build
+
+STOP.

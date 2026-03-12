@@ -1,0 +1,116 @@
+✅ PROMPT — SUPABASE STATUS VERIFICATION + FULL MIGRATION TO NEON | EVIDENCE ONLY | NO GUESSING | STOP
+
+ROLE: Full-stack Engineer (Vite/React + Express + Neon)
+MODE: Evidence-first. Do not assume. Do not invent endpoints. Derive everything from existing code.
+
+OBJECTIVES:
+1) Prove (with raw evidence) whether Supabase is still used at runtime and where.
+2) If yes, migrate remaining Supabase DB usage (supabase.from / supabase.rpc) to Neon via existing dataGateway/apiClient patterns (or add ONLY the minimal required Express GET endpoints).
+3) Add hard gates to prevent any future Supabase DB usage.
+
+HARD RULES:
+- NO speculation.
+- Every claim must have raw command output proof.
+- Migrations must be file-by-file with diffs + runtime proof.
+- Do not change UI behavior besides replacing the data source.
+- Do NOT create generic “table read” endpoints unless already exists and allowlisted; prefer explicit endpoints per feature.
+
+SECTION A — ENV & CONFIG PROOF (RAW)
+A1) Show .env supabase keys existence:
+cat .env | rg "VITE_SUPABASE_URL|VITE_SUPABASE_PUBLISHABLE_KEY|VITE_DATA_BACKEND" || true
+
+A2) Show Vite frontend env at build time (raw):
+rg -n "import\\.meta\\.env\\.VITE_SUPABASE_(URL|PUBLISHABLE_KEY)|import\\.meta\\.env\\.VITE_DATA_BACKEND" src --glob='*.ts' --glob='*.tsx' || true
+
+A3) Show Node/server env (raw):
+node -e "console.log('process.env.VITE_SUPABASE_URL=', process.env.VITE_SUPABASE_URL); console.log('process.env.VITE_DATA_BACKEND=', process.env.VITE_DATA_BACKEND);" || true
+
+SECTION B — SUPABASE USAGE INVENTORY (MULTILINE-AWARE) (RAW)
+B1) Exact count of files calling supabase.from/rpc (must catch multiline):
+python - <<'PY'
+import os,re
+matches=[]
+for root,_,files in os.walk("src"):
+  for fn in files:
+    if not (fn.endswith(".ts") or fn.endswith(".tsx")): 
+      continue
+    p=os.path.join(root,fn)
+    s=open(p,"r",encoding="utf-8",errors="ignore").read()
+    if re.search(r"supabase\\s*\\.\\s*(from|rpc)\\s*\\(", s):
+      matches.append(p)
+print("FILES_WITH_SUPABASE_CALLS", len(matches))
+for p in sorted(matches)[:200]:
+  print(p)
+PY
+
+B2) List top 30 files by number of supabase calls (raw):
+python - <<'PY'
+import os,re,collections
+cnt=collections.Counter()
+for root,_,files in os.walk("src"):
+  for fn in files:
+    if not (fn.endswith(".ts") or fn.endswith(".tsx")): 
+      continue
+    p=os.path.join(root,fn)
+    s=open(p,"r",encoding="utf-8",errors="ignore").read()
+    n=len(re.findall(r"supabase\\s*\\.\\s*(from|rpc)\\s*\\(", s))
+    if n: cnt[p]=n
+print("TOTAL_FILES",len(cnt))
+print("TOTAL_CALLS",sum(cnt.values()))
+for p,n in cnt.most_common(30):
+  print(n,p)
+PY
+
+B3) Show all edge function calls (functions/v1) (raw):
+rg -n "functions/v1/" src --glob='*.ts' --glob='*.tsx' || true
+
+SECTION C — RUNTIME PROOF: WHICH BACKEND IS ACTUALLY USED? (NO GUESSING)
+C1) Prove current runtime backend selection from logs (raw):
+rg -n "\\[ACTIVE_DATA_BACKEND\\]" -S . || true
+
+C2) Prove whether any supabase.from calls execute in runtime logs:
+- Add TEMPORARY instrumentation ONLY in the supabase client file to log when it is created/used:
+  src/integrations/supabase/client.ts: add console.info("[SUPABASE_CLIENT_ACTIVE]") once on client creation.
+- Add TEMPORARY instrumentation wrapper on supabase.from / supabase.rpc by monkey patching in that same file (log table/function name).
+IMPORTANT: this instrumentation must be behind a guard:
+if (import.meta.env.DEV) { ... } 
+Do not change logic.
+
+Then run the app and capture logs:
+- show workflow logs lines containing SUPABASE_CLIENT_ACTIVE or SUPABASE_CALL.
+- If none appear during normal navigation, that proves Supabase is currently dead-path for your tested routes, but code still exists.
+
+SECTION D — MIGRATION PLAN (DERIVED FROM INVENTORY, NOT IDEAS)
+D1) Categorize remaining usage by type:
+- DB reads (supabase.from select)
+- DB rpc (supabase.rpc)
+- Edge Functions (functions/v1)
+- Storage (supabase.storage)
+Output must be a table: category -> files list.
+
+D2) Choose Wave 1 = top 5 non-health pages/components by call count (from B2).
+For each file in Wave 1:
+- Paste the exact supabase query blocks VERBATIM (copy from code).
+- Implement equivalent Neon read using:
+  - existing dataGateway/apiClient endpoints IF they already exist, otherwise create minimal explicit Express GET endpoints matching the query.
+- Replace only the data source calls in that file.
+- Evidence pack per file:
+  1) git diff --stat
+  2) git diff (only the touched file + server routes + dataGateway changes)
+  3) curl -i to the new/used endpoint(s) (show status + first 20 lines of JSON)
+  4) rg proof: file has zero "supabase." usage after change
+  5) Browser/workflow logs show no errors for that route
+
+STOP after completing Wave 1.
+
+SECTION E — HARD GATES (PREVENT REGRESSION)
+E1) Add CI/pre-commit grep gate:
+- Fail if any "supabase.(from|rpc)(" exists in src/ except src/components/health/*
+- Fail if any "functions/v1" exists in src/ after Phase 3 (not in this run)
+Provide the exact shell commands used as the gate.
+
+OUTPUT FORMAT (STRICT):
+- Print all raw command outputs for Sections A/B/C.
+- Then D1 table.
+- Then Wave 1 migrations with per-file evidence packs.
+NO narrative. NO recommendations without evidence. STOP.

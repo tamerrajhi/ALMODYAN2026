@@ -1,0 +1,65 @@
+DB-ONLY — Create Cashier PINs + POS Operational Sessions (NO CODE CHANGES)
+
+Goal:
+Add operational POS layer:
+- user_pins: PIN authentication for staff users (cashiers/supervisors)
+- pos_sessions: current POS shift/session within a branch (branch-scoped, cashier-scoped)
+
+Rules:
+- DB changes only.
+- Do NOT modify existing tables.
+- No default PINs inserted.
+- Provide BEFORE/AFTER proof.
+- Keep schema minimal & enterprise-friendly.
+
+1) BEFORE:
+SELECT
+  to_regclass('public.user_pins') AS user_pins,
+  to_regclass('public.pos_sessions') AS pos_sessions;
+
+2) Migration (single transaction):
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS user_pins (
+  user_id uuid PRIMARY KEY REFERENCES profiles(user_id) ON DELETE CASCADE,
+  pin_hash text NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  failed_attempts int NOT NULL DEFAULT 0,
+  locked_until timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_pins_locked_until_idx ON user_pins(locked_until);
+
+CREATE TABLE IF NOT EXISTS pos_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id uuid NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  cashier_user_id uuid NOT NULL REFERENCES profiles(user_id) ON DELETE RESTRICT,
+  opened_at timestamptz NOT NULL DEFAULT now(),
+  closed_at timestamptz,
+  created_by_user_id uuid REFERENCES profiles(user_id) ON DELETE SET NULL,
+  device_fingerprint text,
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pos_sessions_branch_id_idx ON pos_sessions(branch_id);
+CREATE INDEX IF NOT EXISTS pos_sessions_cashier_user_id_idx ON pos_sessions(cashier_user_id);
+CREATE INDEX IF NOT EXISTS pos_sessions_opened_at_idx ON pos_sessions(opened_at);
+CREATE INDEX IF NOT EXISTS pos_sessions_closed_at_idx ON pos_sessions(closed_at);
+
+COMMIT;
+
+3) AFTER:
+SELECT
+  to_regclass('public.user_pins') AS user_pins,
+  to_regclass('public.pos_sessions') AS pos_sessions;
+
+4) Columns proof:
+SELECT table_name, column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name IN ('user_pins','pos_sessions')
+ORDER BY table_name, ordinal_position;
+
+STOP.
+Return outputs.

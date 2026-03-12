@@ -1,0 +1,98 @@
+AUDIT ONLY — POS Login UI + Sidebar + Branch/Seller display (NO CODE CHANGES)
+
+Rules:
+- NO implementation, NO refactor, NO edits.
+- Only collect evidence with exact file/line references + raw rg outputs + endpoint auth status.
+- Paste outputs exactly as-is.
+
+Goal:
+Confirm precisely why:
+1) POS sidebar doesn't show the requested 3 routes only for cashier.
+2) Branch name shows UUID/garbage instead of "Name (Code)".
+3) Seller shows "جاري التحميل..." or "البائع غير محدد" and whether seller selection exists.
+
+========================
+PHASE A — ROUTES + GUARDS
+A1) Confirm POS standalone routing:
+- Open src/App.tsx
+- Paste the exact <Route> entries for:
+  /pos
+  /pos/return
+  /pos/invoices
+  /pos/returns
+  /sales/pos-invoices redirect
+- Confirm what wrappers are used for POS routes (POSRoute / ModuleRoute) with line numbers.
+
+A2) Confirm what redirects back to /auth:
+- Search for any ProtectedRoute / ModuleAwareRoute affecting /pos.
+- Paste relevant snippets with line numbers.
+
+RG commands (paste raw output):
+1) rg -n "path=\"/pos|/pos/return|/pos/invoices|/pos/returns|/sales/pos-invoices|POSRoute|ModuleRoute|ProtectedRoute|ModuleAwareRoute" src/App.tsx src/components/auth/ModuleAwareRoute.tsx
+
+========================
+PHASE B — POS SIDEBAR BEHAVIOR
+B1) POS sidebar menu definition:
+- Open src/components/pos/POSLayout.tsx
+- Paste posMenuSections definition and the filtering logic that decides what appears.
+- Identify whether filtering is section-level only or item-level, with line numbers.
+
+B2) Confirm cashier vs admin detection source:
+- Paste the exact code that calls:
+  /api/pos/session/context
+  /api/pos/admin/context
+  /api/branch/context (if any)
+- Paste how isPosAdmin / hasBranch / isPosMode are computed.
+
+RG commands (paste raw output):
+2) rg -n "posMenuSections|adminOnly|filteredSections|isPosAdmin|hasBranch|pos/session/context|pos/admin/context|branch/context" src/components/pos/POSLayout.tsx src/components/layout/MainLayout.tsx
+
+========================
+PHASE C — BRANCH NAME (BADGE) SOURCE
+C1) Where the branch badge is rendered:
+- Open src/pages/POSPage.tsx and src/pages/POSReturnPage.tsx
+- Paste the exact badge JSX showing branch name and which variables it uses.
+
+C2) How BranchLoginGate computes activeBranchName:
+- Open src/components/pos/BranchLoginGate.tsx
+- Paste:
+  - the public branches fetch (URL used, response unwrap)
+  - the branchName computation chain (prop match → public match → fallback)
+  - what it passes into children()
+
+C3) Confirm public endpoint response shape:
+- Find GET /api/public/branches-list in server/routes.ts
+- Paste its response fields (branch_id, name, code, etc.)
+
+RG commands (paste raw output):
+3) rg -n "activeBranchName|selectedBranch|Building2|/api/public/branches-list|publicBranches|branchNameFromProp|branch_id|name|code" src/pages/POSPage.tsx src/pages/POSReturnPage.tsx src/components/pos/BranchLoginGate.tsx server/routes.ts
+
+========================
+PHASE D — SELLER (BAI3) FLOW
+D1) Confirm whether seller selection dropdown exists:
+- Open src/pages/POSPage.tsx
+- Search for Select/Dropdown for seller, selectedSellerId, sellers list fetch.
+- Paste results with line numbers.
+
+D2) Confirm current seller source:
+- Paste currentSellerName derivation and SellerSync usage (if exists).
+- Confirm what happens if seller_profile_id is empty (does UI get stuck?).
+
+D3) Confirm seller list endpoint availability for POS:
+- Locate endpoint:
+  GET /api/branches/:branchId/sellers
+- Paste middleware guard used (requireSession vs requireBranchSession vs requirePosSession).
+- Also search if there is any POS-scoped sellers endpoint already.
+
+RG commands (paste raw output):
+4) rg -n "seller|SellerSync|selectedSellerId|cashierInfo|seller_profile_id|seller_display_name|/branches/.*/sellers|requireSession|requireBranchSession|requirePosSession" src/pages/POSPage.tsx server/routes.ts server/posSession.ts server/branchAuth.ts
+
+========================
+PHASE E — OUTPUT FORMAT
+Return:
+- A numbered list of findings (1–3) with:
+  - File + line references
+  - The exact root cause per finding (1 sentence)
+- Raw rg outputs (as pasted above)
+- For seller endpoint: explicitly state “POS can call it” or “POS cannot call it” with evidence (middleware).
+STOP — do not implement anything.

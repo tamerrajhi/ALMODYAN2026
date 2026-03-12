@@ -1,0 +1,17 @@
+-- P0.2: Add sale_out movements to complete_pos_sale_atomic
+-- When POS sells items, each item now gets a movement record:
+--   movement_type = 'sale_out'
+--   reference_type = 'invoice'
+--   reference_id = invoice_id
+--   from_branch_id = sale branch
+--   to_branch_id = NULL
+--
+-- The movement INSERT loop is placed immediately after:
+--   UPDATE unique_items SET sold_at = now(), sale_id = v_sale_id, status = 'sold'
+--
+-- Idempotency: The existing idempotency guard (pos_workflow_requests) ensures
+-- duplicate RPC calls never re-execute the function body, so no duplicate
+-- sale_out rows can be created.
+--
+-- NO schema changes. Only the function body was modified via CREATE OR REPLACE.
+-- See the full function definition in the database (pg_get_functiondef).

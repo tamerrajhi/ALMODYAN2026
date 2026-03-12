@@ -1,0 +1,44 @@
+ROLE: Senior Full-Stack Engineer
+
+GOAL: Enforce "Atomic-Only" writes. Absolutely forbid any direct DB writes from the frontend (insert/update/upsert/delete). All writes MUST go through existing Supabase RPCs (already atomic). This is a hard freeze to eliminate legacy paths quickly.
+
+SCOPE (UI CODE ONLY):
+- Search the entire src/ for any Supabase client usage:
+  - .from(...).insert(...)
+  - .from(...).update(...)
+  - .from(...).upsert(...)
+  - .from(...).delete(...)
+- Also catch any helper services that wrap those writes (e.g. purchasingWriteService.ts, accounting.ts, accounting-health-fixes.ts, useSuppliers.ts, components/products/*, components/production/*).
+
+IMPLEMENTATION:
+1) Create a single guard wrapper in src/lib/atomicWriteGuard.ts:
+   - Export functions that throw a hard error when any direct write is attempted:
+     - forbidDirectWrite(opName: string, fileHint?: string): never
+   - Error message must be explicit: "DIRECT_WRITE_BLOCKED: Use RPC atomic instead."
+
+2) Replace every direct write call found in (SCOPE) with a call to forbidDirectWrite(...) and immediately STOP the original write.
+   - Do NOT attempt to refactor to RPC now.
+   - Do NOT invent new RPCs.
+   - Keep reads (select) unchanged.
+
+3) Update UI to handle blocked writes gracefully:
+   - Wherever a blocked write would have been triggered, show a toast/dialog:
+     - Arabic message: "تم إيقاف هذا المسار لأنه غير ذري (Legacy). استخدم المسار الذري (Atomic) أو انتظر تحويل الشاشة."
+   - Ensure the app still builds.
+
+4) Safe cleanup:
+   - If src/lib/pos-return-workflow.ts is truly unused (no imports), delete it.
+   - For DeprecatedPurchasingPage.tsx: replace route usage with inline <Navigate ... /> and delete the page only if no longer referenced.
+
+EVIDENCE REQUIRED:
+- For every file modified, list:
+  - file path
+  - each blocked direct write with line number(s)
+- Confirm: "No remaining .insert/.update/.upsert/.delete in src/" by running grep and pasting results (should be empty).
+
+STRICT RULES:
+- No database schema changes.
+- No new RPC creation.
+- No guessing: if something is unclear, STOP and report what is missing.
+- After completing, output a short checklist of what screens may be impacted due to blocked legacy writes (by feature area only: Suppliers/Products/Production/Accounting fixes/Purchase Orders/Returns if applicable).
+STOP AFTER DONE.

@@ -1,0 +1,64 @@
+ROLE: Full-Stack Engineer
+MODE: ATOMIC MULTI-INVOICE FIX (IMPORTPAGE.tsx ONLY) — STOP AFTER EVIDENCE
+
+SCOPE (STRICT):
+- Modify ONLY: src/pages/ImportPage.tsx
+- Do NOT touch routing/navigation (App.tsx, MainLayout, DashboardPage) at all.
+- Keep existing UI layout and flow as-is, only extend it to support selecting multiple invoice files and enforcing SUPP INV dedupe.
+
+GOAL:
+On route /import (ImportPage.tsx), support selecting 1..N Excel files where each file represents ONE purchase invoice (unique items import).
+Implement SUPP INV preflight to prevent duplicates:
+A) Inside each file: EXACTLY ONE unique SUPP INV (from column name exactly "SUPP INV")
+B) Across selected files: no duplicate SUPP INV
+C) Against DB: none of the selected SUPP INV already exist for the same supplier_id (purchase invoices, status<>'voided')
+If any check fails => block and create ZERO invoices (no create loop started)
+
+REUSE (DO NOT REINVENT):
+- Use existing RPC: purchase_invoice_supp_inv_precheck(p_supplier_id uuid, p_supp_invs text[]) returns jsonb {success, exists[]}
+- Use existing atomic create flow already used by ImportPage.tsx (purchase_invoice_create_atomic / createPurchaseInvoiceAtomic wrapper).
+- Keep existing parsing of rows/items and mapping to invoice items unchanged.
+
+NORMALIZATION:
+normSuppInv = upper(trim(value))
+
+IMPLEMENTATION DETAILS:
+1) File input:
+- Change to allow multiple selection (multiple attribute).
+- Store selected files as File[] in state.
+2) Preflight build per file:
+- Parse each file (same method currently used).
+- Extract SUPP INV values from column "SUPP INV" (exact header).
+- Normalize each found value.
+- Per-file: uniqueSuppInvs must be length=1
+   - 0 => error "الملف X لا يحتوي على SUPP INV"
+   - >1 => error "الملف X يحتوي على أكثر من SUPP INV: [...]"
+- Attach suppInv to that file’s prepared invoice payload.
+3) Cross-file duplicate check:
+- Build map suppInv -> file names; if any suppInv appears in >1 file => block with list.
+4) DB precheck (before create):
+- Require supplier_id selected.
+- Call purchase_invoice_supp_inv_precheck with ALL normalized suppInvs.
+- If exists[] non-empty => block with list and return BEFORE any create.
+5) Create loop:
+- Only if all preflight passes.
+- For each file:
+  - Generate client_request_id = crypto.randomUUID()
+  - Ensure payload uses supplier_invoice_no = fileSuppInv (normalized)
+  - Call atomic create.
+- On first failure: stop remaining; show error; do NOT proceed.
+
+EVIDENCE (MANDATORY):
+A) ImportPage.tsx snippets with line numbers showing:
+  1) multi-file input
+  2) SUPP INV extraction from column "SUPP INV"
+  3) per-file validation
+  4) cross-file dedupe check
+  5) DB precheck call + EARLY RETURN BEFORE create
+  6) create loop AFTER preflight
+B) A short "Route confirmation" line:
+  "This change affects /import only (src/pages/ImportPage.tsx)."
+C) Grep proof (must show no new direct writes were introduced):
+  grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E '\.from\([^)]*\)\.(insert|update|upsert|delete)\(' src/pages/ImportPage.tsx
+
+STOP AFTER EVIDENCE. NO OTHER MODULES.

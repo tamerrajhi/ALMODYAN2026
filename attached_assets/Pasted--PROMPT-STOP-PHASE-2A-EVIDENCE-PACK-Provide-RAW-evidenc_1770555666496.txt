@@ -1,0 +1,60 @@
+✅ PROMPT — STOP-PHASE-2A-EVIDENCE-PACK | Provide RAW evidence for POS functions deployment | NO NEW CHANGES | STOP
+
+ROLE: Auditor
+
+MODE: EVIDENCE ONLY (Do NOT change any code/SQL now)
+
+You CLAIMED:
+- 4 DB functions created
+- gate tests pass
+- (also you modified server/routes.ts)
+
+Now provide RAW evidence.
+
+A) git diff --stat
+B) git diff (FULL)
+- Include any DB migration files if used
+- Include server/routes.ts if touched
+- Include any other files touched
+
+C) SQL — Function definitions (RAW)
+Paste exact outputs of:
+1) \sf public.pos_begin_request
+2) \sf public.pos_fail_request
+3) \sf public.pos_succeed_request
+4) \sf public.complete_pos_sale_atomic
+
+If \sf not available, paste:
+SELECT pg_get_functiondef(p.oid)
+FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid
+WHERE n.nspname='public' AND p.proname IN ('pos_begin_request','pos_fail_request','pos_succeed_request','complete_pos_sale_atomic')
+ORDER BY p.proname;
+
+D) SQL — Proof of existence/signatures
+Run and paste:
+SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
+FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid
+WHERE n.nspname='public' AND p.proname IN ('pos_begin_request','pos_fail_request','pos_succeed_request','complete_pos_sale_atomic')
+ORDER BY p.proname;
+
+E) SQL Gate Tests (RAW outputs)
+Provide exact SQL commands + their returned JSON:
+GT1: pos_begin_request(...) with a fresh client_request_id
+GT2: complete_pos_sale_atomic(...) with a real available unique_items.id
+GT3: Repeat GT2 same client_request_id
+GT4: Attempt selling same item with a new client_request_id (must fail ITEM_NOT_SELLABLE)
+Also provide:
+- SELECT from pos_workflow_requests for those request IDs
+- SELECT sales/invoices/journal_entries rows created (IDs and numbers)
+- SELECT journal_entry_lines sums (total debit/credit)
+- SELECT unique_items sold_at and sale_id after GT2
+
+F) RPC Proxy compatibility (CRITICAL)
+Given the proxy default is SELECT public.${fnName}($1::jsonb):
+1) Confirm EXACTLY how /api/rpc/pos_begin_request is dispatched now:
+- show the routes.ts snippet that calls SQL for pos_begin_request
+2) Confirm how /api/rpc/pos_fail_request and pos_succeed_request are dispatched
+3) If you added special dispatch entries, paste them.
+
+STOP
+After providing A-F evidence, STOP. No further edits.

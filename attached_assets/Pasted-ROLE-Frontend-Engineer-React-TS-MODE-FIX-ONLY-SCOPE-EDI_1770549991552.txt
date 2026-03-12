@@ -1,0 +1,81 @@
+ROLE: Frontend Engineer (React/TS)
+
+MODE: FIX ONLY
+
+SCOPE: EDIT ONLY ONE FILE
+- src/pages/POSPage.tsx
+Do NOT modify any other files.
+
+GOALS
+A) Scanner flow (Scan-to-Add):
+- When user scans a barcode using a hardware scanner (keyboard wedge), it should be added to cart automatically without pressing "+".
+- This is already routed through handleBarcodeScan(barcode). Ensure Enter triggers it reliably and refocuses input after adding.
+
+B) Mobile camera scan:
+- Add a camera button next to the existing "+" button in the barcode input area (around lines ~936-961).
+- Use ONLY BarcodeDetector API (no ZXing/quagga in this step).
+- On BOTH Android and iPhone: show the camera button (debug mode).
+- If unsupported or fails, show clear debug info in the modal (no crashes).
+
+STRICT RULES
+- Do not change backend, DB, routes, RPCs, allowlist.
+- Reuse existing handleBarcodeScan(barcode) and addToCart(item) logic. Do NOT duplicate business logic.
+- UI must remain RTL/Arabic friendly.
+- Clean up camera resources (stop tracks, cancel RAF) on close/unmount.
+
+IMPLEMENTATION DETAILS
+
+1) Scanner Enter behavior (Scan-to-Add)
+- Locate the barcode input JSX (lines ~937-948) and its onKeyDown.
+- Ensure pressing Enter:
+  - preventDefault
+  - calls handleBarcodeScan(inputValue)
+  - clears input (if current code doesn’t already)
+  - refocuses the barcode input after success (use inputRef + requestAnimationFrame)
+
+- Add a light "likelyScan timing" tracker ONLY if needed to avoid accidental adds from manual typing:
+  - Track first/last keystroke timestamps in onChange.
+  - If duration <= 200ms AND length >= 6 => treat as scan.
+  - On Enter:
+      if likelyScan => call handleBarcodeScan
+      else keep existing behavior (search only) OR still call handleBarcodeScan if current design expects Enter to add.
+  NOTE: prefer minimal change: keep current behavior but ensure scanner workflow is flawless.
+
+2) Camera button + modal (BarcodeDetector only)
+- Add a camera icon button near the "+" button in the same container.
+- On click:
+  - Open a modal overlay with:
+    - <video playsInline muted> preview area
+    - a debug panel showing:
+      hasMediaDevices, hasBarcodeDetector, isSecureContext, userAgent
+  - Attempt getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+    - If fails: show error.name + error.message in modal.
+  - If hasBarcodeDetector is false:
+    - show message: "BarcodeDetector غير مدعوم على هذا المتصفح (Debug)"
+    - keep modal open; allow user to close; stop camera if opened.
+  - If supported:
+    - create BarcodeDetector with formats: ean_13, ean_8, code_128, code_39, qr_code, upc_a, upc_e
+    - run detect loop (requestAnimationFrame)
+    - on first detection:
+      - call handleBarcodeScan(rawValue)
+      - close modal and stop tracks
+
+3) Cleanup
+- Stop all media tracks on close/unmount.
+- Cancel requestAnimationFrame loop on close/unmount.
+- Do not leak streams.
+
+EVIDENCE REQUIRED (RAW)
+A) git diff --stat
+B) git diff (full)
+C) Console logs or debug panel screenshots:
+   - Android: hasBarcodeDetector=true, scan success
+   - iPhone: show flags (and unsupported reason if any) without crash
+D) Gate Tests:
+   GT1 Hardware scanner: scan -> item added without pressing "+"
+   GT2 Manual typing: typing still works as before
+   GT3 Android camera: open -> detect -> added
+   GT4 iPhone camera: button visible; modal shows debug; if unsupported shows message; no crash
+
+STOP
+After providing evidence and gate tests, STOP.

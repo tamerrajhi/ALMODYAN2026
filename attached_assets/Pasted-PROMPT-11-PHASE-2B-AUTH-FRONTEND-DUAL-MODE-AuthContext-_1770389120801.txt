@@ -1,0 +1,77 @@
+PROMPT 11 — PHASE-2B AUTH | FRONTEND DUAL-MODE AuthContext ONLY | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+MODE: FRONTEND ONLY (NO SERVER CHANGES IN THIS PROMPT)
+
+SCOPE (ONLY THESE FILES):
+1) src/contexts/AuthContext.tsx
+2) src/lib/dataGateway.ts   (ONLY if you need a tiny helper for fetch/post; otherwise avoid)
+
+GOAL:
+Add a dual-mode auth backend controlled by env:
+  VITE_AUTH_BACKEND = "supabase" | "session"
+Default remains "supabase".
+When "session", AuthContext must use:
+  - GET  /api/auth/me
+  - POST /api/auth/login
+  - POST /api/auth/logout
+and preserve the same useAuth() contract for the rest of the app.
+
+STRICT RULES (NO EXCEPTIONS):
+- Do NOT modify any other pages/components/hooks.
+- Do NOT change ProtectedRoute or any consumer code.
+- Do NOT change UI messages unless absolutely necessary.
+- Keep existing Supabase auth flow intact when VITE_AUTH_BACKEND != "session".
+- When using fetch to /api/auth/* MUST include credentials:
+  fetch(url, { credentials: "include", ... })
+- Must keep user object shape backwards-compatible:
+  Provide a Supabase-like user shape at minimum:
+    user.id (string UUID)
+    user.email (string)
+    user.user_metadata.full_name (if available)
+    user.user_metadata.username (if available)
+  so that existing code using useAuth().user continues working.
+- signUp in session-mode:
+  Return a clear "Not supported" error (since admin-create-user via Edge Function is used)
+  BUT do NOT break the UI; return a structured error consistent with existing code.
+
+IMPLEMENTATION REQUIREMENTS:
+1) Detect backend:
+   const AUTH_BACKEND = import.meta.env.VITE_AUTH_BACKEND ?? "supabase";
+2) Session-mode functions:
+   - sessionMe(): GET /api/auth/me (401 => no user)
+   - sessionLogin(email_or_username, password): POST /api/auth/login
+   - sessionLogout(): POST /api/auth/logout
+3) AuthContext behavior:
+   - On mount:
+     if session-mode => call sessionMe() once to set user/session state.
+     else => current supabase.getSession + onAuthStateChange logic (unchanged).
+   - signIn:
+     if session-mode => call sessionLogin
+     else => current supabase.signInWithPassword
+   - signOut:
+     if session-mode => call sessionLogout
+     else => current supabase.signOut
+4) Error handling:
+   - Keep existing toast/error patterns as-is.
+   - Do NOT introduce new global error UI.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff --
+C) Grep proofs:
+   - rg -n "VITE_AUTH_BACKEND" src/contexts/AuthContext.tsx
+   - rg -n "/api/auth/(me|login|logout)" src/contexts/AuthContext.tsx
+D) Typecheck:
+   tsc --noEmit (Exit 0)
+E) Runtime verification (text only):
+   1) With VITE_AUTH_BACKEND unset (supabase default):
+      - App loads, user remains authenticated as before.
+   2) With VITE_AUTH_BACKEND=session and server SESSION_AUTH_ENABLED=true:
+      - Login works
+      - /api/auth/me loads user on refresh (cookie persists)
+      - Logout clears user
+   Mention any console errors if present.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

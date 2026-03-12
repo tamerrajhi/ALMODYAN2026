@@ -1,0 +1,49 @@
+✅ PROMPT — FAST TRACK: WAVE-2 MIGRATION (TOP IMPACT 6 FILES) | MIN ENDPOINTS | EVIDENCE LIGHT | STOP
+
+ROLE: Full-stack Engineer (React + Express + Neon)
+MODE: Execute. Prioritize speed + correctness. No redesign. No speculation.
+
+GOAL:
+In ONE run, remove ALL supabase.from / supabase.rpc usage from the next 6 highest-impact NON-HEALTH files, with minimal backend work.
+
+HARD RULES (FAST):
+1) Do NOT build “perfect” new endpoints unless required. Prefer existing endpoints:
+   - dataGateway/apiClient.get() if exists
+   - /api/query/:table (ONLY if already exists + allowlisted + requires session)
+2) If a query needs joins/aggregations and no endpoint exists, create ONE explicit endpoint per file (max 1–2).
+3) Each file must end with:
+   - zero "supabase." usage
+   - zero supabase import
+4) Evidence LIGHT (must provide):
+   - git diff --stat
+   - rg proof per file: rg -n "supabase\\s*\\." <file> returns 0
+   - curl -i for any NEW endpoint (status + Content-Type + first 15 lines JSON)
+STOP after 6 files.
+
+STEP 0 — PICK FILES (NO GUESSING)
+From the inventory counts already produced, select exactly these 6 files (skip health/*):
+1) src/pages/production/WorkOrderDetailsPage.tsx
+2) src/pages/TransferRequestsPage.tsx
+3) src/pages/production/WIPPage.tsx
+4) src/pages/sales/SalesReturnFormPage.tsx
+5) src/pages/SerialTrackingPage.tsx
+6) src/pages/RolesPage.tsx
+
+STEP 1 — FOR EACH FILE (DO IT)
+For each file:
+1.1) Paste only the supabase query blocks (verbatim).
+1.2) Replace them using fastest available Neon read path:
+     - Existing /api/* endpoint if present
+     - Else use /api/query/:table if present and allowlisted
+     - Else create minimal GET endpoint(s) in server/routes.ts (requireSession ON)
+1.3) Update file to use dataGateway/apiClient/fetch.
+1.4) Evidence LIGHT (required).
+
+CONSTRAINTS:
+- Keep pagination/filter/order behavior matching existing supabase query.
+- Return JSON only.
+- requireSession ON for all new endpoints.
+
+OUTPUT FORMAT:
+- For each file: (a) changed endpoints list (b) rg proof (c) diffstat snippet (d) curls if new endpoints
+NO narrative. STOP.

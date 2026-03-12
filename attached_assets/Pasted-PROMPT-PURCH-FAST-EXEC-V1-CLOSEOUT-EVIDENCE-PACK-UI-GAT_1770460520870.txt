@@ -1,0 +1,60 @@
+PROMPT — PURCH-FAST-EXEC-V1-CLOSEOUT | EVIDENCE PACK + UI GATE TESTS | NO NEW CHANGES | STOP
+
+ROLE: Senior Full-Stack Engineer
+MODE: VERIFICATION ONLY (NO CODE CHANGES)
+
+GOAL:
+Provide a complete RAW Evidence Pack proving Batch A+B+C+D are complete and Purchasing tab works end-to-end in MIN mode.
+
+REQUIRED OUTPUT (RAW, SEPARATE SECTIONS):
+
+1) GIT EVIDENCE
+A) git diff --stat
+B) git diff --
+
+2) MIGRATIONS + DB PROOF
+A) List exact migration filenames added/modified for:
+   - Batch A (tables + indexes + view)
+   - Batch D (RPCs + generate_purchase_return_number)
+B) Paste full SQL contents of those migration files (no summaries)
+C) psql proof outputs:
+   - \d+ purchase_returns
+   - \d+ purchase_return_items
+   - \d+ purchase_return_lines
+   - \d+ purchase_order_receipts
+   - \d+ pr_approval_thresholds
+   - SELECT * FROM v_returns_hub LIMIT 5;
+   - SELECT proname FROM pg_proc WHERE proname IN (
+       'complete_purchase_return_unique_items_atomic',
+       'complete_purchase_return_general_atomic',
+       'void_purchase_return_atomic',
+       'generate_purchase_return_number'
+     );
+
+3) SERVER ALLOWLIST PROOF
+Show the exact routes.ts snippets where you added:
+- TABLE_READ_ALLOWLIST entries (new tables + v_returns_hub + any extras you mentioned)
+- TABLE_ORDERABLE_COLUMNS entries
+
+4) API PROOF (AUTHENTICATED CURL)
+Provide curl -i proofs with session cookie showing Content-Type JSON for:
+- /api/table-read for each new table + v_returns_hub
+Provide curl proofs for RPCs (at least one success each):
+- complete_purchase_return_unique_items_atomic
+- complete_purchase_return_general_atomic
+- void_purchase_return_atomic
+Include one duplicate client_request_id test showing idempotent behavior.
+
+5) TYPESCRIPT BUILD
+- npx tsc --noEmit (Exit 0)
+
+6) UI GATE TESTS (PURCHASING TAB)
+Open all Purchasing sidebar pages (about 23) logged-in and output a PASS/FAIL list.
+For any FAIL: include failing network request URL + status + response snippet.
+
+7) NO SUPABASE CONFIRMATION
+Run ripgrep and show output:
+- rg "supabase\\." src/pages/purchasing
+(Should be zero except storage if any)
+
+STOP AFTER OUTPUTTING ALL EVIDENCE.

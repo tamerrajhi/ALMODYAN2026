@@ -1,0 +1,89 @@
+STOP. Do NOT say “implemented / done” until you provide the requested evidence exactly.
+
+We have the raw rg outputs (provided below). Your last message claims you changed 6–7 files and fixed multiple routes/layout switching, but you did NOT provide any proof (git diff / rg after). Also you mentioned SalesReturnViewPage line numbers (94, 214, 476 etc). We must verify those edits are real and correct.
+
+Goal (Strict)
+- POS/ERP separation by routing + removing internal layout switching
+- POS must not navigate to /sales/* at runtime
+- Remove ?source=pos logic
+- POS invoice view must use /pos/invoices/:id/view
+- POS returns view must use /pos/returns/:id/view (only if route exists and page can run under POSRoute)
+
+Hard constraints
+- No DB/schema changes.
+- No RBAC/permissions changes.
+- No RPC payload changes.
+- No “assume it works”. If missing route or dependency found, STOP and report evidence.
+
+RAW RG EVIDENCE (baseline)
+RG1:
+src/App.tsx:240: <Route path="/pos/invoices" element={<POSRoute><SalesInvoicesPage sourceMode="pos" /></POSRoute>} />
+src/pages/sales/SalesInvoicesPage.tsx:294: navigate(`/sales/invoices/${invoice.id}/view${sourceMode === 'pos' ? '?source=pos' : ''}`);
+
+RG2 includes:
+src/hooks/useItemMovements.ts:95: pos_sale: '/sales/invoices/{id}/view',
+src/pages/sales/SalesReturnsListPage.tsx:262: onPreview={() => navigate(`/sales/returns/${ret.id}/view`)}
+
+RG4 shows existing POS routes:
+src/App.tsx:240 /pos/invoices
+src/App.tsx:241 /pos/returns
+src/App.tsx:242 /pos/return
+(no evidence of /pos/invoices/:id/view OR /pos/returns/:id/view yet)
+
+Layout switching evidence:
+SalesInvoiceViewPage.tsx uses searchParams.get('source') === 'pos' and Layout = POSLayout/MainLayout
+SalesInvoicesPage.tsx uses Layout = sourceMode === 'pos' ? POSLayout : MainLayout
+SalesReturnsListPage.tsx uses Layout = mode === 'pos' ? POSLayout : MainLayout
+
+Task Set (in this exact order)
+
+PHASE 0 — PROVE CURRENT STATE (MANDATORY)
+0.1) Print:
+- git status
+- git diff --stat
+- git diff (only for touched files)
+0.2) Run and paste raw outputs of these rg commands AFTER your claimed changes:
+A) rg -n "\\?source=pos" src/pages/sales/SalesInvoicesPage.tsx src/pages/sales/SalesInvoiceViewPage.tsx
+B) rg -n "searchParams\\.get\\('source'\\) === 'pos'" src/pages/sales/SalesInvoiceViewPage.tsx
+C) rg -n "const Layout = .*POSLayout.*MainLayout" src/pages/sales/SalesInvoicesPage.tsx src/pages/sales/SalesReturnsListPage.tsx src/pages/sales/SalesInvoiceViewPage.tsx
+D) rg -n "pos_sale: '/sales/invoices/\\{id\\}/view'" src/hooks/useItemMovements.ts
+E) rg -n "Route path=\\"/pos/invoices/:id/view\\"" src/App.tsx
+F) rg -n "Route path=\\"/pos/returns/:id/view\\"" src/App.tsx
+If any of (A–D) still has hits, or (E/F) missing, do NOT continue to final claims. Proceed to PHASE 1 fixes.
+
+PHASE 1 — MINIMAL FIXES (ONLY if evidence shows still broken)
+1.1) Add missing routes in src/App.tsx:
+- /pos/invoices/:id/view -> <POSRoute><SalesInvoiceViewPage /></POSRoute>
+- /pos/returns/:id/view  -> <POSRoute><SalesReturnViewPage /></POSRoute>  (only if SalesReturnViewPage is safe under POSRoute)
+Also ensure ERP routes wrap with ModuleRoute and MainLayout at route level if pages become content-only.
+
+1.2) Make these shared pages content-only (remove internal layout selection):
+- src/pages/sales/SalesInvoicesPage.tsx: remove imports of MainLayout/POSLayout and remove Layout variable.
+- src/pages/sales/SalesReturnsListPage.tsx: same.
+- src/pages/sales/SalesInvoiceViewPage.tsx: remove searchParams source=pos and layout variable, replace with path-based isPosPath = location.pathname.startsWith('/pos/')
+
+1.3) Fix POS navigation leaks exactly at known lines:
+- SalesInvoicesPage.tsx line ~294: if (sourceMode==='pos') navigate(`/pos/invoices/${invoice.id}/view`) else ERP path.
+- useItemMovements.ts: pos_sale must be '/pos/invoices/{id}/view'
+- SalesReturnsListPage.tsx: onPreview and onEdit must use /pos/returns/:id/view and /pos/returns/:id (if edit exists) ONLY in POS mode.
+
+1.4) SalesReturnViewPage hardcoded navigation:
+If your earlier claim is true (MainLayout references at lines 196,209,535 and back routes at 94,214,476):
+- Remove MainLayout wrapping from the page (content-only)
+- Replace hardcoded back routes '/sales/returns' with path-aware:
+  const isPosPath = location.pathname.startsWith('/pos/');
+  const backPath = isPosPath ? '/pos/returns' : '/sales/returns';
+  and use backPath in all 3 places
+
+PHASE 2 — FINAL EVIDENCE (MANDATORY)
+Provide:
+2.1) git diff --stat (must list only expected files)
+2.2) raw rg outputs from PHASE 0 again; all must PASS:
+- ?source=pos => 0 hits
+- searchParams.get('source') => 0 hits
+- const Layout = ... => 0 hits
+- pos_sale ERP path => 0 hits
+- routes for /pos/invoices/:id/view and /pos/returns/:id/view exist => 1 hit each
+2.3) Brief “changed files list” (names only), no storytelling.
+
+Do not include any explanation that isn’t backed by the above evidence.

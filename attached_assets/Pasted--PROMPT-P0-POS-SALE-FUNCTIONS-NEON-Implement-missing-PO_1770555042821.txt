@@ -1,0 +1,173 @@
+✅ PROMPT — P0-POS-SALE-FUNCTIONS (NEON) | Implement missing POS atomic functions | DB ONLY | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Database Engineer
+
+MODE: DB ONLY (SQL FUNCTIONS ONLY)
+Allowed: CREATE OR REPLACE FUNCTION فقط
+Forbidden: ALTER TABLE / DROP / data migrations
+ABSOLUTE: No use of sale_items.item_id with unique_items.id (FK points to jewelry_items)
+
+TARGET FUNCTIONS (must match server RPC proxy signature exactly):
+1) public.pos_begin_request(p_client_request_id uuid, p_workflow_type text, p_payload jsonb) RETURNS jsonb
+2) public.pos_fail_request(p_client_request_id uuid, p_error_code text, p_error_message text) RETURNS jsonb
+3) public.pos_succeed_request(p_client_request_id uuid, p_entity_id uuid, p_result jsonb) RETURNS jsonb
+4) public.complete_pos_sale_atomic(p_payload jsonb) RETURNS jsonb
+
+FOUNDATIONS (from audit)
+- Idempotency table: public.pos_workflow_requests
+  PK: client_request_id
+  status: processing|succeeded|failed
+  payload_hash, result, error_code, error_message, timestamps
+
+- Inventory: public.unique_items
+  available if sold_at IS NULL and sale_id IS NULL
+  on sale: set sold_at=now(), sale_id=<sale_id>
+
+- Accounting mapping: public.branch_coa_accounts (template_code -> account_code per branch)
+  required template_codes:
+  CASH, BANK, INVENTORY, VAT_OUTPUT, SALES_REVENUE, COGS
+  (No AR in mapping -> if payment_method=credit then fail with error_code UNSUPPORTED_PAYMENT_METHOD unless you find AR template)
+
+- GL tables: journal_entries, journal_entry_lines
+  account_id is FK to chart_of_accounts; lookup by account_code from mapping.
+
+- Invoices tables:
+  invoices (invoice_number NOT NULL)
+  sales_invoice_items (use jewelry_item_id to store unique_items.id, no FK)
+
+RESPONSE CONTRACT (must exactly match UI expectation)
+On success return jsonb:
+{
+  "success": true,
+  "sale_id": "<uuid>",
+  "sale_code": "<text>",
+  "invoice_id": "<uuid>",
+  "invoice_number": "<text>",
+  "journal_entry_id": "<uuid>",
+  "journal_entry_number": "<text>",
+  "total_amount": <numeric>,
+  "discount_amount": <numeric>,
+  "tax_amount": <numeric>,
+  "final_amount": <numeric>,
+  "items_count": <int>,
+  "payment_method": "<text>",
+  "idempotent": <bool>,
+  "message": "<text>"
+}
+On failure return jsonb:
+{
+  "success": false,
+  "error": "<arabic message>",
+  "error_code": "<code>",
+  "idempotent": <bool?>
+}
+Also ensure pos_workflow_requests updated accordingly.
+
+IMPLEMENTATION DETAILS (STRICT)
+
+A) pos_begin_request(...)
+- Compute payload_hash = sha256(p_payload::text)
+- Insert into pos_workflow_requests if missing with status='processing', created_at/updated_at=now()
+- If already exists:
+  - if status='succeeded': return {"idempotent": true, "status":"succeeded", "entity_id": (result->>'sale_id'), "result": result}
+  - if status='failed': return {"idempotent": true, "status":"failed", "retry": true, "error_code":..., "error_message":...}
+  - if status='processing': return {"idempotent": true, "status":"processing", "retry": true}
+Return JSON exactly.
+
+B) pos_fail_request(...)
+- Update pos_workflow_requests set status='failed', error_code, error_message, updated_at=now()
+- Return {"ok": true}
+
+C) pos_succeed_request(...)
+- Update pos_workflow_requests set status='succeeded', result=p_result, updated_at=now()
+- Return {"ok": true}
+
+D) complete_pos_sale_atomic(p_payload jsonb)
+1) Parse required fields:
+- client_request_id (uuid), branch_id (uuid), customer_id (uuid|null), payment_method (text),
+  cash_amount, card_amount, discount_amount, notes, sold_by, bank_account_code,
+  items (array of {jewelry_item_id(uuid==unique_items.id), unit_price numeric, discount_amount numeric, tax_rate numeric, is_tax_inclusive bool})
+
+2) Idempotency guard:
+- Read pos_workflow_requests by client_request_id:
+  - if status='succeeded' and result not null -> return result with idempotent=true
+  - else if missing -> create row as processing (same as begin) to be safe
+
+3) Validate inventory sellable:
+- For each item id, SELECT ... FROM unique_items WHERE id IN (...) FOR UPDATE
+- Validate:
+  - branch_id matches payload branch_id
+  - sold_at IS NULL AND sale_id IS NULL
+- On violation: update workflow failed + return {"success":false,"error_code":"ITEM_NOT_SELLABLE",...}
+
+4) Calculate amounts (numeric):
+- items_count = jsonb_array_length(items)
+- subtotal = sum(unit_price)  (quantity is 1 each)
+- item_discounts = sum(item.discount_amount)
+- discount_amount = p_payload.discount_amount (use payload) OR enforce equals item_discounts (choose one and document)
+- taxable_base = greatest(subtotal - discount_amount, 0)
+- tax_amount = round(taxable_base * 0.15, 2)  (since is_tax_inclusive=false always)
+- final_amount = taxable_base + tax_amount
+
+5) Generate codes (must be deterministic enough):
+- sale_code and invoice_number must be unique strings.
+- Use pattern with timestamp + random:
+  sale_code := 'SAL-'||to_char(now(),'YYMMDDHH24MISS')||'-'||substr(gen_random_uuid()::text,1,6)
+  invoice_number := 'INV-'||to_char(now(),'YYMMDDHH24MISS')||'-'||substr(gen_random_uuid()::text,1,6)
+  journal_entry_number similarly 'JE-...'
+
+6) Insert records (single transaction):
+- Insert into sales (branch_id, customer_id, subtotal, tax_amount, discount_amount, total_amount, status='completed', notes, sale_code, sale_date=now())
+- Insert into invoices (invoice_number, invoice_type='sale', invoice_date=now(), status='posted', customer_id, branch_id, subtotal, tax_amount, discount_amount, total_amount, sale_id)
+- Insert into sales_invoice_items for each unique item:
+  (invoice_id, jewelry_item_id=<unique_items.id>, quantity=1, unit_price, total_price=unit_price)
+- Update sales set invoice_id=<invoice_id>
+
+7) Accounting entry (balanced):
+- Lookup account_id by branch_id + template_code -> account_code -> chart_of_accounts.id
+  Required:
+  INVENTORY, COGS, SALES_REVENUE, VAT_OUTPUT
+  Payment debit account:
+   - cash -> CASH
+   - card/bank_transfer -> BANK
+   - split -> two debits (CASH + BANK)
+   - credit -> FAIL with UNSUPPORTED_PAYMENT_METHOD unless AR mapping exists
+
+- Post JE:
+  Debit: CASH/BANK final_amount (or split)
+  Credit: SALES_REVENUE taxable_base
+  Credit: VAT_OUTPUT tax_amount (if >0)
+  Debit: COGS sum(unique_items.cost)
+  Credit: INVENTORY same COGS
+- Create journal_entries row (is_posted=true, status='posted', branch_id, totals)
+- Create journal_entry_lines rows, ensure total_debit == total_credit
+
+- Update sales.journal_entry_id and invoices.journal_entry_id
+
+8) Payments row (optional but recommended):
+- Insert into payments (payment_type='sale', amount=final_amount, payment_method, reference_type='sale', reference_id=sale_id, customer_id, branch_id, invoice_id, journal_entry_id, status='completed')
+
+9) Update inventory:
+- Update unique_items set sold_at=now(), sale_id=sale_id WHERE id IN (...)
+(Already locked, so safe)
+
+10) Write workflow succeeded:
+- Build result jsonb exactly per contract (include ids, numbers, amounts)
+- Update pos_workflow_requests status='succeeded', result=result_jsonb, updated_at=now()
+
+11) Return result_jsonb
+
+ERROR HANDLING
+- Any exception: set workflow failed via UPDATE pos_workflow_requests (if possible) and return {"success":false,"error_code":"SERVER_ERROR","error":<message>}
+- Use clear Arabic messages for user-facing errors.
+
+EVIDENCE REQUIRED
+A) SQL definitions (full CREATE OR REPLACE FUNCTION bodies) for all 4 functions
+B) Gate tests via SQL (show exact commands + outputs):
+  GT1: pos_begin_request -> returns processing
+  GT2: complete_pos_sale_atomic with 1 valid item -> returns success true + ids
+  GT3: retry complete_pos_sale_atomic same client_request_id -> idempotent true, same ids
+  GT4: selling same item again with new request -> ITEM_NOT_SELLABLE
+C) Show resulting rows:
+- sales, invoices, sales_invoice_items, journal_entries, journal_entry_lines, unique_items updated fields, pos_workflow_requests row
+STOP.

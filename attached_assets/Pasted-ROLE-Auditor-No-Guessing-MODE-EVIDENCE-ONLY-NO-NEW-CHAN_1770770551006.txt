@@ -1,0 +1,63 @@
+ROLE: Auditor (No Guessing)
+MODE: EVIDENCE-ONLY (NO NEW CHANGES)
+
+TARGET:
+P1 Draft ERP Sales Invoice creation via new endpoint (/api/sales-invoices/draft)
+and frontend CreateSalesInvoicePage updated to call it.
+Must satisfy:
+- invoices.invoice_type='sales'
+- invoices.sale_id IS NULL
+- status='draft' (or system draft status)
+- items written to sales_invoice_items
+- NO journal_entries/payments/stock movements created by draft
+
+DELIVERABLES:
+
+1) Git Evidence (mandatory)
+A) git diff --stat
+B) git diff
+Include ALL changed files.
+
+2) Endpoint Evidence (raw code)
+- Print the full handler code for POST /api/sales-invoices/draft from server/routes.ts with line numbers (at least 80 lines around it).
+- Show EXACT insert/update statements and explicitly show sale_id is set to NULL.
+
+3) Frontend Call Evidence
+- Show the exact code in CreateSalesInvoicePage.tsx that calls the new endpoint (path, payload) with line numbers.
+- rg proof:
+  rg -n "complete_sales_invoice_atomic|/api/sales-invoices/draft" src/pages/sales/CreateSalesInvoicePage.tsx
+
+4) “No legacy tables” proofs
+- rg proof that sale_items is NOT used anywhere in this new flow:
+  rg -n "sale_items" server src/pages/sales/CreateSalesInvoicePage.tsx
+
+5) DB Proof (raw SQL + outputs)
+Run and paste outputs:
+
+A) Show newest ERP invoice (sale_id NULL):
+SELECT id, invoice_number, invoice_type, sale_id, status, branch_id, customer_id, total_amount, created_at
+FROM invoices
+WHERE invoice_type='sales' AND sale_id IS NULL
+ORDER BY created_at DESC
+LIMIT 3;
+
+B) Show its items:
+-- take the newest id from (A) as <ERP_ID>
+SELECT invoice_id, jewelry_item_id, quantity, unit_price, total_price
+FROM sales_invoice_items
+WHERE invoice_id = '<ERP_ID>';
+
+C) Prove draft did NOT create JE/payments/stock movements:
+SELECT journal_entry_id FROM invoices WHERE id = '<ERP_ID>';
+SELECT count(*) AS pay_cnt FROM payments WHERE invoice_id = '<ERP_ID>';
+-- movements (use your actual table name; likely unique_item_movements)
+SELECT count(*) AS mov_cnt FROM unique_item_movements WHERE reference_id = '<ERP_ID>';
+
+6) Runtime Proof (UI)
+- Show that /sales/invoices (ERP list) now shows 1 draft invoice (sale_id NULL)
+- Confirm /sales/pos-invoices still shows the 5 POS invoices
+Screenshots ok if possible; if not, provide console logs/SQL counts:
+SELECT count(*) pos_cnt FROM invoices WHERE invoice_type='sales' AND sale_id IS NOT NULL;
+SELECT count(*) erp_cnt FROM invoices WHERE invoice_type='sales' AND sale_id IS NULL;
+
+STOP after evidence only.

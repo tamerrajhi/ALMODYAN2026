@@ -1,0 +1,46 @@
+PROMPT — PHASE-NEON-FINAL-3 | MIGRATE PROD READS OFF SUPABASE (from/rpc) | CODE+SERVER | EVIDENCE | STOP
+
+ROLE: Senior Fullstack Engineer
+MODE: CODE + SERVER ROUTES (TS/TSX + server/routes.ts)
+
+GOAL:
+Eliminate ALL supabase.from() and supabase.rpc() usages from these production files by routing them to the existing NEON backend (Express API) and/or dataGateway NEON-only functions.
+
+IN SCOPE (ONLY these 5 files):
+1) src/hooks/useZatcaSettings.ts
+2) src/pages/BatchDetailPage.tsx
+3) src/pages/ImportPage.tsx
+4) src/pages/UsersPage.tsx
+5) src/pages/accounting/InvoicesPage.tsx
+
+OUT OF SCOPE (DO NOT TOUCH in this prompt):
+- src/components/suppliers/SupplierDocuments.tsx (supabase.storage)
+- src/lib/set-images-api.ts (supabase.storage)
+- src/components/health/** (all health/tests)
+- Auth files (AuthContext/AuthPage/supabaseToken)
+
+STRICT RULES:
+1) In the 5 scope files above:
+   - Remove ALL usages of supabase.from(...)
+   - Remove ALL usages of supabase.rpc(...)
+   - Remove supabase import if it becomes unused.
+2) Do NOT change UI texts, RTL, validation behavior, user flows, or business logic.
+3) Use one of these patterns ONLY:
+   A) call existing dataGateway functions (NEON-only)
+   B) call new Express endpoints you add to server/routes.ts (GET/POST) with same response shape the UI expects.
+4) If you add new endpoints:
+   - Keep them minimal and safe (allowlisted select/order params only)
+   - Return JSON in the same envelope pattern used elsewhere ({data, error} or raw arrays) based on what the frontend currently expects.
+5) No database migrations in this prompt.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) rg -n "supabase\\.from\\(" -S src/pages src/hooks src/domain src/lib
+B) rg -n "supabase\\.rpc\\(" -S src/pages src/hooks src/domain src/lib
+C) rg -n "from\\s+['\\\"]@/integrations/supabase/client['\\\"]" -S src/pages src/hooks src/domain src/lib
+D) git diff --stat
+E) git diff -- (full)
+F) npx tsc --noEmit (EXIT CODE)
+G) Runtime sanity (curl):
+   - hit every NEW endpoint you added (at least once) and show HTTP status + first 200 chars of JSON
+
+STOP. WAIT FOR NEXT PROMPT.

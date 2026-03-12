@@ -1,0 +1,196 @@
+ROLE: Full-Stack Engineer
+MODE: READ-ONLY AUDIT + GATE CHECKS (NO CHANGES) — STOP AFTER EVIDENCE
+
+GOAL
+I removed the old import screen (PurchaseInvoiceImportPage) and unified import on /import (ImportPage.tsx). I need a single, comprehensive audit to ensure:
+1) Cleanup is complete (no leftover routes/links/registry references)
+2) /import is the ONLY import entry point
+3) The /import screen is correct end-to-end from UI → Atomic RPC → DB invariants (SUPP INV dedupe) → accounting (JE) → inventory visibility/movements
+4) Provide hard evidence: greps, code pointers (line numbers), and DB verification queries/results.
+
+STRICT RULES
+- READ-ONLY ONLY: Do not edit any file, do not create/alter SQL objects, do not run migrations.
+- Do not “assume” or “guess”. If you can’t prove something from code/DB, mark it as NOT PROVEN.
+- Output MUST be structured and include: PASS/FAIL + evidence for each check.
+- STOP after producing the evidence report.
+
+========================================
+A) CLEANUP / ROUTES / NAVIGATION GATES
+========================================
+
+A1) Prove no remnants of the deleted import screen exist:
+Run:
+1) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "/purchasing/invoices/import|PurchaseInvoiceImportPage" src
+2) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "invoices/import|PurchaseInvoiceImportPage" src/modules src
+
+Expected: EMPTY. If not empty, list exact files/lines.
+
+A2) Prove /import is the only import route entry point:
+Run:
+3) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "<Route |path=\"/import\"|path='/import'|/import\" element" src/App.tsx src/routes src/pages
+4) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "href: '/import'|to=\"/import\"|to='/import'|/import\"" src/components src/pages
+
+Output: route definitions + any nav links (files + line numbers). Confirm there is no other import page route for purchase invoices.
+
+A3) Build gate:
+Run:
+5) npm run build
+Report success/failure with any build errors.
+
+========================================
+B) /IMPORT SCREEN (ImportPage.tsx) — UI + MULTI-INVOICE + SUPP INV LOGIC
+========================================
+
+B1) Confirm the running screen is /import → ImportPage.tsx:
+Provide:
+- App.tsx route snippet with line numbers for /import
+- ImportPage.tsx export default component declaration line
+
+B2) Multi-file support gate:
+In ImportPage.tsx, locate and paste snippet (with line numbers) for the file input showing:
+- type="file"
+- accept .xlsx/.xls
+- multiple enabled
+- handler function name (e.g., handleMultiFileUpload / handleFileChange)
+
+B3) SUPP INV extraction gate:
+Locate and paste the function/snippet (with line numbers) that:
+- reads column exactly named "SUPP INV"
+- normalizes using trim + upper
+- extracts per file
+
+B4) Per-file invoice integrity gate:
+Prove from code (snippets + line numbers) that for EACH selected file:
+- Exactly ONE unique SUPP INV is required (0 → error, >1 → error)
+- MODEL duplicates are allowed (i.e., nothing rejects duplicates by MODEL)
+Show the logic that enforces the per-file SUPP INV rule and confirm no MODEL-based dedupe exists (grep evidence below).
+
+B5) Cross-file (within selection) duplicate gate:
+Provide the snippet (with line numbers) proving:
+- it detects two files with the same normalized SUPP INV
+- blocks BEFORE any DB write/create (early return)
+- outputs a user-facing error list
+
+B6) DB preflight gate (already-in-DB duplicate check):
+Provide snippet (with line numbers) proving:
+- it calls a precheck RPC BEFORE any create
+- if precheck returns existing SUPP INV(s), it aborts with EARLY RETURN and creates ZERO invoices
+Also list:
+- RPC name used for precheck
+- payload keys used
+
+B7) Create loop gate (atomic create only after passing preflight):
+Provide snippet (with line numbers) proving:
+- create loop runs ONLY AFTER all preflight checks pass
+- each invoice create includes supplier_invoice_no = normalized SUPP INV (per file)
+- it uses Atomic create RPC (purchase_invoice_create_atomic via service) not direct insert
+
+========================================
+C) NO DIRECT WRITES (ATOMIC-ONLY) — MANDATORY GREP
+========================================
+
+Run and paste outputs (must be EMPTY except comments):
+1) grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E '\.from\([^)]*\)\.(insert|update|upsert|delete)\(' src
+2) grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E '\.(insert|update|upsert|delete)\(' src/pages/ImportPage.tsx
+
+If any matches exist, list file/line and classify if real write vs comment.
+
+========================================
+D) DATABASE INVARIANTS — SUPP INV DEDUPE ENFORCEMENT
+========================================
+
+D1) Verify column exists:
+Run SQL:
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='invoices' AND column_name='supplier_invoice_no';
+
+D2) Verify unique constraint/index enforcing dedupe:
+Run SQL:
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public' AND tablename='invoices'
+ORDER BY indexname;
+
+Confirm:
+- there is a unique index for (supplier_id, upper(trim(supplier_invoice_no))) for purchase invoices
+- invoice_number unique index is removed if that’s the intended design
+Mark PASS/FAIL with evidence.
+
+D3) Verify create RPC enforces required + duplicate check:
+Run SQL (read-only):
+SELECT routine_name
+FROM information_schema.routines
+WHERE routine_schema='public' AND routine_name IN ('purchase_invoice_create_atomic','purchase_invoice_post_atomic','purchase_invoice_void_atomic','purchase_invoice_supp_inv_precheck');
+
+Then show proof from DB by fetching the function definition(s) (exact SQL):
+- purchase_invoice_create_atomic (must show normalization + required check + duplicate check + insert supplier_invoice_no)
+- purchase_invoice_supp_inv_precheck (must show checking existing invoices by supplier and non-voided)
+Use:
+SELECT pg_get_functiondef(p.oid)
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname='purchase_invoice_create_atomic';
+
+(and similarly for precheck).
+
+========================================
+E) ACCOUNTING + JE + STOCK/MOVEMENTS — AUDIT STATUS (PROVEN ONLY)
+========================================
+
+E1) From code, prove the purchase invoice create is ATOMIC and ties to accounting:
+- In purchasing write service or import flow, locate call path showing purchase invoice creation uses purchase_invoice_create_atomic and returns/sets journal_entry_id.
+Provide file + line numbers.
+
+E2) DB proof: invoice header links to journal entry:
+Run SQL:
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='invoices' AND column_name='journal_entry_id';
+
+Run SQL:
+SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY'
+  AND tc.table_name='invoices'
+  AND kcu.column_name='journal_entry_id';
+
+E3) If there are purchase invoices in DB, prove JE is non-zero and balanced:
+Run:
+SELECT i.id, i.invoice_number, i.supplier_invoice_no, i.status, i.journal_entry_id,
+       je.entry_number, je.is_posted, je.total_debit, je.total_credit
+FROM invoices i
+LEFT JOIN journal_entries je ON je.id=i.journal_entry_id
+WHERE i.invoice_type='purchase'
+ORDER BY i.created_at DESC
+LIMIT 10;
+
+If rows exist, check totals: total_debit>0, total_credit>0, total_debit=total_credit.
+If no rows exist, mark “NOT PROVEN (no data)”.
+
+E4) Inventory visibility / movement ledger (purchase side):
+- From code, identify where imported items are created/updated and how branch_id/status gets set for POS visibility
+- From DB, check if item_movements contains purchase-related movement types for invoices, else mark NOT PROVEN.
+
+Provide:
+- the POS visibility query criteria from POS page (file + lines)
+- a DB sample query of jewelry_items showing branch_id and sale_status
+
+========================================
+F) FINAL REPORT FORMAT (MANDATORY)
+========================================
+
+Produce a final report with these sections:
+1) Cleanup & Routing Gates — PASS/FAIL
+2) ImportPage UI Gates (multi-file + SUPP INV) — PASS/FAIL
+3) Atomic-only (no direct writes) — PASS/FAIL
+4) DB invariants (SUPP INV column + unique index + RPC defs) — PASS/FAIL
+5) Accounting/JE linkage — PASS/FAIL/NOT PROVEN
+6) Inventory/movements/visibility — PASS/FAIL/NOT PROVEN
+Include:
+- ALL command outputs
+- ALL SQL outputs
+- ALL code snippets with line numbers
+STOP AFTER REPORT.

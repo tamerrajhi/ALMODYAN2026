@@ -1,0 +1,114 @@
+ROLE: Lead Engineer
+GOAL: Migrate DATA-PLANE fully from Supabase to Neon via Express API, WITHOUT breaking the app.
+SCOPE RULES:
+- Keep Supabase ONLY for Auth session (login/logout/getSession). No other data reads/writes from Supabase.
+- Every usage of supabase.from(), supabase.rpc(), supabase.functions.invoke() outside pure Auth must be removed or routed through dataGateway→Express→Neon.
+- Work in safe checkpoints. After each checkpoint, run verification commands and provide evidence.
+
+INPUT (PROOF LIST of remaining Supabase calls):
+A) supabase.from() files (14):
+- src/components/health/PerformanceTests.tsx
+- src/components/purchasing/monitoring/PurchasingDrillDownFilters.tsx
+- src/components/reports/TransferHistoryReport.tsx
+- src/components/transfers/TransferDetailsDialog.tsx
+- src/components/transfers/TransferReceipt.tsx
+- src/domain/purchasing/purchasingReadService.ts
+- src/hooks/useTransfersV2ReadModel.ts
+- src/lib/accounting.ts
+- src/lib/account-linkage-check.ts
+- src/lib/atomicWriteGuard.ts
+- src/lib/dataGateway.ts
+- src/pages/accounting/JournalEntriesPage.tsx
+- src/pages/hr/AttendancePage.tsx
+- src/pages/TransfersCenterPage.tsx
+
+B) supabase.rpc() files (46):
+- src/components/accounting/monitoring/DrillDownDialog.tsx
+- src/components/accounting/monitoring/HBLegacyCleanupDialog.tsx
+- src/components/health/AuthenticationTests.tsx
+- src/components/health/DatabaseTests.tsx
+- src/components/health/SecurityTests.tsx
+- src/components/modules/ModuleSettingsDialog.tsx
+- src/components/pos/debug/POSDebugPanel.tsx
+- src/components/pos/POSQuickCustomerDialog.tsx
+- src/components/production/PartialCompletionDialog.tsx
+- src/components/products/CostEntryFormDialog.tsx
+- src/components/products/JewelryItemFormDialog.tsx
+- src/components/products/ProductFormDialog.tsx
+- src/components/purchasing/returns/VoidReturnDialog.tsx
+- src/components/reports/BranchBalancesReport.tsx
+- src/components/sales/invoice-view/QuickActionsBar.tsx
+- src/components/sales/QuickCustomerDialog.tsx
+- src/contexts/AuthContext.tsx  (WARNING: only session auth allowed; move any role/profile/rpc out)
+- src/domain/purchasing/purchasingWriteService.ts
+- src/hooks/useScreenPermissions.ts
+- src/hooks/useSuppliers.ts
+- src/hooks/useUserBranches.ts
+- src/lib/accounting.ts
+- src/lib/codeGenerators.ts
+- src/lib/dataGateway.ts
+- src/lib/posRequestLogger.ts
+- src/lib/production-accounting.ts
+- src/lib/transfersV2Service.ts
+- src/pages/accounting/JournalEntriesPage.tsx
+- src/pages/CustomersPage.tsx
+- src/pages/hr/EmployeesPage.tsx
+- src/pages/POSCreditNotePage.tsx
+- src/pages/POSReturnPage.tsx
+- src/pages/production/FinishedGoodsFactoryPage.tsx
+- src/pages/products/ProductsPage.tsx
+- src/pages/purchasing/PurchaseRequisitionsPage.tsx
+- src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+- src/pages/ReturnsPage.tsx
+- src/pages/RolesPage.tsx
+- src/pages/sales/CreateSalesInvoicePage.tsx
+- src/pages/sales/CreditNotesPage.tsx
+- src/pages/sales/CustomerReceiptsPage.tsx
+- src/pages/sales/SalesReturnFormPage.tsx
+- src/pages/sales/SalesReturnsPage.tsx
+- src/pages/sales/SalesReturnViewPage.tsx
+- src/pages/TransferRequestsPage.tsx
+- src/pages/UsersPage.tsx
+
+C) supabase.functions.invoke() files (13):
+- src/components/health/EdgeFunctionTests.tsx
+- src/components/health/SecurityTests.tsx
+- src/domain/purchasing/purchasingWriteService.ts
+- src/hooks/useZatcaSettings.ts
+- src/hooks/useZatcaSubmit.ts
+- src/pages/accounting/InvoicesPage.tsx
+- src/pages/admin/TestDataSeederPage.tsx
+- src/pages/AuthPage.tsx
+- src/pages/BatchDetailPage.tsx
+- src/pages/ImportPage.tsx
+- src/pages/purchasing/PurchasingHealthCheckPage.tsx
+- src/pages/SystemHealthPage.tsx
+- src/pages/UsersPage.tsx
+
+D) Supabase config usage (4):
+- src/integrations/supabase/client.ts  (keep for auth only)
+- src/lib/set-images-api.ts           (migrate)
+- src/pages/BatchDetailPage.tsx       (migrate)
+- src/pages/ImportPage.tsx            (migrate)
+
+DELIVERABLES:
+1) Implement Express endpoints to cover ALL required RPC/queries used by these files:
+   - Create a strict allowlist for RPC proxy (/api/rpc/:fn).
+   - Create REST endpoints where from()/select() is used (or route through SQL functions).
+   - For supabase.functions.invoke usage: create equivalent Express endpoints (do NOT call Supabase edge).
+2) Create/extend dataGateway so it uses Neon/Express for ALL data-plane operations.
+3) Refactor files above to remove Supabase data access completely.
+4) IMPORTANT: AuthContext.tsx must only do session auth; move any role/permission/profile fetch to dataGateway.
+5) Verification (MUST PROVIDE EVIDENCE):
+   - Run grep checks and show EMPTY results:
+     a) grep -RIn "supabase\.from\(" src (should only match integrations/supabase/client.ts or auth-only if unavoidable)
+     b) grep -RIn "supabase\.rpc\(" src (same)
+     c) grep -RIn "supabase\.functions\.invoke\(" src (same)
+   - Run Neon DB health check endpoint and show PASS.
+   - Smoke test flows: Import multi-invoice + SUPP INV preflight, POS sale atomic, JournalEntries view.
+
+CONSTRAINTS:
+- No breaking UI routes.
+- No schema changes needed (Neon already has schema/RPCs).
+- Keep system behavior identical.
+STOP AFTER COMPLETING ALL DELIVERABLES WITH EVIDENCE.

@@ -1,0 +1,57 @@
+✅ PROMPT 2 — P0 HOTFIX | RESTORE POS RETURNS | NO GUESSING | CODE ONLY | EVIDENCE + GATE TESTS | STOP
+
+ROLE: Senior Full-Stack Engineer (React + Supabase/Postgres)
+
+MODE: FIX ONLY (P0). Implement minimal safe fixes to restore POS Returns functionality.
+
+STRICT RULES (NO EXCEPTIONS):
+1) ممنوع التخمين. ممنوع عمل mapping لأعمدة “غير مثبتة” مثل reason/refund_method/subtotal_before_tax/processed_by إلى أعمدة أخرى. 
+   - الحل الوحيد المسموح: إزالة الأعمدة غير الموجودة من SELECT/filters أو استبدالها بأعمدة مثبتة بالاسم الصحيح فقط.
+2) ممنوع تعديل أي Routes أو Navigation أو تغيير مسارات المرتجعات:
+   - POS Returns يبقى /pos/return (يدعم invoice_id)
+   - ERP Returns يبقى /sales/returns/new?invoice_id=...
+3) ممنوع تغييرات DB في هذا البرومبت (لا migrations ولا alter ولا views). كود فقط.
+4) لا refactor. لا تغيّر UI/UX إلا بقدر منع crash (مثلاً placeholders أو fallback نصي).
+5) كل تعديل لازم يكون مدعوم من تقرير الأوديت (Mismatch Register).
+6) اكتب رسائل الأخطاء بالعربية عند الفشل.
+
+TARGET FILES (P0 scope فقط):
+- src/pages/POSReturnPage.tsx
+- src/components/pos/return/PreviousReturnsSection.tsx
+- src/components/pos/return/AllReturnsSection.tsx
+(لا تعدّل أي ملفات أخرى حتى لو في 15 ملف فيها final_amount — هذا خارج P0. فقط اجعل POS Returns تعمل الآن.)
+
+REQUIRED FIXES (مُثبتة من الأوديت):
+A) returns table:
+- استبدل أي filter/column باسم "sale_id" في جدول returns بـ "original_sale_id".
+- راجع أي SELECT على returns يحتوي sale_id أو أي أعمدة غير موجودة (subtotal_before_tax, reason, refund_method, processed_by):
+  -> احذف هذه الأعمدة من SELECT فورًا (لا تستبدلها بشيء).
+  -> اعتمد فقط على الأعمدة الموجودة فعليًا: id, return_number, return_date, return_type, original_invoice_id, original_sale_id, subtotal, tax_amount, total_amount, status, notes, created_at, created_by, branch_id, customer_id, journal_entry_id.
+
+B) sales table:
+- استبدل أي SELECT يطلب "final_amount" بـ "total_amount".
+- احذف "payment_method" من أي SELECT على sales لأنه غير موجود (لا تستبدله بشيء).
+
+C) Defensive handling:
+- أي query فشل بسبب أعمدة/فلتر -> اعرض toast عربي واضح + سجّل console.error للـ raw error.
+- لا تجعل الصفحة “فاضية بصمت”.
+
+EVIDENCE REQUIRED (خام وواضح):
+1) A) git diff --stat
+2) B) git diff
+3) C) Proof تشغيل:
+   - Screenshot أو log يثبت أن POSReturnPage تفتح بدون أخطاء column does not exist
+   - Network/console snippet بعد الإصلاح يثبت نجاح قراءة returns + sales
+
+GATE TESTS (نفّذهم واذكر النتيجة):
+GT1) افتح /pos/return:
+- Expected: لا يظهر column "sale_id" does not exist
+- Expected: أقسام Previous/All Returns تظهر (حتى لو بيانات قليلة)
+
+GT2) Auto-load عبر /pos/return?invoice_id=<POS invoice uuid>:
+- Expected: يجلب invoice ثم sale ثم يستطيع عرض بيانات البيع (بلا final_amount/payment_method errors)
+
+GT3) Regression check (must not break ERP returns routing):
+- Expected: لا تغييرات في /sales/returns/new flow (تأكيد فقط: لم يتم تعديل أي route)
+
+STOP after providing evidence + gate tests results. Do NOT propose P1/P2. Do NOT edit any other files.

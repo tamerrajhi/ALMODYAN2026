@@ -1,0 +1,56 @@
+ROLE: Full-stack engineer (Replit/Neon + React). 
+SCOPE: Gate-2 ONLY (RBAC Seed for Neon). 
+STRICT: ممنوع أي Batch Migration أو تعديل ملفات صفحات/Hooks/Services. ممنوع توسيع allowlist أو إضافة endpoints جديدة إلا لو كانت لازمة جدًا لخطوة RBAC نفسها. 
+Default لازم يفضل Supabase. الهدف فقط: لما أعمل Toggle إلى NEON ما يظهرش "غير مصرح".
+
+CONTEXT:
+- Auth مازال Supabase.
+- Data backend toggle موجود (Supabase default + localStorage override).
+- مشكلة NEON: has_role يرجع false لأن بيانات RBAC (profiles/user_roles/user_branches...) في Neon فاضية/ناقصة.
+- المطلوب: Seed للمستخدم الحالي كـ admin على Neon + ربطه بفرع MAIN (والفرع الثاني لو موجود) + minimal profile.
+
+DELIVERABLE: نفّذ Gate-2 ثم قدّم Evidence ثم STOP.
+
+PHASE A — Capture current signed-in user (from Supabase Auth)
+1) أضف "Admin Tool" بسيط مؤقت (أو استخدم صفحة موجودة بالفعل إن وُجدت) يعرض في UI:
+   - user.id
+   - user.email
+   - session exists؟
+   الهدف: أعرف الـ user_id الحقيقي (UUID) من Supabase auth.
+   ملاحظة: لا تغيّر auth flow. فقط عرض Read-only.
+2) اطبع في console أيضاً:
+   [AUTH_USER] id=<uuid> email=<email>
+
+PHASE B — Seed RBAC in Neon (SQL on heliumdb)
+باستخدام الـ user_id الذي ظهر في Phase A فقط (لا تخمين):
+1) تأكد الجداول موجودة: profiles, user_roles, user_branches, branches, user_custom_roles (إن وجدت), custom_roles (إن وجدت).
+2) اجلب branch ids:
+   SELECT id, code, name FROM public.branches ORDER BY code;
+   خزّن branch_main_id حيث code='MAIN' إن وجد، وإلا أول فرع.
+3) نفّذ UPSERTs آمنة (idempotent) للمستخدم الحالي:
+   - profiles: أدخل صف بـ id = user_id، email = user.email (إن كان العمود موجود)، name = email أو 'Admin', created_at/updated_at إن وجدت.
+   - user_roles: أضف role = 'admin' (أو app_role enum المناسب) لهذا user_id. لو schema تستخدم enum/app_role أو جدول roles مختلف: استنتج من الأعمدة الموجودة واملأها بالشكل الصحيح.
+   - user_branches: اربط user_id بـ branch_main_id (وأيضاً باقي الفروع إن النظام يتطلب).
+   - إن النظام يعتمد على user_custom_roles/custom_roles: أضف custom role "admin" واربطه بالمستخدم (فقط إذا كان has_role يعتمد عليها).
+4) IMPORTANT: لا تلمس بيانات Supabase. كل التعديلات على Neon فقط.
+
+PHASE C — Verification (No guessing)
+1) شغّل Toggle إلى NEON من UI (localStorage override = neon).
+2) افتح صفحة كانت تعطي "غير مصرح" وتأكد أنها تفتح.
+3) شغّل فحص RBAC:
+   - استدعاء has_role (بنفس الطريقة التي يستخدمها النظام) وتأكد يرجع true لـ admin.
+4) ارجع إلى SUPABASE (override reset) وتأكد كل شيء كما كان.
+
+EVIDENCE REQUIRED (raw):
+A) SQL outputs:
+   - SELECT * FROM profiles WHERE id='<user_id>';
+   - SELECT * FROM user_roles WHERE user_id='<user_id>';
+   - SELECT * FROM user_branches WHERE user_id='<user_id>';
+B) Screenshot/description: NEON mode opens protected page successfully (no "غير مصرح").
+C) Console logs:
+   - [AUTH_USER] ...
+   - [ACTIVE_DATA_BACKEND] ... (reason=..., env=..., override=...)
+D) git diff --stat AND git diff (must show only the minimal admin read-only UI file(s) + any seed script location if used). 
+E) Confirm idempotency: rerun seed safely (no duplicates / no errors).
+
+STOP بعد تقديم الـ Evidence. لا تبدأ أي Batch Migration.

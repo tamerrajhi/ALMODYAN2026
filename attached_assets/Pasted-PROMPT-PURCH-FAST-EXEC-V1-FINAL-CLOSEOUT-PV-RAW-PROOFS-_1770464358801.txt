@@ -1,0 +1,145 @@
+PROMPT — PURCH-FAST-EXEC-V1-FINAL-CLOSEOUT-PV | RAW PROOFS ONLY | NO SUMMARIES | STOP
+
+ROLE: Senior Full-Stack Engineer
+MODE: VERIFICATION + EVIDENCE ONLY (NO CODE CHANGES)
+
+OUTPUT MUST BE ONLY RAW COMMAND OUTPUTS + FILE SNIPPETS (NO NARRATIVE).
+If any proof fails, paste the raw failure output and STOP (do not fix).
+
+0) BASE INFO (RAW)
+- git rev-parse HEAD
+- git log -1 --oneline
+
+1) GIT (RAW)
+- git diff --stat
+- git diff --
+If diff is empty:
+- git show --stat HEAD
+- git show HEAD --name-only
+
+2) MIGRATIONS (PASTE FULL CONTENTS)
+Paste full contents of ALL PURCH fast-exec migrations (at least):
+- migrations/purch_fast_exec_v1_batch_a.sql
+- migrations/purch_fast_exec_v1_batch_d.sql
+- migrations/purch_fast_exec_v1_batch_ef.sql (if exists)
+- the migration file that contains PV FULL implementation + seed accounts/settings (paste full)
+(If PV was added into batch_ef, confirm and paste that file only once.)
+
+3) DB OBJECT PROOFS (PSQL RAW)
+- \d+ payments
+- \d+ supplier_payment_allocations (if created)
+- \d+ payment_account_settings
+- \d+ chart_of_accounts
+- \d+ journal_entries
+- \d+ journal_entry_lines
+
+Returns objects:
+- \d+ purchase_returns
+- \d+ purchase_return_items
+- \d+ purchase_return_lines
+- \d+ v_returns_hub
+
+Functions existence:
+- SELECT proname FROM pg_proc WHERE proname IN (
+    'generate_payment_number',
+    'payment_voucher_atomic',
+    'payment_voucher_update_atomic',
+    'payment_voucher_void_atomic',
+    'complete_purchase_return_general_atomic',
+    'complete_purchase_return_unique_items_atomic',
+    'void_purchase_return_atomic',
+    'purchase_order_receive_v2_atomic',
+    'import_purchase_batch_create_atomic'
+  ) ORDER BY proname;
+
+4) SERVER SNIPPETS (RAW FILE SNIPS)
+From server/routes.ts paste:
+A) RPC_ALLOWLIST entries for:
+   generate_payment_number,
+   payment_voucher_atomic,
+   payment_voucher_update_atomic,
+   payment_voucher_void_atomic
+B) The RPC endpoint handler code showing:
+   - the route path
+   - req.body parsing (must read req.body.args)
+C) Paste the NOT_IMPLEMENTED guard block.
+   IMPORTANT: show that PV RPC names are NOT in the NOT_IMPLEMENTED guard anymore.
+
+5) AUTH SESSION ENDPOINT PROOF (RAW CURL)
+- curl -i <BASE_URL>/api/auth/session
+(Show headers + JSON body.)
+
+6) PV NUMBER PROOF (AUTHENTICATED CURL)
+- curl -i -X POST <BASE_URL>/<RPC_ENDPOINT>/generate_payment_number \
+  -H "Content-Type: application/json" \
+  -H "Cookie: <SESSION_COOKIE>" \
+  -d '{"args":{"p_payload":{"client_request_id":"pv-gen-raw-001"}}}'
+Paste output.
+
+7) PV CREATE/UPDATE/VOID PROOFS (AUTHENTICATED CURL)
+Run and paste outputs (must be HTTP 200 + JSON body, not 500):
+A) payment_voucher_atomic (SUCCESS)
+B) payment_voucher_update_atomic (SUCCESS)
+C) payment_voucher_void_atomic (SUCCESS)
+
+IMPORTANT BODY SHAPE:
+{"args":{"p_payload":{...}}}
+
+8) PV DB + ACCOUNTING BALANCE PROOF (RAW)
+After CREATE:
+- SELECT id, payment_number, supplier_id, branch_id, amount, status, created_at
+  FROM payments ORDER BY created_at DESC LIMIT 3;
+- Identify the JE id created and paste:
+  SELECT journal_entry_id FROM payments ORDER BY created_at DESC LIMIT 1;
+- Then:
+  SELECT journal_entry_id, SUM(debit) AS total_debit, SUM(credit) AS total_credit
+  FROM journal_entry_lines
+  WHERE journal_entry_id = '<JE_ID>'
+  GROUP BY journal_entry_id;
+
+After UPDATE:
+- Show reversal chain:
+  SELECT id, payment_number, status, updated_at FROM payments ORDER BY updated_at DESC LIMIT 3;
+  SELECT id, reference_type, reference_id, created_at
+  FROM journal_entries
+  ORDER BY created_at DESC LIMIT 5;
+
+After VOID:
+- SELECT id, payment_number, status, voided_at FROM payments ORDER BY voided_at DESC LIMIT 3;
+
+9) PV IDEMPOTENCY PROOF (RAW)
+Re-run payment_voucher_atomic with SAME client_request_id and paste:
+- curl output
+- SELECT count(*) FROM payments WHERE client_request_id = '<same>';
+
+10) RETURNS RPC PROOFS (AUTHENTICATED CURL) — MIN MODE
+- complete_purchase_return_general_atomic (SUCCESS)
+- complete_purchase_return_unique_items_atomic (SUCCESS)
+- void_purchase_return_atomic (SUCCESS)
+Then DB proof:
+- SELECT id, return_number, purchase_type, status, created_at FROM purchase_returns ORDER BY created_at DESC LIMIT 3;
+
+11) RECEIVE PO PROOF (RAW)
+Provide ONE curl proof for purchase_order_receive_v2_atomic (structured JSON response)
+OR DB proof that purchase_order_receipts can be written/read.
+
+12) EXCEL IMPORT PROOF (RAW)
+- curl proof calling import_purchase_batch_create_atomic (must not fail on enum/audit_logs mismatch)
+- DB proof:
+  SELECT id, status, created_at FROM purchase_batches ORDER BY created_at DESC LIMIT 3;
+
+13) TYPESCRIPT BUILD (RAW)
+- npx tsc --noEmit
+(Paste output.)
+
+14) NO SUPABASE CONFIRMATION (RAW)
+- rg "supabase\\." src/pages/purchasing
+(Paste output.)
+
+15) UI GATE TESTS (LOGGED-IN) — RAW
+From authenticated browser session:
+- Open ALL purchasing sidebar routes.
+- Provide PASS/FAIL list.
+- For each FAIL: failing request URL + status + response snippet.
+
+STOP AFTER ALL OUTPUTS.

@@ -1,0 +1,161 @@
+
+Time
+Deployment
+Source
+Log
+2026-02-05 03:10:56.13
+4c0c9290
+System
+starting up user application
+2026-02-05 03:10:57.28
+4c0c9290
+User
+Error: Cannot find module '/home/runner/workspace/dist/index.cjs'
+2026-02-05 03:10:57.28
+4c0c9290
+User
+^
+2026-02-05 03:10:57.28
+4c0c9290
+User
+}
+2026-02-05 03:10:57.28
+4c0c9290
+User
+at Module._load (node:internal/modules/cjs/loader:1038:27)
+2026-02-05 03:10:57.28
+4c0c9290
+User
+throw err;
+2026-02-05 03:10:57.28
+4c0c9290
+User
+node:internal/modules/cjs/loader:1210
+2026-02-05 03:10:58.03
+4c0c9290
+User
+Error: Cannot find module '/home/runner/workspace/dist/index.cjs'
+2026-02-05 03:10:58.03
+4c0c9290
+User
+at Module._load (node:internal/modules/cjs/loader:1038:27)
+2026-02-05 03:10:58.70
+4c0c9290
+User
+node:internal/modules/cjs/loader:1210
+2026-02-05 03:10:58.70
+4c0c9290
+User
+^
+2026-02-05 03:10:58.70
+4c0c9290
+User
+throw err;
+2026-02-05 03:11:02.92
+4c0c9290
+User
+Error: Cannot find module '/home/runner/workspace/dist/index.cjs'
+2026-02-05 03:11:02.92
+4c0c9290
+User
+at node:internal/main/run_main_module:28:49 {
+2026-02-05 03:11:02.92
+4c0c9290
+User
+Node.js v20.20.0
+2026-02-05 03:11:02.92
+4c0c9290
+User
+^
+2026-02-05 03:11:02.92
+4c0c9290
+User
+node:internal/modules/cjs/loader:1210
+2026-02-05 03:11:02.92
+4c0c9290
+User
+at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)
+2026-02-05 03:11:02.92
+4c0c9290
+User
+throw err;
+2026-02-05 03:11:02.92
+4c0c9290
+User
+requireStack: []
+2026-02-05 03:11:02.92
+4c0c9290
+User
+at Module._load (node:internal/modules/cjs/loader:1038:27)
+2026-02-05 03:11:02.92
+4c0c9290
+User
+code: 'MODULE_NOT_FOUND',
+2026-02-05 03:11:02.92
+4c0c9290
+User
+at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+2026-02-05 03:11:02.92
+4c0c9290
+User
+}
+2026-02-05 03:11:02.94
+4c0c9290
+System
+command finished with error [node ./dist/index.cjs]: exit status 1
+2026-02-05 03:11:10.34
+4c0c9290
+User
+at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+2026-02-05 03:11:10.34
+4c0c9290
+User
+requireStack: []
+2026-02-05 03:11:10.34
+4c0c9290
+User
+node:internal/modules/cjs/loader:1210
+2026-02-05 03:11:10.34
+4c0c9290
+User
+^
+2026-02-05 03:11:10.34
+4c0c9290
+User
+Node.js v20.20.0
+2026-02-05 03:11:10.34
+4c0c9290
+User
+at node:internal/main/run_main_module:28:49 {
+2026-02-05 03:11:10.34
+4c0c9290
+User
+at Module._load (node:internal/modules/cjs/loader:1038:27)
+2026-02-05 03:11:10.34
+4c0c9290
+User
+Error: Cannot find module '/home/runner/workspace/dist/index.cjs'
+2026-02-05 03:11:10.34
+4c0c9290
+User
+at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)
+2026-02-05 03:11:10.34
+4c0c9290
+User
+}
+2026-02-05 03:11:10.34
+4c0c9290
+User
+throw err;
+2026-02-05 03:11:10.34
+4c0c9290
+User
+code: 'MODULE_NOT_FOUND',
+2026-02-05 03:11:10.35
+4c0c9290
+System
+command finished with error [node ./dist/index.cjs]: exit status 1
+2026-02-05 03:11:10.43
+4c0c9290
+System
+crash loop detected

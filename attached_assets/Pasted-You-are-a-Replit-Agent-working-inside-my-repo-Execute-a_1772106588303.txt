@@ -1,0 +1,101 @@
+You are a Replit Agent working inside my repo. Execute an evidence-based workflow to (1) stabilize the dev server/workflow so Vite does not lose connection, and (2) keep the POS Sellers endpoints fix intact. NO GUESSING. Use the codebase as source of truth. Do not refactor. Minimal, surgical changes only.
+
+NON-NEGOTIABLE RULES
+- Do NOT modify any existing /api/admin/* ERP endpoints in server/routes.ts.
+- Do NOT change DB schema, tables, RPC functions, or business logic for POS/ERP.
+- Do NOT change authentication models. You may only adjust error-handling so the server does not crash, and workflow config so the server stays up.
+- Any code change must be justified by a specific log/evidence snippet you capture during Phase A.
+- If you change a file, show the exact diff summary and line references.
+
+SCOPE (what must remain true)
+- POS Sellers tab uses POS Admin endpoints:
+  /api/pos/admin/branches-with-sellers
+  /api/pos/admin/profiles-active
+  /api/pos/admin/branch-sellers/assign
+  /api/pos/admin/branch-sellers/remove
+- These endpoints stay protected by requirePosAdminToken and keep the exact response shapes.
+- Vite webview should remain connected (no repeated “[vite] server connection lost. Polling for restart…” during normal idle use).
+
+=====================================
+PHASE A — AUDIT & EVIDENCE (READ-ONLY)
+=====================================
+A0) Collect runtime evidence BEFORE changing anything:
+1) Start the app using the existing Replit workflow (do not change config yet).
+2) Capture the last 200 lines of logs around the moment Vite reports:
+   “[vite] server connection lost. Polling for restart…”
+3) Determine which is happening:
+   - Crash: process exits / stack trace / unhandled rejection / throw / exit code
+   - Workflow stop: process still healthy when run manually, but workflow stops / port not detected
+4) Record:
+   - Exact command the workflow runs
+   - Expected port (usually 5000) and whether it’s actually listening
+   - Whether server binds to 0.0.0.0 or only localhost
+   - Any error handler behavior (e.g., throw inside express error middleware)
+
+A1) Evidence pack output (must include all):
+- Workflow command + waitForPort + outputType (from workflow config file)
+- Proof of server listening: lsof/netstat output for port 5000 (or configured port)
+- A 60-second stability probe:
+  Run 5 curls spaced 12s apart to http://127.0.0.1:5000/ (or /health if exists) and record HTTP codes + times.
+- If crash: include the stack trace line that causes the exit.
+
+STOP and do not implement until the Evidence Pack is produced.
+
+=====================================
+PHASE B — IMPLEMENTATION (MINIMAL FIXES)
+=====================================
+B0) Goal: eliminate the root cause proven in Phase A. Choose the minimal fix path based on evidence:
+
+B1) If Evidence indicates Express error handler is crashing the process:
+- Locate the global error middleware in server/index.ts (or wherever).
+- If it does “throw err” (or rethrows) AFTER sending a response, remove the throw and replace with:
+  - console.error(err) (or logger)
+  - return; (ensure no rethrow)
+- Do not change response structure. Do not swallow errors silently—log them.
+
+B2) If Evidence indicates unhandled promise rejections terminate the process:
+- Identify the exact rejection source from logs (which promise, which file/line).
+- Fix ONLY the source (add missing await/try-catch) OR add a process-level handler ONLY if absolutely necessary and justified by evidence.
+- Prefer fixing the source over global handlers.
+
+B3) If Evidence indicates workflow config is stopping the server (port not detected / wrong command / wrong bind):
+- Fix workflow config minimally:
+  - Ensure it runs the correct dev/start command that keeps the process in foreground
+  - Ensure waitForPort matches the actual listening port
+  - Ensure app listens on process.env.PORT and binds to 0.0.0.0
+- Do not change app architecture; only adjust listen host/port if proven necessary.
+
+B4) Preserve and re-verify POS Sellers endpoints fix:
+- Confirm no edits were made to server/routes.ts /api/admin/* endpoints.
+- Confirm POSUsersPage.tsx still uses /api/pos/admin/* URLs only.
+- Confirm the 4 POS admin endpoints exist and return:
+  - 401 { error: "POS admin session required" } with no __pos_admin cookie
+  - 200 with valid POS admin session (if test data exists)
+
+=====================================
+PHASE C — VERIFICATION (MUST PASS)
+=====================================
+C1) Workflow stability:
+- Start via workflow.
+- Keep running for 90 seconds without server exit.
+- No repeated “[vite] server connection lost…” during idle.
+- Run the 60-second curl probe again (5 curls) and record results.
+
+C2) Auth behavior unchanged:
+- Without __pos_admin cookie: all /api/pos/admin/* return 401 with the same JSON error.
+- ERP /api/admin/* endpoints remain unchanged in routes.ts.
+
+C3) Report:
+- Files changed (exact list)
+- Minimal diff summary (what was removed/added)
+- Evidence: log snippets before vs after showing the crash/stop is resolved
+- Stability probe results (HTTP codes + timings)
+- Explicit statement: “No changes were made to existing /api/admin/* endpoints.”
+
+DELIVERABLE FORMAT
+Return a final report with:
+1) Root cause (1 sentence) + the exact log line proving it
+2) Fix applied (1–3 bullets)
+3) Files changed + short diff summary
+4) Verification evidence (logs + curl probe)
+5) Confirmation that POS Sellers endpoints fix remains intact

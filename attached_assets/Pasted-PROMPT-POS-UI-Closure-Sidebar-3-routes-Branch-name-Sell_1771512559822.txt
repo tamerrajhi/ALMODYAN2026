@@ -1,0 +1,222 @@
+PROMPT — POS UI Closure: Sidebar (3 routes) + Branch name + Seller name + remove legacy badges
+Hard constraints
+
+Frontend-only changes (src/ فقط).
+
+لا تغييرات DB schema.
+
+لا تغييرات على RPC payloads.
+
+لا تغييرات RBAC/Atomic patterns.
+
+لا localStorage للتخزين الدائم (session/runtime state فقط مسموح).
+
+المطلوب بالضبط (Definition of Done)
+1) بعد دخول الكاشير PIN (POS session 200)
+
+السـايدبار يعرض فقط 3 عناصر وبنفس المسارات:
+
+نقطة بيع (POS) → /pos
+
+فواتير مبيعات POS → /sales/pos-invoices
+
+مرتجعات مبيعات POS → /sales/returns?mode=pos
+
+أي عناصر أخرى تختفي بالكامل في وضع POS.
+
+2) اسم الفرع في Header
+
+في /pos و /pos/return:
+
+بدلاً من عرض branch_id (UUID)، اعرض:
+
+اسم الفرع + الكود بالشكل: فرع 01 (BR01)
+
+لو فشل جلب الاسم لأي سبب:
+
+اعرض fallback واضح: Branch: <uuid مختصر> (مش كأنه اسم فرع)
+
+3) اسم البائع (Seller) في Header
+
+حذف أي Badge/نص قديم مثل: “اسم البائع غير محدد”.
+
+استبداله بـ display صحيح:
+
+قبل اختيار بائع: Badge خفيف “البائع: اختر بائع”
+
+بعد اختيار بائع + نجاح PIN: Badge “البائع: {sellerName}”
+
+لازم يظهر sellerName من قائمة البياعين للفرع (endpoint الحالي /api/branches/:branchId/sellers أو /api/pos/cashiers حسب ما هو معتمد عندكم للبياعين داخل POS).
+
+4) سياسة التشغيل (Operational Rule)
+
+لا يُسمح بتنفيذ البيع أو أي عملية POS Atomic قبل:
+
+Branch session موجود (BranchLoginGate نجح)
+
+POS cashier session موجود (POSCashierGate نجح)
+
+Seller selected من القائمة (ولو عندكم PIN للبائع نفسه، يظل مطلوب كما اتفقنا)
+
+أي محاولة بدون Seller:
+
+رسالة واضحة: “يجب اختيار البائع أولاً”
+
+A) AUDIT (قبل التعديل) — Evidence إلزامي
+
+نفّذ تدقيق سريع واذكر النتائج بالملفات والأسطر:
+
+أين يتم بناء السايدبار وفلترته؟
+
+MainLayout / Sidebar / menu config
+
+هل الفلترة تعتمد على branch context أم pos session context؟
+
+أين يظهر branch_id كـ UUID في Header؟
+
+في POSPage.tsx و POSReturnPage.tsx
+
+حدّد البادج/العنصر الذي يعرضه.
+
+أين يظهر “اسم البائع غير محدد”؟
+
+ابحث عن النص العربي نفسه + كلمات: seller, selectedSeller, غير محدد
+
+حدّد الـcomponent الذي يرسمه.
+
+كيف يتم اختيار البائع حالياً؟
+
+هل هو selectedSellerId من endpoint البياعين؟
+
+هل يوجد Gate للبائع PIN أو مجرد اختيار؟
+
+لا تبدأ التعديل قبل ما تكتب audit مختصر بالنقاط الأربعة.
+
+B) IMPLEMENTATION
+B1) Sidebar POS Mode detection يجب أن يكون “بعد cashier PIN فقط”
+
+عرّف isPosMode كالتالي:
+
+GET /api/pos/session/context مع credentials: 'include'
+
+لو 200 → POS mode = true
+
+لو 401 → POS mode = false
+
+ضع check في المكان المركزي الذي يبني/يعرض السايدبار (غالباً MainLayout).
+
+عندما isPosMode=true:
+
+فلتر عناصر السايدبار إلى allowlist (الثلاث routes فقط).
+
+عندما isPosMode=false:
+
+اعرض السايدبار الكامل (ERP).
+
+مهم: الفلترة لازم تكون exact match على المسارات الثلاثة المذكورة أعلاه.
+
+B2) Branch display name + code
+
+استخدم endpoint public:
+
+GET /api/public/branches-list (بدون auth)
+
+ابني map: branch_id -> {name, code}
+
+في POSPage.tsx و POSReturnPage.tsx:
+
+بدل badge الحالي الذي يعرض UUID
+
+اعرض: {branch.name} ({branch.code})
+
+fallback: Branch: ${branchId.slice(0,8)}…
+
+ممنوع تخمين الاسم من UUID.
+
+B3) Seller name — إزالة “غير محدد” وإظهار seller الحقيقي
+
+ابحث عن UI القديم الذي يعرض “اسم البائع غير محدد” واحذفه.
+
+اعمل header badge واضح:
+
+البائع: اختر بائع قبل الاختيار
+
+البائع: {sellerName} بعد الاختيار
+
+sellerName يُستخرج من قائمة البياعين (المحمّلة للفرع الحالي).
+
+تأكد أن selectedSellerId لا يتم تصفيره بدون سبب عند refresh branch أو تغييرات أخرى.
+
+لو كان في flow للبائع PIN:
+
+لازم يبقى sellerName لا يتغير إلا بعد PIN success (لو دي سياستكم)
+
+وإلا على الأقل بعد اختيار seller من dropdown.
+
+B4) Confirm أن العمليات لا تعمل بدون Seller
+
+راجع مكان استدعاء RPC البيع/المرتجع (مثلاً complete_pos_sale_atomic)
+
+قبل الاستدعاء:
+
+تحقق أن seller selected
+
+وإلا toast/error وتوقف.
+
+C) ERROR HANDLING (شرط مهم)
+
+لو فشل أي جزء من fetch (branches list / pos session context):
+
+لا تكسر الصفحة
+
+استخدم fallback states + رسائل واضحة
+
+D) EVIDENCE REQUIRED (بعد التنفيذ)
+
+لازم ترجع التالي:
+
+git diff --stat
+
+قائمة الملفات المعدلة فقط (paths)
+
+Smoke tests manual checklist:
+
+Smoke 1 — دخول POS
+
+افتح /pos بدون ERP login → تظهر بوابة الفرع
+
+branch login صحيح → تظهر بوابة الكاشير PIN
+
+بعد cashier PIN success:
+
+Sidebar = 3 عناصر فقط (بالروتس المذكورة)
+
+Branch badge = اسم + كود (ليس UUID)
+
+Seller badge لا يعرض “غير محدد”
+
+Smoke 2 — Seller
+
+قبل اختيار البائع: يظهر “البائع: اختر بائع”
+
+اختر بائع من القائمة:
+
+يظهر “البائع: فلان”
+
+حاول تنفيذ بيع بدون اختيار بائع:
+
+يمنع العملية برسالة “يجب اختيار البائع أولاً”
+
+Smoke 3 — خروج POS
+
+اعمل Exit/Logout POS cashier
+
+تأكد أن /api/pos/session/context يرجع 401
+
+Sidebar يرجع كامل (ERP mode)
+
+ملاحظة تنفيذية (مهم)
+
+لا تستخدم branch session لتفعيل وضع POS في السايدبار.
+
+تفعيل POS sidebar يحصل فقط بعد نجاح /api/pos/session/context.

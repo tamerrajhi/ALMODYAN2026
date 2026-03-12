@@ -1,0 +1,63 @@
+✅ PROMPT — STOP-ACC-VERIFY-PATCH | Provide missing RAW outputs only | EVIDENCE ONLY | NO CHANGES | STOP
+
+ROLE: Auditor
+MODE: EVIDENCE ONLY — NO CODE/DB CHANGES. NO NEW COMMITS. NO DDL. NO FUNCTION EDITS.
+
+You previously provided a summary, but RAW outputs are missing.
+Provide ONLY the missing raw evidence below, then STOP.
+
+=================================
+A2) FULL GIT DIFFS (RAW)
+=================================
+Run (no pager) and paste full outputs:
+
+git --no-pager diff 241bae9..8c98ed3 -- server/routes.ts
+git --no-pager diff 241bae9..8c98ed3 -- src/pages/accounting/JournalEntriesPage.tsx
+git --no-pager diff 241bae9..8c98ed3 -- src/pages/accounting/ChartOfAccountsPage.tsx
+git --no-pager diff 241bae9..8c98ed3 -- replit.md
+
+STOP if any output is truncated—split into parts but include everything.
+
+=================================
+B2) FULL FUNCTION BODIES (RAW)
+=================================
+For each function below, run and paste the full output of pg_get_functiondef (no summaries):
+
+SELECT pg_get_functiondef(p.oid)
+FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname='create_journal_entry_atomic';
+
+Repeat for:
+post_journal_entry_atomic
+unpost_journal_entry_atomic
+reverse_journal_entry_atomic   (IMPORTANT: ensure you output the jsonb signature one)
+update_journal_entry_atomic
+update_chart_of_account_atomic
+delete_chart_of_account_atomic
+
+=================================
+D2) RAW CURL OUTPUTS (WITH STATUS LINES)
+=================================
+Paste raw outputs including HTTP status line + headers:
+
+1) Unauthed:
+curl -i http://localhost:<PORT>/api/journal-entries
+curl -i http://localhost:<PORT>/api/chart-of-accounts
+
+2) Authed:
+curl -i --cookie "__session=<MASKED_TOKEN>" http://localhost:<PORT>/api/journal-entries
+curl -i --cookie "__session=<MASKED_TOKEN>" http://localhost:<PORT>/api/chart-of-accounts
+
+Mask token value, but keep cookie name and structure.
+
+=================================
+E) GATE TESTS — SHOW CALLS + RESULTS
+=================================
+For each GT, paste:
+- The exact SQL you executed (or rpc call)
+- Then paste ONLY the JSON result
+
+GT1 create draft JE
+GT2 post balanced JE
+GT3 post imbalanced JE
+GT4 rev

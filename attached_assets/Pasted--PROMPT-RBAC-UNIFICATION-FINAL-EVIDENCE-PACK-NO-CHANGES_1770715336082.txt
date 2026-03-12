@@ -1,0 +1,102 @@
+✅ PROMPT — RBAC UNIFICATION FINAL EVIDENCE PACK | NO CHANGES | RAW OUTPUT ONLY | STOP
+
+ROLE: Full-stack Engineer (Express + Neon/Postgres + Vite/React)
+MODE: Verification only. Do NOT modify any files. Do NOT refactor. Do NOT “fix”. Just run commands and paste RAW outputs.
+
+GOAL:
+Produce the FINAL Evidence Pack that RBAC is now:
+1) 100% local (DB-driven) and portable to any hosting (no provider dependency)
+2) Single source of truth: /api/access-context
+3) No legacy duplication: NO has_role RPC usage in production UI, NO /api/module-context-data, NO /api/user-is-admin
+4) Cold-start clean (no “Rendered fewer hooks than expected”)
+
+OUTPUT RULES:
+- Paste raw command outputs exactly.
+- No narrative, no opinions, no extra text.
+- If something fails, paste the error and continue.
+
+========================
+SECTION A — CODEBASE GATES (RG PROOF)
+Run:
+
+A1) Legacy endpoints references in frontend:
+rg -n "module-context-data|user-is-admin" src --glob='*.ts' --glob='*.tsx' || true
+
+A2) has_role usage in frontend (must be 0 in prod UI):
+rg -n "\\bhas_role\\s*\\(" src --glob='*.ts' --glob='*.tsx' || true
+
+A3) /api/access-context usage (should exist in ModuleContext fetch):
+rg -n "/api/access-context|access-context" src --glob='*.ts' --glob='*.tsx' || true
+
+A4) Verify legacy endpoints removed from server:
+rg -n "app\\.get\\(\"/api/module-context-data\"|app\\.get\\(\"/api/user-is-admin\"" server/routes.ts || true
+
+A5) Verify new endpoint exists + is protected:
+rg -n "app\\.get\\(\"/api/access-context\".*requireSession" server/routes.ts || true
+
+========================
+SECTION B — DATABASE STATE PROOF (RBAC TABLES + SEED COUNTS)
+Run SQL (use your existing DB tool/psql wrapper). Output ONLY results:
+
+B1) Table existence:
+SELECT to_regclass('public.custom_roles') AS custom_roles,
+       to_regclass('public.user_custom_roles') AS user_custom_roles,
+       to_regclass('public.screens') AS screens,
+       to_regclass('public.role_permissions') AS role_permissions,
+       to_regclass('public.role_modules') AS role_modules;
+
+B2) Seed counts:
+SELECT
+ (SELECT count(*) FROM custom_roles) AS custom_roles_count,
+ (SELECT count(*) FROM user_custom_roles) AS user_custom_roles_count,
+ (SELECT count(*) FROM screens) AS screens_count,
+ (SELECT count(*) FROM role_permissions) AS role_permissions_count,
+ (SELECT count(*) FROM role_modules) AS role_modules_count;
+
+B3) One sample admin assignment (latest):
+SELECT ucr.user_id, cr.role_name
+FROM user_custom_roles ucr
+JOIN custom_roles cr ON cr.id = ucr.role_id
+ORDER BY ucr.created_at DESC
+LIMIT 5;
+
+========================
+SECTION C — ENDPOINT CONTRACT PROOF (/api/access-context)
+C0) Start server fresh (NO HMR assumption):
+- Stop server
+- npm run build
+- npm run dev (or start)
+Paste BOTH raw outputs for build + dev start.
+
+C1) Unauthenticated call (must be 401 JSON):
+curl -i http://localhost:3000/api/access-context | head -n 40 || true
+
+C2) Authenticated call from a real browser session:
+- Open app in browser, login normally.
+- Open DevTools → Network → click /api/access-context → copy the FULL JSON response (redact tokens only).
+Paste the JSON ONLY.
+
+C3) Verify JSON shape keys exist:
+Must show: is_admin, roles (array), modules (array), screen_permissions (object).
+If any missing, paste what you got.
+
+========================
+SECTION D — COLD START UI GATE (HOOKS ERROR MUST BE 0)
+D1) After the fresh server start in C0:
+- Hard refresh the browser (Ctrl+Shift+R)
+- Open DevTools Console
+- Filter “Rendered fewer hooks than expected”
+Paste:
+- A screenshot text dump OR copy the console lines showing NONE (or paste the error if present).
+
+========================
+SECTION E — ROUTE GUARD BEHAVIOR (SANITY)
+E1) Visit a protected route directly while logged out (e.g. /sales/invoices):
+- Confirm redirect to /auth OR “غير مصرح” as intended
+Paste the observed behavior text + the network status for /api/access-context.
+
+E2) Login then visit same route:
+- Confirm access granted
+Paste observed behavior text.
+
+STOP.

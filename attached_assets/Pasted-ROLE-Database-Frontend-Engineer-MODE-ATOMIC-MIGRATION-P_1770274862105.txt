@@ -1,0 +1,71 @@
+ROLE: Database + Frontend Engineer
+MODE: ATOMIC MIGRATION (PR/PO ONLY) — STOP AFTER DONE
+
+GOAL:
+Re-enable Purchase Requisitions (PR) and Purchase Orders (PO) workflows using Atomic RPCs only.
+Eliminate ALL direct write paths in purchasingWriteService.ts by replacing them with RPC calls.
+Keep the system Atomic-Only.
+
+SCOPE (STRICT):
+- Only PR + PO (create, update, submit/approve, cancel/void).
+- Only code paths that currently used direct writes in purchasingWriteService.ts and the PR/PO pages/components that call it.
+- Do NOT touch purchase invoices/import/sales/returns.
+
+STEP 1 — INVENTORY OF OPERATIONS (NO GUESSING):
+1) List the exact functions exported by purchasingWriteService.ts that perform writes.
+2) For each, identify:
+   - entity: PR or PO
+   - action: create/update/submit/approve/void/line-add/line-remove
+   - payload keys used by UI
+STOP if any ambiguity and print what file/line is missing (but do not ask user questions).
+
+STEP 2 — DB ATOMIC RPCs (REQUIRED):
+Create these RPCs (SECURITY DEFINER, PL/pgSQL) using atomic_workflow_requests idempotency (client_request_id TEXT):
+A) PR:
+- pr_create_atomic(p_client_request_id uuid, p_branch_id uuid, p_request_date date, p_notes text, p_lines jsonb) returns jsonb
+- pr_update_atomic(p_client_request_id uuid, p_pr_id uuid, p_notes text, p_lines jsonb) returns jsonb
+- pr_submit_atomic(p_client_request_id uuid, p_pr_id uuid) returns jsonb
+- pr_approve_atomic(p_client_request_id uuid, p_pr_id uuid, p_approval_level int, p_reason text) returns jsonb
+- pr_void_atomic(p_client_request_id uuid, p_pr_id uuid, p_reason text) returns jsonb
+
+B) PO:
+- po_create_atomic(p_client_request_id uuid, p_branch_id uuid, p_supplier_id uuid, p_order_date date, p_notes text, p_lines jsonb) returns jsonb
+- po_update_atomic(p_client_request_id uuid, p_po_id uuid, p_supplier_id uuid, p_notes text, p_lines jsonb) returns jsonb
+- po_submit_atomic(p_client_request_id uuid, p_po_id uuid) returns jsonb
+- po_void_atomic(p_client_request_id uuid, p_po_id uuid, p_reason text) returns jsonb
+
+RULES:
+- p_lines jsonb is an array of line objects from UI (product_id, qty, unit_cost, notes, etc.). Adapt to current DB schema:
+  - If PR/PO lines tables exist, upsert lines inside RPC in a single transaction.
+  - If only one table exists, use it. Do NOT invent new schema unless absolutely required (then add minimal tables pr_lines/po_lines).
+- Enforce status transitions (draft -> submitted -> approved; void only from allowed states).
+- Idempotency:
+  - workflow_type values must be fixed (e.g. 'pr_create','pr_update','po_create', etc.)
+  - Store result_payload with generated ids/codes.
+- Audit:
+  - Insert into audit_logs with entity_type 'pr'/'po' and entity_id + human code if available.
+
+STEP 3 — FRONTEND MIGRATION:
+3) Refactor purchasingWriteService.ts:
+- Remove all direct writes.
+- Replace with wrapper functions that call the new RPCs using supabase.rpc.
+- Ensure each operation generates p_client_request_id via crypto.randomUUID().
+- Keep function signatures stable to avoid touching many UI files.
+
+4) Update PR/PO UI only if needed (minimal):
+- If UI relied on intermediate direct write return values, adjust to use RPC result_payload.
+
+STEP 4 — VERIFICATION (MANDATORY):
+A) Paste exact SQL definitions for the RPCs created (at least pr_create_atomic + po_create_atomic + pr_approve_atomic + po_void_atomic; if more exist, include all).
+B) Paste purchasingWriteService.ts snippets with line numbers showing RPC calls.
+C) Run and paste (must remain EMPTY):
+   grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+D) Minimal non-UI test (no manual clicking):
+   - Run SQL calls directly:
+     - select pr_create_atomic(<uuid>, <branch>, current_date, 'test', '[{...}]'::jsonb);
+     - select po_create_atomic(<uuid>, <branch>, <supplier>, current_date, 'test', '[{...}]'::jsonb);
+   - Paste returned jsonb (ids/codes).
+
+STOP AFTER COMPLETION.
+NO OTHER MODULES.
+NO GUESSING.

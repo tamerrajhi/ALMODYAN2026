@@ -1,0 +1,80 @@
+✅ PROMPT — RETURNS ROUTES & TYPE DISCRIMINATION AUDIT (POS vs GENERAL) | NO GUESSING | EVIDENCE ONLY | STOP
+
+ROLE: Senior Full-Stack Auditor (React + Supabase/Postgres + Node routes)
+
+MODE: AUDIT ONLY (READ-ONLY). DO NOT APPLY ANY FIXES.
+
+STRICT RULES (NO EXCEPTIONS):
+1) ممنوع التخمين تمامًا. أي استنتاج لازم يكون مدعوم بـ Evidence من الكود/الـ DB/اللوجز.
+2) ممنوع تعديل أي ملف أو تشغيل auto-fix أو refactor أو تغيير routes.
+3) الهدف: فهم “المسارين المختلفين للمرتجعات” كما هو مطبّق فعليًا الآن، وكيف يتم تمييز POS vs General على مستوى البيانات والـ UI.
+4) اكتب الرد بالعربية، وبأسلوب تقرير تدقيق.
+
+AUDIT OBJECTIVES:
+A) Identify the two return flows (routes + pages + entry points)
+B) Identify the discrimination logic (how system tells POS return vs General return) WITHOUT guessing
+C) Provide a clear contract proposal based only on proven facts (columns/fields already exist), but do NOT implement it
+
+TASKS (execute in order):
+
+1) ROUTE MAP (Evidence-based)
+- افتح ملف الراوتر الرئيسي (App.tsx / routes config) واذكر كل routes المتعلقة بالمرتجعات:
+  - POS return route(s) (مثال: /pos/return ...)
+  - General sales return route(s) (مثال: /sales/returns..., /sales/returns/new...)
+- لكل route: اذكر Component/Page المستهدف + path/line evidence.
+
+2) ENTRY POINTS (Create Return actions)
+- ابحث في الكود عن كل أماكن “إنشاء مرتجع” أو أي buttons/actions تؤدي لمرتجعات.
+- اعرض جدول:
+  - Source Screen (مثال: SalesInvoiceViewPage / POS invoice list / POS screen)
+  - Target Route
+  - Params passed (invoice_id / sale_id / return_id ...)
+  - Evidence snippet (path + lines)
+
+3) DATA MODEL REALITY (DB proof)
+- اعرض schema فعلي (columns فقط) لجدول returns + أي جدول return_items (إن وجد) + sales + invoices.
+- استخرج “حقول يمكن استخدامها للتمييز” لكن بشرط أن تكون موجودة فعليًا في DB (Evidence).
+- لا تقترح mapping لأعمدة غير موجودة.
+
+4) CURRENT DISCRIMINATION LOGIC (As-Is)
+- حدّد من الكود: هل هناك شرط يميز POS vs General؟
+  أم أن كل المرتجعات تُقرأ من نفس الجدول بلا تمييز؟
+- اعرض الكود الذي يحدد:
+  - ما الذي يعتبر “POS return”
+  - ما الذي يعتبر “General return”
+  أو اذكر بوضوح: “لا يوجد تمييز صريح مثبت” مع دليل.
+
+5) RETURNS LISTING PAGES (Where each shows)
+- حدّد صفحات “عرض قائمة المرتجعات” لكل مسار:
+  - صفحة POS returns list
+  - صفحة General returns management (مرتجعات المبيعات العامة من العملاء)
+- لكل صفحة:
+  - ما مصدر البيانات (table reads / endpoints / RPC)
+  - ما الـ filters المستخدمة فعليًا الآن (إن وجدت)
+  - Evidence snippets
+
+6) GAP LIST (No guessing)
+- اذكر فجوات تمنع الفصل بين الشاشتين (إن وجدت) مثل:
+  - غياب return_type واضح
+  - غياب foreign key يحدد المصدر
+  - تداخل UI يعرض نفس dataset
+- كل فجوة لازم تتدعم بدليل من الكود/DB.
+
+REQUIRED OUTPUT FORMAT:
+1) Summary (5–8 نقاط)
+2) Evidence Pack (خام):
+   - E1 Routes snippets (paths + line ranges)
+   - E2 Entry points table (with snippets)
+   - E3 DB schema proof snippets
+   - E4 As-Is discrimination code snippets
+   - E5 Listing pages filters snippets
+3) As-Is Contract Map (جدول نهائي):
+   - Flow: POS Return | General Return
+   - Route(s)
+   - Page(s)
+   - Required params
+   - Data source
+   - Discriminator field(s) (ONLY if proven)
+4) Gaps / Risks list
+
+STOP. Do NOT propose fixes. Do NOT implement anything. Do NOT change any file.

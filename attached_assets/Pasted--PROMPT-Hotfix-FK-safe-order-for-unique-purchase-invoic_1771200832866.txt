@@ -1,0 +1,120 @@
+✅ PROMPT — Hotfix (FK-safe order) for unique_purchase_invoice_rebuild_atomic(jsonb)
+الهدف
+
+إصلاح خطأ FK:
+unique_purchase_invoices_journal_entry_id_fkey
+بسبب ترتيب خاطئ داخل unique_purchase_invoice_rebuild_atomic.
+
+القاعدة الذهبية
+
+قبل حذف journal_entries لازم:
+
+نفك الربط من unique_purchase_invoices.journal_entry_id
+
+نحذف journal_entry_lines
+
+نحذف journal_entries
+
+بدون أي تغيير آخر في منطق الـ rebuild.
+
+P0 — Evidence BEFORE (Read-only)
+
+نفّذ (مع استبدال :invoice_id بـ UUID):
+
+-- P0.1 confirm invoice has JE
+select id, invoice_number, journal_entry_id
+from unique_purchase_invoices
+where id = :invoice_id;
+
+-- P0.2 JE lines count
+select count(*) as je_lines
+from journal_entry_lines
+where journal_entry_id = (
+  select journal_entry_id from unique_purchase_invoices where id = :invoice_id
+);
+
+
+وطلع definition الحالي:
+
+select pg_get_functiondef('public.unique_purchase_invoice_rebuild_atomic(jsonb)'::regprocedure);
+
+P1 — Apply Patch (Minimal, exact variables)
+
+افتح نص الدالة، وروّح لجزئية Step 1c (حوالي السطر 76) اللي فيها الكود الحالي:
+
+DELETE FROM journal_entry_lines WHERE journal_entry_id = v_old_inv.journal_entry_id;
+DELETE FROM journal_entries WHERE id = v_old_inv.journal_entry_id;
+UPDATE unique_purchase_invoices SET journal_entry_id = NULL WHERE id = v_invoice_id;
+
+✅ استبدلها بهذا الترتيب فقط:
+-- Step 1c (FIXED ORDER): detach invoice FK first, then delete lines, then delete header
+if v_old_inv.journal_entry_id is not null then
+  UPDATE unique_purchase_invoices
+  SET journal_entry_id = NULL
+  WHERE id = v_invoice_id;
+
+  DELETE FROM journal_entry_lines
+  WHERE journal_entry_id = v_old_inv.journal_entry_id;
+
+  DELETE FROM journal_entries
+  WHERE id = v_old_inv.journal_entry_id;
+end if;
+
+
+ملاحظات مهمة جداً:
+
+لا تغيّر أي شيء خارج Step 1c.
+
+نفس المتغيرات بالضبط: v_old_inv.journal_entry_id و v_invoice_id.
+
+وجود الـ if يمنع أخطاء لو JE null.
+
+بعد التعديل نفّذ:
+
+CREATE OR REPLACE FUNCTION public.unique_purchase_invoice_rebuild_atomic(args jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+  -- full function body with only Step 1c block reordered as above
+$$;
+
+P2 — Evidence AFTER deploy
+
+تأكد أن الترتيب اتغير داخل نص الدالة:
+
+select
+  position('SET journal_entry_id = NULL' in def) as pos_detach,
+  position('DELETE FROM journal_entry_lines' in def) as pos_lines,
+  position('DELETE FROM journal_entries' in def) as pos_header
+from (
+  select pg_get_functiondef('public.unique_purchase_invoice_rebuild_atomic(jsonb)'::regprocedure) as def
+) s;
+
+
+لازم: pos_detach < pos_lines < pos_header.
+
+P3 — Re-test (Rebuild call) + Verification
+
+شغّل نفس عملية الحفظ/الـ RPC على الفاتورة اللي كانت بتفشل.
+
+بعد النجاح نفّذ:
+
+-- P3.1 invoice now has a JE (new one) or null depending on your rebuild logic
+select id, invoice_number, journal_entry_id
+from unique_purchase_invoices
+where id = :invoice_id;
+
+-- P3.2 new JE has lines
+select count(*) as new_je_lines
+from journal_entry_lines
+where journal_entry_id = (
+  select journal_entry_id from unique_purchase_invoices where id = :invoice_id
+);
+
+المطلوب في ردّك (Evidence Pack)
+
+مقتطف git diff أو SQL snippet يبين فقط Step 1c قبل/بعد
+
+نتائج P0 و P2 و P3 raw
+
+تأكيد إن الخطأ اختفى: no FK violation

@@ -1,0 +1,63 @@
+✅ PROMPT — HOTFIX: /api/module-context-data RETURNS WRONG SHAPE (ROLES OBJECTS) → ACCESS DENY | FIX BACKEND SHAPE | SAFE DEFAULTS | EVIDENCE | STOP
+
+ROLE: Full-stack Engineer (Express/Neon + React)
+MODE: Fix-only + evidence. No refactors.
+
+PROBLEM (CONFIRMED):
+Frontend expects an array of module keys like ["dashboard","sales",...].
+But /api/module-context-data currently returns roles as full objects (e.g. [{id, role_name, ...}]) or returns data that is NOT a string[] of module keys.
+Result: permission checks like includes("dashboard") fail → user gets "غير مصرح بالوصول" across the app.
+
+GOAL:
+1) Fix /api/module-context-data to return a stable, explicit contract:
+   {
+     "is_admin": boolean,
+     "roles": string[],          // role names only
+     "modules": string[]         // module keys only
+   }
+2) Ensure SAFE defaults:
+   - Never use "modules: [] means allow all" (unsafe).
+   - Admin-only may receive allow-all behavior via is_admin=true, not by empty modules.
+3) Do NOT change UI behavior except to consume the corrected contract if needed (minimal change).
+4) Must not break when role_modules table is missing or empty.
+
+STRICT RULES:
+- NO guessing: derive role/admin detection from existing tables/logic used elsewhere (e.g. has_role / user_roles / roles table).
+- Prefer BACKEND fix only. Touch frontend only if it currently reads the wrong field name.
+- requireSession MUST remain enabled for this endpoint.
+- Return JSON only.
+
+IMPLEMENTATION REQUIREMENTS:
+A) Update server route: GET /api/module-context-data
+   - Determine user_id from session (same method used by requireSession).
+   - Compute is_admin:
+     * Use existing "has_role" RPC OR join user_roles→roles where role_name in ('admin','superadmin') (use whatever exists in this codebase).
+   - Compute roles as string[] role_name (NOT objects).
+   - Compute modules as string[] of module keys:
+     * If role_modules table exists: join user_roles→role_modules→modules (or role_modules→module_key) as appropriate.
+     * If role_modules table is missing:
+       - If is_admin=true: return modules = ["*"] OR return a full explicit list from modules table if exists.
+       - If is_admin=false: return modules = [] (deny by default).
+   - IMPORTANT: If you choose ["*"], then ALSO patch frontend check to treat "*" as allow-all.
+
+B) Frontend minimal (ONLY IF REQUIRED):
+   - Wherever module access is checked, ensure it reads response.modules (string[]).
+   - Allow-all rule:
+     * if response.is_admin === true → allow
+     * else if response.modules includes "*" → allow
+     * else modules.includes(requiredModule)
+
+EVIDENCE PACK (MANDATORY):
+1) Show the BEFORE response (sample) from /api/module-context-data (curl or logged output) demonstrating wrong shape.
+2) git diff --stat
+3) git diff (only the touched files)
+4) AFTER: curl proof:
+   - Without cookie → 401
+   - With cookie → 200 and JSON includes is_admin(boolean), roles(string[]), modules(string[])
+   - Show first ~30 lines only
+5) Runtime proof:
+   - Load one protected page that previously failed (e.g. /dashboard) and confirm access is restored (no "غير مصرح" loop).
+6) STOP.
+
+DELIVERABLE:
+Apply the fix now and output the evidence pack only. STOP.

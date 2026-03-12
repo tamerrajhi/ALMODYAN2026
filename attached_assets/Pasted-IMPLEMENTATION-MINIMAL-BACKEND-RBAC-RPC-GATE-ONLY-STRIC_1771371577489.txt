@@ -1,0 +1,73 @@
+IMPLEMENTATION — MINIMAL BACKEND RBAC (RPC GATE ONLY)
+
+STRICT RULES:
+- Only touch the RPC gateway route: POST /api/rpc/:fnName in server/routes.ts (or where it is implemented).
+- Do NOT refactor unrelated code.
+- Do NOT change any SQL in the atomic functions.
+- Do NOT change payload formats.
+- Keep diffs as small as possible.
+- Evidence required: git diff --stat and git diff.
+
+Goal:
+Enforce role-based access control at the RPC gateway for non-admin users.
+Admin (custom_roles.is_admin=true) can call any allowlisted RPC.
+Non-admin users can only call RPCs allowed for their custom role(s).
+
+Audited RPCs:
+POS Sale:
+- complete_pos_sale_atomic
+- pos_fail_request
+- pos_succeed_request
+
+POS Return:
+- complete_pos_piece_return_atomic
+- get_customer_credit_balance
+
+Unique Purchase Return:
+- unique_purchase_return_create_atomic
+- generate_purchase_return_number
+
+MVP Role policies:
+1) Seller role (role_name = 'بائع فرع (POS فقط)'):
+   allow: complete_pos_sale_atomic, pos_fail_request, pos_succeed_request
+
+2) Supervisor role (role_name = 'مشرف فرع (POS + مرتجع القطع الفريدة)'):
+   allow: complete_pos_sale_atomic, pos_fail_request, pos_succeed_request,
+          complete_pos_piece_return_atomic, get_customer_credit_balance,
+          unique_purchase_return_create_atomic, generate_purchase_return_number
+
+Implementation steps:
+A) Locate the RPC gateway handler in server/routes.ts.
+   It currently has requireSession applied and an RPC_ALLOWLIST check. Keep those.
+
+B) Add a small authorization check AFTER requireSession and AFTER allowlist validation, BEFORE executing the RPC:
+   1) Determine userId from req (as set by requireSession).
+   2) Fetch user's custom roles:
+      SELECT cr.role_name, cr.is_admin
+      FROM user_custom_roles ucr
+      JOIN custom_roles cr ON cr.id = ucr.role_id
+      WHERE ucr.user_id = $1;
+   3) If any role has is_admin=true → allow.
+   4) Else compute allowed RPC names:
+      - If user has role_name exactly 'بائع فرع (POS فقط)' → seller allowlist.
+      - If user has role_name exactly 'مشرف فرع (POS + مرتجع القطع الفريدة)' → supervisor allowlist.
+      If user has neither, deny by default.
+   5) If fnName not in allowed RPC set → return 403 with a short message (consistent style).
+      Do NOT leak internal details.
+
+C) Keep backward compatibility:
+   - Do not remove RPC_ALLOWLIST (it is still the outer allowlist).
+   - Do not change apiClient.rpc mechanism.
+
+Testing (provide curl examples or internal simulation):
+1) seller calling /api/rpc/complete_pos_sale_atomic → NOT 403
+2) seller calling /api/rpc/complete_pos_piece_return_atomic → 403
+3) supervisor calling /api/rpc/complete_pos_piece_return_atomic → NOT 403
+4) supervisor calling /api/rpc/unique_purchase_return_create_atomic → NOT 403
+5) non-admin unknown role calling any RPC → 403
+6) admin calling any allowlisted RPC → NOT 403
+
+Evidence required:
+A) git diff --stat
+B) git diff
+C) Identify the exact code block added with line numbers.

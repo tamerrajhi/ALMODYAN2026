@@ -1,0 +1,68 @@
+ROLE: Senior Full-Stack Engineer
+MODE: EXECUTE NOW (NO QUESTIONS)
+
+GOAL:
+Hard-enforce Atomic-Only writes in the frontend by blocking ALL direct DB writes (.insert/.update/.upsert/.delete) anywhere under src/. Do NOT refactor to RPC now. Do NOT create new RPC. Just block legacy writes fast and safely.
+
+NON-NEGOTIABLE:
+- Implement FULL enforcement (block all ~90 writes). No partial, no confirmation prompts, no “are you sure”.
+- Reads (select) remain unchanged.
+- No DB/schema changes.
+- No guessing: if you cannot implement a change due to missing context, STOP and report the exact file/line and why.
+
+STEP 1) Add Guard
+Create: src/lib/atomicWriteGuard.ts
+
+Requirements:
+- export function forbidDirectWrite(opName: string, fileHint?: string): never
+- It must throw Error with message:
+  "DIRECT_WRITE_BLOCKED: Use atomic RPC instead. op=<opName> file=<fileHint>"
+- Also export helper: isDirectWriteBlockedError(e: unknown): boolean
+
+STEP 2) Replace ALL Direct Writes in src/
+Find and replace every usage of:
+  supabase.from("...").insert(...)
+  supabase.from("...").update(...)
+  supabase.from("...").upsert(...)
+  supabase.from("...").delete(...)
+and any wrapper services that perform these operations.
+
+For EACH write occurrence:
+- Replace the write call with:
+  forbidDirectWrite("<insert|update|upsert|delete>", "<relative-file-path>:<line>")
+- Ensure no write code executes after it (return/throw as needed).
+- Do NOT remove business logic around it except what's necessary to compile.
+
+Files likely to contain writes (must scan all anyway):
+- purchasingWriteService.ts
+- accounting.ts
+- accounting-health-fixes.ts
+- useSuppliers.ts
+- components/products/*
+- components/production/*
+- plus any other matches from grep.
+
+STEP 3) UI Handling (minimal, safe)
+Where a blocked write is triggered from UI:
+- Catch the thrown error (only where already handling async errors; do not rewrite architecture).
+- Show Arabic message:
+  "تم إيقاف هذا المسار لأنه غير ذري (Legacy). استخدم المسار الذري (Atomic) أو انتظر تحويل الشاشة."
+If no toast system exists, use the existing app notification/toast utility. If none, fallback to alert().
+
+STEP 4) Legacy cleanup (safe only)
+- Delete src/lib/pos-return-workflow.ts ONLY if it has zero imports/usages in src (prove by grep).
+- Replace DeprecatedPurchasingPage.tsx route usage with inline <Navigate ... replace /> in router,
+  then delete DeprecatedPurchasingPage.tsx only if no longer referenced.
+
+STEP 5) Evidence Output (MANDATORY)
+After changes:
+A) For each modified file, output:
+   - path
+   - exact line numbers of each blocked write
+B) Run these and paste results (must be EMPTY):
+   - grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+   - grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.(insert|update|upsert|delete)\(" src
+C) Confirm build passes (or list exact compile errors if any).
+
+STOP AFTER COMPLETION.
+DO NOT ASK QUESTIONS.

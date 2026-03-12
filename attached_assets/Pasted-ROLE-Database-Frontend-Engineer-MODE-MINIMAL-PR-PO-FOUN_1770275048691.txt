@@ -1,0 +1,158 @@
+ROLE: Database + Frontend Engineer
+MODE: MINIMAL PR/PO FOUNDATION (TABLES + ATOMIC RPCs) — STOP AFTER DONE
+
+CONTEXT (EVIDENCE):
+- purchasingWriteService.ts calls missing RPCs:
+  purchase_order_create_v2_atomic, purchase_order_update_v2_atomic, purchase_order_receive_v2_atomic
+- Database currently has NO tables:
+  purchase_requisitions, purchase_requisition_lines, purchase_orders, purchase_order_items
+Therefore create minimal schema + RPCs to unblock PR/PO with atomic-only writes.
+
+HARD RULES:
+- Create ONLY the minimal required tables for PR/PO + lines.
+- All writes must be inside RPCs (SECURITY DEFINER).
+- Use existing atomic_workflow_requests for idempotency (client_request_id TEXT).
+- Add minimal indexes/constraints only.
+- Do NOT touch invoices/import/sales/returns.
+- Do NOT ask questions. Decide minimal columns by reading UI payload keys in purchasingWriteService.ts.
+
+STEP 0 — READ UI PAYLOADS (NO GUESSING):
+Inspect purchasingWriteService.ts around the PR and PO related code paths:
+- PR insert/update/approval around lines ~725, ~728, ~808
+- PO create/update/submit/send/receive around lines ~919..1366
+Extract the exact fields used by UI (supplier_id, branch_id, items array shape, totals, notes, dates, statuses).
+
+STEP 1 — CREATE TABLES (MINIMAL):
+Create these tables if not exist:
+
+1) purchase_requisitions
+- id uuid pk default gen_random_uuid()
+- branch_id uuid not null
+- pr_no text unique (generated in RPC)
+- status text not null default 'draft'  -- draft/submitted/approved/void
+- notes text null
+- requested_at timestamptz not null default now()
+- created_by uuid null (auth.uid() inside RPC)
+- approved_at timestamptz null
+- voided_at timestamptz null
+- void_reason text null
+
+2) purchase_requisition_lines
+- id uuid pk default gen_random_uuid()
+- pr_id uuid not null references purchase_requisitions(id) on delete cascade
+- product_id uuid not null
+- qty numeric not null
+- unit_cost numeric null
+- notes text null
+
+3) purchase_orders
+- id uuid pk default gen_random_uuid()
+- branch_id uuid not null
+- supplier_id uuid not null
+- po_no text unique (generated in RPC)
+- status text not null default 'draft' -- draft/submitted/sent/partially_received/received/void
+- order_date date not null default current_date
+- notes text null
+- created_by uuid null
+- submitted_at timestamptz null
+- sent_at timestamptz null
+- voided_at timestamptz null
+- void_reason text null
+
+4) purchase_order_items
+- id uuid pk default gen_random_uuid()
+- po_id uuid not null references purchase_orders(id) on delete cascade
+- product_id uuid not null
+- qty numeric not null
+- unit_cost numeric null
+- received_qty numeric not null default 0
+- notes text null
+
+Indexes (minimal):
+- idx_pr_branch on purchase_requisitions(branch_id)
+- idx_po_branch on purchase_orders(branch_id)
+- idx_po_supplier on purchase_orders(supplier_id)
+- idx_pr_lines_pr on purchase_requisition_lines(pr_id)
+- idx_po_items_po on purchase_order_items(po_id)
+
+STEP 2 — ATOMIC HELPERS (IDs + Numbers):
+Implement number generators inside RPC (do NOT depend on existing ones unless found):
+- generate_pr_no(): returns text like 'PR-000001'
+- generate_po_no(): returns text like 'PO-000001'
+Use a simple sequence per table or compute max+1 with locking (prefer sequences if allowed).
+
+STEP 3 — CREATE RPCs (MATCH EXISTING CALLS IN CODE):
+Create these RPC names exactly to match current frontend calls:
+
+A) purchase_order_create_v2_atomic(p_client_request_id uuid, p_branch_id uuid, p_supplier_id uuid, p_order_date date, p_notes text, p_items jsonb)
+RETURNS jsonb { success, po_id, po_no }
+
+- Idempotency via atomic_workflow_requests where workflow_type='po_create_v2'
+- Insert into purchase_orders, then insert items into purchase_order_items from jsonb array.
+- Audit log: entity_type='po', action_type='create'
+
+B) purchase_order_update_v2_atomic(p_client_request_id uuid, p_po_id uuid, p_supplier_id uuid, p_notes text, p_items jsonb, p_action text)
+RETURNS jsonb { success, po_id, po_no, status }
+
+- Idempotency workflow_type='po_update_v2'
+- Support actions used by UI:
+  - 'update' : replace items (delete existing then re-insert) + update notes/supplier
+  - 'submit' : set status='submitted', submitted_at=now()
+  - 'send'   : set status='sent', sent_at=now()
+  - 'void'   : set status='void', voided_at=now(), void_reason from notes or separate param if present
+- Audit log per action.
+
+C) purchase_order_receive_v2_atomic(p_client_request_id uuid, p_po_id uuid, p_receipts jsonb)
+RETURNS jsonb { success, po_id, status }
+
+- Idempotency workflow_type='po_receive_v2'
+- Update received_qty per item based on receipts array (product_id, received_qty_delta or absolute)
+- Update PO status:
+  - if all received_qty >= qty => 'received'
+  - else => 'partially_received'
+- Audit log: action_type='receive'
+
+PR RPCs (even if UI currently direct-writes):
+D) pr_create_atomic(p_client_request_id uuid, p_branch_id uuid, p_notes text, p_lines jsonb)
+RETURNS jsonb { success, pr_id, pr_no }
+
+E) pr_update_atomic(p_client_request_id uuid, p_pr_id uuid, p_notes text, p_lines jsonb)
+RETURNS jsonb { success, pr_id, pr_no }
+
+F) pr_approve_atomic(p_client_request_id uuid, p_pr_id uuid, p_reason text)
+RETURNS jsonb { success, pr_id, status }
+
+G) pr_void_atomic(p_client_request_id uuid, p_pr_id uuid, p_reason text)
+RETURNS jsonb { success, pr_id, status }
+
+- Use status transitions: draft->submitted->approved. If submit step is required by UI, include pr_submit_atomic too (create if needed).
+
+All RPCs:
+- Must wrap in a single transaction (default for plpgsql).
+- Must write atomic_workflow_requests status to 'completed' and set result_payload jsonb.
+- Must insert audit_logs with Arabic description.
+
+STEP 4 — FRONTEND WIRING (MINIMAL CHANGES):
+- In purchasingWriteService.ts:
+  - Keep existing function signatures.
+  - For PO functions that already call missing RPCs, ensure payload keys match RPC params exactly.
+  - For PR direct writes (blocked), replace with calls to pr_*_atomic RPCs.
+  - Remove any remaining forbidDirectWrite usage in PR/PO code paths only.
+
+STEP 5 — EVIDENCE (MANDATORY):
+A) Paste the exact SQL migrations for:
+   - 4 tables + indexes
+   - 3 PO RPCs (create/update/receive)
+   - at least 2 PR RPCs (create + approve OR create + void)
+B) Paste purchasingWriteService.ts snippets with line numbers for:
+   - createPurchaseOrder RPC call payload
+   - approvePurchaseOrder/submit/send/receive payload
+   - PR create/approve replacements
+C) Run and paste (must be EMPTY):
+   grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+D) Non-UI test via SQL (paste outputs):
+   - select purchase_order_create_v2_atomic(gen_random_uuid(), <branch_uuid>, <supplier_uuid>, current_date, 'test', '[{"product_id":"<uuid>","qty":1,"unit_cost":10}]'::jsonb);
+   - select purchase_order_receive_v2_atomic(gen_random_uuid(), <po_uuid_from_prev>, '[{"product_id":"<uuid>","received_qty":1}]'::jsonb);
+
+STOP AFTER OUTPUT A/B/C/D.
+DO NOT CONTINUE TO OTHER MODULES.

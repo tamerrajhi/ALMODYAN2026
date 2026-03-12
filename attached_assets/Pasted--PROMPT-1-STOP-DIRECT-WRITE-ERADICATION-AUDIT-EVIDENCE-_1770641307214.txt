@@ -1,0 +1,92 @@
+✅ PROMPT 1 — STOP | DIRECT-WRITE ERADICATION AUDIT (EVIDENCE ONLY) | FULL MAP
+
+ROLE: Auditor
+MODE: EVIDENCE ONLY — NO CHANGES
+GOAL: استخراج “خريطة كاملة” لأي Direct Writes في:
+
+Frontend (supabase.from / direct fetch POST/PUT/DELETE / apiClient mutations غير RPC)
+
+Backend (Express routes فيها INSERT/UPDATE/DELETE مباشرة)
+
+DB (أي functions / triggers / policies تشير لمسارات legacy)
+
+A) Frontend Evidence (RAW)
+
+نفّذ بحث نصي شامل في repo واطبع النتائج الخام:
+
+أي supabase direct:
+
+grep -RIn "supabase\.from\(" src
+
+grep -RIn "supabase\.rpc\(" src
+
+grep -RIn "createClient\(" src
+
+grep -RIn "@/integrations/supabase" src
+
+أي fetch/apiclient mutations محتمل Direct Write:
+
+grep -RIn "fetch\(" src | grep -E "POST|PUT|PATCH|DELETE|/api/"
+
+grep -RIn "apiClient\.(post|put|patch|delete)" src
+
+أي bypass guard:
+
+grep -RIn "forbidDirectWrite" src
+
+grep -RIn "atomicWriteGuard" src
+
+Output مطلوب: لستة النتائج كاملة (file:line + snippet).
+
+B) Backend Evidence (RAW)
+
+في server/routes.ts (وأي ملفات routes أخرى):
+
+grep -RIn "INSERT INTO|UPDATE |DELETE FROM" server
+
+grep -RIn "app\.(post|put|patch|delete)\(" server
+
+Output مطلوب: كل occurrences بالـ line numbers + مقتطف 5-10 سطور حولها.
+
+C) DB Evidence (RAW) — Schema Drift + Live SQL
+
+استخرج قائمة functions و triggers اللي اتعملت “live” (قدر الإمكان):
+
+SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS args,
+       pg_get_userbyid(p.proowner) AS owner,
+       to_char(p.procreated, 'YYYY-MM-DD HH24:MI:SS') AS created_at
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname='public'
+ORDER BY p.proname;
+
+
+لو procreated غير متاح في بيئتكم، بدّله بـ listing بدون created.
+
+كل constraints / indexes (خصوصًا اللي اتضافت قريبًا):
+
+SELECT conname, conrelid::regclass AS table_name, pg_get_constraintdef(oid) AS def
+FROM pg_constraint
+WHERE connamespace = 'public'::regnamespace
+ORDER BY table_name::text, conname;
+
+SELECT schemaname, tablename, indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public'
+ORDER BY tablename, indexname;
+
+D) Findings Summary (REQUIRED)
+
+اعمل جدول:
+
+Artifact (frontend/backend/db)
+
+Location
+
+Type (direct write / legacy supabase / REST direct)
+
+Severity (P0/P1)
+
+Suggested Fix (1-line)
+
+STOP بعد تسليم Evidence Pack بالكامل.

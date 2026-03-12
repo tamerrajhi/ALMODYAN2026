@@ -1,0 +1,20 @@
+-- P0.3: Add sales_return_in movements to complete_pos_piece_return_atomic
+-- When POS returns items, each item now gets a movement record:
+--   movement_type = 'sales_return_in'
+--   reference_type = 'return'
+--   reference_id = return_id
+--   from_branch_id = NULL
+--   to_branch_id = branch where item returns to stock
+--   unit_cost = item cost snapshot
+--
+-- The movement INSERT loop is placed immediately after:
+--   UPDATE unique_items SET sold_at = NULL, sale_id = NULL, status = 'in_stock'
+--
+-- Also fixed: status = 'in_stock' was missing from the original UPDATE unique_items
+-- (previously only cleared sold_at and sale_id but did not reset status).
+--
+-- Idempotency: The existing idempotency guard (pos_workflow_requests) ensures
+-- duplicate RPC calls never re-execute the function body, so no duplicate
+-- sales_return_in rows can be created.
+--
+-- NO schema changes. Only the function body was modified via CREATE OR REPLACE.

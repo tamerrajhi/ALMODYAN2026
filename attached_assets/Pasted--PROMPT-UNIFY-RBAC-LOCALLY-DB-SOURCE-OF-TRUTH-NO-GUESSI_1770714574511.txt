@@ -1,0 +1,135 @@
+✅ PROMPT — UNIFY RBAC LOCALLY (DB SOURCE OF TRUTH) | NO GUESSING | CLEAN MIGRATION | EVIDENCE | STOP
+
+ROLE: Full-stack Engineer (Express + Postgres/Neon + React/Vite)
+MODE: Implement RBAC consolidation with raw evidence. No speculation.
+
+INPUT (ALREADY VERIFIED):
+modules_final (11):
+dashboard, sales, purchases, products, inventory, production, accounting, vaults, hr, reports, settings
+
+screens_final (paths): use the exact list provided in the chat (do not invent new paths).
+
+GOAL:
+Make permissions fully local to the system (DB + Express), remove legacy duplication, and make UI rely on ONE endpoint contract.
+
+HARD RULES:
+1) Single Source of Truth = NEW RBAC tables only (below). Legacy user_roles + has_role must not be used by UI after this change.
+2) No duplicate endpoints. If an endpoint is redundant, delete it and update callers.
+3) All RBAC endpoints requireSession.
+4) Provide raw evidence: SQL migrations + git diffs + curl (401/200) + build.
+
+PHASE 1 — DB MIGRATIONS (SUPABASE MIGRATION SQL OR SERVER MIGRATION FILE)
+Create tables (if not exist) with constraints:
+
+A) modules
+- id uuid pk default gen_random_uuid()
+- module_key text unique not null   (e.g. 'sales')
+- module_name_ar text not null
+- sort_order int not null default 100
+- is_active bool not null default true
+
+B) screens
+- id uuid pk default gen_random_uuid()
+- screen_path text unique not null  (e.g. '/sales/invoices')
+- module_key text not null references modules(module_key) on update cascade
+- screen_name_ar text not null default ''
+- sort_order int not null default 100
+- is_active bool not null default true
+
+C) custom_roles (reuse existing if compatible; otherwise migrate cleanly)
+- id uuid pk default gen_random_uuid()
+- role_name text unique not null
+- is_admin bool not null default false
+
+D) user_custom_roles (reuse existing if compatible)
+- user_id uuid not null references profiles(id) on delete cascade
+- role_id uuid not null references custom_roles(id) on delete cascade
+- primary key (user_id, role_id)
+
+E) role_modules  (NEW)
+- role_id uuid not null references custom_roles(id) on delete cascade
+- module_key text not null references modules(module_key) on update cascade
+- primary key (role_id, module_key)
+
+F) role_permissions (screen CRUD)
+- role_id uuid not null references custom_roles(id) on delete cascade
+- screen_path text not null references screens(screen_path) on update cascade
+- can_view bool not null default false
+- can_create bool not null default false
+- can_edit bool not null default false
+- can_delete bool not null default false
+- primary key (role_id, screen_path)
+
+Seed data (NO GUESSING):
+1) Insert 11 modules from modules_final with Arabic names (simple names ok).
+2) Insert all screens_final paths and map each to the correct module_key by prefix:
+   - dashboard: '/' + '/dashboard-settings'
+   - sales: '/pos', '/sales*', '/customers', '/returns'
+   - purchases: '/import*', '/batches*', '/suppliers', '/purchasing/*'
+   - products: '/products*'
+   - inventory: '/transfers', '/transfer-requests', '/inventory/*', '/item-history', '/serial-tracking', '/raw-materials', '/barcode-labels'
+   - production: '/production/*', '/finished-goods/*', '/gemstones*'
+   - accounting: '/accounting*'
+   - vaults: '/gold/*', '/cash-vault', '/vaults/settlements'
+   - hr: '/hr/*'
+   - reports: '/reports', '/audit-logs'
+   - settings: '/settings*', '/users', '/roles', '/branches', '/backup', '/system-health', '/admin/test-data'
+3) Create role: "مدير النظام" with is_admin=true
+4) Assign current admin user (the one you log in with) to "مدير النظام" in user_custom_roles
+5) For "مدير النظام":
+   - role_modules: grant all 11 modules
+   - role_permissions: set all screens can_view/create/edit/delete = true
+
+PHASE 2 — SERVER: SINGLE ACCESS CONTEXT ENDPOINT
+Create: GET /api/access-context (requireSession)
+Returns exactly:
+{
+  "user_id": "<uuid>",
+  "is_admin": true/false,
+  "roles": ["role_name", ...],
+  "modules": ["dashboard","sales",...],      // if is_admin true => all 11 module keys
+  "screen_permissions": {
+     "/path": {"view":true,"create":true,"edit":true,"delete":true},
+     ...
+  }
+}
+
+Implementation rules:
+- Determine roles by joining user_custom_roles -> custom_roles
+- is_admin = OR(custom_roles.is_admin)
+- If is_admin true:
+  - modules = all active modules
+  - screen_permissions: all active screens full true
+- Else:
+  - modules = role_modules union (active only)
+  - screen_permissions = merge role_permissions across roles using OR per permission flag
+- No fallback "*" behavior anymore.
+
+PHASE 3 — FRONTEND: USE ONLY /api/access-context
+Update:
+- src/core/contexts/ModuleContext.tsx to call /api/access-context (NOT /api/module-context-data)
+- src/hooks/useScreenPermissions.ts to stop calling has_role RPC and stop using /api/user-custom-roles + /api/role-permissions-with-screens
+  -> read screen_permissions from access-context.
+- Remove /api/module-context-data usage; either delete endpoint or make it thin wrapper calling same logic then delete callers.
+
+Route gating:
+- ModuleAwareRoute uses modules[] from access-context
+- ProtectedRoute uses screen_permissions[path].view (and CRUD where needed)
+
+PHASE 4 — REMOVE LEGACY + ANTI-DUPLICATION GATES
+- Remove /api/user-is-admin endpoint (duplicate).
+- Deprecate has_role RPC usage in frontend (should be zero references).
+- Add CI checks:
+  1) Fail if "has_role(" appears in src/ (except health dev-only folder)
+  2) Fail if multiple endpoints provide access context (only /api/access-context)
+
+EVIDENCE REQUIRED (RAW):
+1) SQL migration file(s) content
+2) Seed proof: SELECT count(*) from modules/screens/custom_roles/user_custom_roles/role_modules/role_permissions
+3) curl (no auth) -> /api/access-context returns 401 JSON
+4) curl (with auth) -> /api/access-context returns 200 and shows modules=11 and is_admin=true for admin user
+5) rg proof:
+   - rg -n "module-context-data|user-is-admin|has_role\\(" src --glob='*.ts' --glob='*.tsx' -> should return 0 (except DEV-only health if any)
+6) npm run build -> PASS
+
+STOP after evidence output.

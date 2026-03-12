@@ -1,0 +1,123 @@
+PROMPT 3 — Fix موجّه واحد (Sidebar + عدم خلط Dashboard/POS)
+
+هدف الـFix:
+POS sidebar (3 routes) يظهر فقط داخل صفحات POS (مثل /pos و routes التابعة)، وليس على Dashboard أو باقي النظام حتى لو POS session موجودة.
+
+ممنوع أي تغييرات جانبية غير لازمة. أقل عدد ملفات.
+
+التعديل المطلوب في src/components/layout/MainLayout.tsx
+1) عرّف متغير يحدد “هل نحن داخل POS Area”
+
+استخدم useLocation() من react-router-dom:
+
+import { useLocation } from "react-router-dom";
+
+
+داخل الـcomponent:
+
+const location = useLocation();
+const inPosArea =
+  location.pathname === "/pos" ||
+  location.pathname.startsWith("/sales/pos-invoices") ||
+  (location.pathname.startsWith("/sales/returns") && location.search.includes("mode=pos"));
+
+
+مهم: لا تعتمد على string واحدة فيها query. استخدم pathname + search.
+
+2) اربط isPosMode بـ inPosArea
+
+بدل ما تجعل isPosMode = true بمجرد وجود pos session في أي مكان، اجعلها:
+
+لو مش داخل POS area ⇒ اعتبر isPosMode=false (حتى لو session موجودة)
+
+لو داخل POS area ⇒ اعمل fetch للـcontext وحدد isPosMode بناءً عليه.
+
+استبدل الـuseEffect الحالي الذي يعمل fetch دائمًا بشيء مثل:
+
+useEffect(() => {
+  let cancelled = false;
+
+  async function run() {
+    if (!inPosArea) {
+      setIsPosMode(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/pos/session/context", { credentials: "include" });
+      if (cancelled) return;
+      setIsPosMode(res.ok);
+    } catch {
+      if (cancelled) return;
+      setIsPosMode(false);
+    }
+  }
+
+  run();
+  return () => { cancelled = true; };
+}, [inPosArea]);
+
+3) اجعل فلترة السايدبار تعتمد على inPosArea && isPosMode
+
+بدل:
+
+if (!isPosMode) return allMenuSections;
+
+
+اجعلها:
+
+if (!(inPosArea && isPosMode)) return allMenuSections;
+
+4) (اختياري قوي) حسّن matching للـreturns
+
+بدل POS_ALLOWED_PATHS.includes(item.href) للـreturns، اعمل matcher صغير:
+
+const isPosAllowedHref = (href?: string) => {
+  if (!href) return false;
+  if (href === "/pos") return true;
+  if (href === "/sales/pos-invoices") return true;
+  if (href.startsWith("/sales/returns") && href.includes("mode=pos")) return true;
+  return false;
+};
+
+
+واستخدمه في الفلترة بدل includes(...).
+
+ده مش “تشعب” — ده لتجنب brittle query string.
+
+Evidence إلزامي بعد Fix (P3)
+
+بعد تطبيق التعديل:
+
+على Dashboard / كـ Admin:
+
+sidebar يرجع كامل (مش 3 routes)
+
+في Network: /api/pos/session/context لا يتم طلبه أو حتى لو اتطلب، isPosMode لا يغيّر السايدبار لأن inPosArea=false
+
+على /pos بعد PIN:
+
+sidebar = 3 routes فقط
+
+اطبع:
+
+git diff --stat
+
+
+Screenshots:
+
+Dashboard sidebar كامل
+
+POS sidebar 3 عناصر فقط
+
+مخرجات ترجعها لي
+
+git diff --stat
+
+Screenshot Dashboard + Screenshot /pos
+
+Console log سريع (لو لسه لوجز موجودة) يثبت:
+
+inPosArea false على /
+
+inPosArea true على /pos

@@ -1,0 +1,109 @@
+✅ PROMPT — P0-RET-PIECE | Implement complete_pos_piece_return_atomic (POS Piece Return) | DB ONLY | EVIDENCE + SQL GATE TESTS | STOP
+
+ROLE: Database Engineer
+
+MODE: DB ONLY (SQL FUNCTIONS ONLY)
+Allowed: CREATE OR REPLACE FUNCTION فقط
+Forbidden: server/routes.ts changes / UI changes / schema migrations
+
+BACKGROUND (from audit)
+- POSReturnPage.tsx and ReturnsPage.tsx call dataGateway.rpc('complete_pos_piece_return_atomic', { p_payload })
+- The function is whitelisted but MISSING in DB -> causes 500 undefined_function
+- Tables exist: returns, return_items, payments, journal_entries, journal_entry_lines, unique_items
+
+INPUT CONTRACT (from POSReturnPage payload)
+Function signature MUST be:
+public.complete_pos_piece_return_atomic(p_payload jsonb) RETURNS jsonb
+
+Expected p_payload keys (verify in code quickly, but assume):
+{
+  client_request_id: uuid string,
+  sale_id: uuid string,
+  branch_id: uuid string,
+  customer_id: uuid | null,
+  refund_method: 'cash'|'card'|'bank_transfer'|'credit'|'split:...',
+  post_return_status: string | null,
+  create_invoice: boolean | null,
+  items: [
+    {
+      jewelry_item_id: uuid,      -- unique_items.id (source of truth)
+      line_amount: numeric,       -- refund amount for this item
+      sale_item_id: uuid | null   -- legacy, may be null/unused
+    }
+  ]
+}
+
+OUTPUT CONTRACT
+Return JSON:
+On success:
+{
+  "success": true,
+  "return_id": "<uuid>",
+  "return_number": "<text>",
+  "journal_entry_id": "<uuid>",
+  "journal_entry_number": "<text>",
+  "total_amount": <numeric>,
+  "items_count": <int>,
+  "idempotent": <bool>,
+  "message": "<arabic>"
+}
+On failure:
+{ "success": false, "error_code": "<code>", "error": "<arabic>", "idempotent"?: <bool> }
+
+IDEMPOTENCY (MUST)
+- Use pos_workflow_requests with client_request_id:
+  - If succeeded: return cached result (idempotent true)
+  - If processing: return retry hint
+  - If missing: insert processing
+- On success: update pos_workflow_requests status='succeeded', result=<result jsonb>
+- On failure: update pos_workflow_requests status='failed', error_code/error_message
+
+BUSINESS RULES (MUST)
+1) Validate sale exists and is completed (sales.status='completed')
+2) Lock unique_items rows FOR UPDATE
+3) For each jewelry_item_id:
+   - Must currently be sold (sold_at IS NOT NULL AND sale_id = <sale_id>)
+   - Must belong to the same branch_id (or decide rule: allow return to same branch only; enforce to avoid inventory drift)
+4) Inventory reversal:
+   - Set unique_items.sold_at = NULL
+   - Set unique_items.sale_id = NULL
+5) Create returns header row in returns:
+   - return_type = 'pos_piece' (or existing enum used; if unknown keep 'sales_return' but be consistent)
+   - original_sale_id = sale_id
+   - customer_id, branch_id
+   - subtotal/tax/total: for POS piece return, tax logic:
+     - Simplest: total_amount = sum(line_amount)
+     - If you must reverse VAT, compute VAT portion based on original sale 15% and return same ratio; document.
+6) Insert return_items rows:
+   - return_id, item_id=jewelry_item_id, quantity=1, unit_price=line_amount, total_price=line_amount, reason optional
+7) Accounting reversal (balanced):
+   - Use branch_coa_accounts mapping (same as sale):
+     CASH/BANK (refund out) credit? (money going out)
+     SALES_REVENUE debit (reverse revenue) OR use RETURNS account if exists (not in mapping)
+     VAT_OUTPUT debit (reverse VAT) if applying VAT reversal
+     INVENTORY debit (inventory increases) at cost
+     COGS credit (reverse cogs) at cost
+   - If no dedicated returns account, reverse SALES_REVENUE directly (debit revenue).
+   - Refund method:
+     cash/bank_transfer/card => credit CASH/BANK? (money out is CREDIT to cash/bank if you treat as asset decreasing)
+     Be consistent with your chart conventions; ensure debits=credits.
+
+EVIDENCE REQUIRED
+A) Provide full CREATE OR REPLACE FUNCTION body for complete_pos_piece_return_atomic
+B) Proof function exists:
+SELECT proname, pg_get_function_identity_arguments(p.oid)
+FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid
+WHERE n.nspname='public' AND p.proname='complete_pos_piece_return_atomic';
+C) SQL Gate Tests (show commands + JSON outputs):
+GT1) Fresh return for an actually sold item (from previous GT2 sale):
+- pick a unique_items row where sale_id is not null
+- call complete_pos_piece_return_atomic with that sale_id and item id
+- expect success true
+GT2) Retry same client_request_id -> idempotent true
+GT3) Try returning same item again with new client_request_id -> should fail ITEM_NOT_RETURNABLE (because already unsold)
+D) Supporting SELECTs:
+- unique_items before/after (sold_at/sale_id)
+- returns + return_items created rows
+- journal_entries + journal_entry_lines totals
+- pos_workflow_requests row
+STOP.

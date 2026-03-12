@@ -1,0 +1,119 @@
+PROMPT 14 — Sales UI Cleanup (6 شاشات + سندات + عملاء) — UI ONLY
+
+ROLE: Senior Frontend Engineer
+MODE: UI ONLY (React/TSX)
+TARGET: تنظيم المبيعات إلى 6 شاشات (3 POS + 3 ERP) + إبقاء (سندات القبض + العملاء) فقط.
+STOP: بعد تقديم Evidence.
+
+✅ المطلوب النهائي (شكل الناف)
+
+POS (قطع)
+
+نقطة بيع (POS) → /pos
+
+فواتير مبيعات POS → /sales/pos-invoices
+
+مرتجعات مبيعات POS → /sales/returns?mode=pos
+
+وبداخلها Tab فوق لإنشاء مرتجع جديد → يفتح /pos/return
+
+ERP (مبيعات عامة)
+
+فواتير المبيعات العامة → /sales/invoices
+
+مرتجعات المبيعات العامة → /sales/returns?mode=erp
+
+وبداخلها Tab فوق لإنشاء مرتجع جديد → يفتح /sales/returns/new
+
+إضافي
+
+سندات القبض → /sales/receipts
+
+العملاء → /customers
+
+أي صفحات/روابط مبيعات أخرى لا تظهر في السايدبار.
+
+التغييرات المطلوبة في Prompt 14 (محددة)
+A) Sidebar: تأكيد/تنظيف نهائي
+
+افتح src/components/layout/MainLayout.tsx
+
+قسم المبيعات يجب أن يحتوي فقط على الـ 7 عناصر بالأعلى.
+
+احذف/اخفِ أي عنصر مبيعات خارج القائمة دي (خصوصًا credit notes / sales-history / POS return direct link).
+
+B) توحيد تجربة “إنشاء مرتجع”
+1) من داخل قائمة الفواتير (SalesInvoicesPage)
+
+زر/أكشن “إنشاء مرتجع” موجود بالفعل — تأكد:
+
+يظهر فقط لو status === 'posted'
+
+POS: يفتح /pos/return?sale_id=...
+
+ERP: يفتح /sales/returns/new?invoice_id=...
+
+2) من داخل عرض الفاتورة نفسها (SalesInvoiceViewPage + QuickActionsBar)
+
+زر “إنشاء مرتجع” موجود بالفعل — تأكد نفس القواعد:
+
+Posted فقط
+
+POS → /pos/return?sale_id=...
+
+ERP → /sales/returns/new?invoice_id=...
+
+3) صفحة المرتجعات نفسها
+
+SalesReturnsListPage.tsx فيها Tabs — تأكد Tab “إنشاء مرتجع جديد”:
+
+mode=pos → يفتح /pos/return
+
+mode=erp → يفتح /sales/returns/new
+
+C) Legacy Routes
+
+نحتفظ بالروتات لكن نخليها Redirect (علشان ما تلخبطش المستخدم):
+
+/returns → /sales/returns?mode=pos
+
+/pos/credit-note → /sales/returns?mode=pos
+
+/sales/credit-notes → /sales/returns?mode=erp
+
+/sales-history → /sales/pos-invoices
+
+لو ده متطبق بالفعل: لا تغيّر.
+
+قواعد صارمة
+
+لا تغيّر DB / RPC / Edge Functions
+
+لا تغيّر server/routes.ts
+
+تعديلات فقط على:
+
+src/components/layout/MainLayout.tsx
+
+src/pages/sales/SalesInvoicesPage.tsx
+
+src/pages/sales/SalesReturnsListPage.tsx
+
+src/components/sales/invoice-view/QuickActionsBar.tsx
+
+src/pages/sales/SalesInvoiceViewPage.tsx
+
+src/pages/POSReturnPage.tsx
+
+src/pages/sales/SalesReturnFormPage.tsx
+
+src/App.tsx (للـ redirects فقط)
+
+RTL/Arabic: لا تكسر أي Labels عربية
+
+Evidence REQUIRED (خام)
+
+A) git diff --stat
+B) git diff
+C) لقطة أو وصف Route map النهائي للمبيعات (7 عناصر في السايدبار)
+STOP

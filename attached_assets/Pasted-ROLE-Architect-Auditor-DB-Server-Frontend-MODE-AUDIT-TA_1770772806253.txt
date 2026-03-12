@@ -1,0 +1,137 @@
+ROLE: Architect + Auditor (DB + Server + Frontend)
+MODE: AUDIT + TARGET ARCHITECTURE (NO CHANGES)
+STRICT: Every claim must be backed by direct evidence (SQL output OR file+line).
+GOAL: Two fully separated purchase return flows:
+(A) Unique Items Purchase Returns (UINV)
+(B) General Purchase Returns (PINV)
+
+DEFINITION — "Full Listening" (must prove for each flow):
+For each return flow, prove (or mark missing) these sinks:
+1) Inventory/Items:
+   - Items table updates (returned/restocked flags or availability)
+   - Movement records created (movements table)
+2) Accounting:
+   - Journal Entry header created
+   - Journal Entry lines created and balanced
+   - Links stored on the return (journal_entry_id) or on invoice
+3) Supplier/Payments impact:
+   - Return affects supplier balance / payable / credit notes (if your model uses them)
+   - Any allocation or reversal logic (if exists)
+4) Linkage:
+   - Return references the correct invoice table (unique_purchase_invoices vs invoices)
+   - Return items reference correct items table (unique_items vs jewelry_items)
+5) Security/Atomicity:
+   - Writes must be atomic (single DB transaction)
+   - No direct writes from frontend (no forbidDirectWrite)
+   - requireSession + requireAdmin/permission on mutations
+
+SECTION 1 — Identify SoT tables (DB Evidence)
+Run and paste outputs:
+
+1A) Confirm existence:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND table_name IN (
+ 'unique_purchase_invoices','unique_purchase_invoice_items','unique_items','unique_item_movements',
+ 'invoices','purchase_invoice_lines','jewelry_items','item_movements',
+ 'unique_purchase_returns','unique_purchase_return_items',
+ 'purchase_returns','purchase_return_items',
+ 'journal_entries','journal_entry_lines','payments',
+ 'supplier_payment_allocations'
+)
+ORDER BY table_name;
+
+1B) For each existing return table, show columns:
+SELECT table_name, column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema='public'
+AND table_name IN ('unique_purchase_returns','unique_purchase_return_items','purchase_returns','purchase_return_items')
+ORDER BY table_name, ordinal_position;
+
+1C) FK constraints for return tables:
+SELECT tc.table_name, kcu.column_name,
+       ccu.table_name AS foreign_table, ccu.column_name AS foreign_column,
+       tc.constraint_name
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+JOIN information_schema.constraint_column_usage ccu
+  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+WHERE tc.table_schema='public'
+AND tc.constraint_type='FOREIGN KEY'
+AND tc.table_name IN ('unique_purchase_returns','unique_purchase_return_items','purchase_returns','purchase_return_items')
+ORDER BY tc.table_name, tc.constraint_name;
+
+SECTION 2 — Map Current UI Routes → Which Flow?
+2A) Locate route(s) and pages:
+- /purchasing/returns/new?type=unique&invoiceId=...
+- /purchasing/returns/new (general)
+Provide exact file paths + line numbers for:
+- invoice load
+- items load
+- submit/create call
+Show payload keys used for items.
+
+SECTION 3 — Mutation Implementation Evidence (RPC / Endpoint)
+3A) Identify mutation mechanism per flow:
+- Unique return creation: RPC name OR endpoint
+- General return creation: RPC name OR endpoint
+For each:
+- Provide file+line evidence of call
+- Provide server/routes.ts handler evidence OR DB function evidence
+
+3B) If DB function is used, provide contract proof:
+- signature:
+SELECT proname, oidvectortypes(proargtypes) AS args
+FROM pg_proc
+WHERE proname ILIKE '%purchase_return%' OR proname ILIKE '%return%';
+- function body location (migration file+line if available)
+- prove JSON keys read for items (jewelry_item_id vs item_id etc)
+
+SECTION 4 — "Full Listening" Proof Checklist (per flow)
+For UNIQUE flow and GENERAL flow, build a checklist table with columns:
+Sink | Where it is implemented (table/function/endpoint) | Evidence | Status (OK/MISSING/MISWIRED)
+
+Sinks to check:
+A) Return header table insert
+B) Return items table insert
+C) Inventory item state update (returned/restocked)
+D) Movement records insert (unique_item_movements OR item_movements)
+E) Accounting JE insert (journal_entries + lines) + link stored
+F) Payments/supplier effect (payments / supplier allocations / invoice totals updated)
+G) Atomic transaction boundary (BEGIN/COMMIT or single SQL function)
+H) Guards: requireSession + permission + no direct writes
+
+SECTION 5 — Diagnose Current Errors (evidence-based)
+Explain the two errors shown by the user with exact evidence:
+- FK violation on purchase_returns.purchase_invoice_id
+- NOT NULL violation on purchase_return_items.jewelry_item_id
+Show:
+- Which flow (unique/general) is hitting which legacy table
+- Which payload key mismatch causes jewelry_item_id NULL
+
+SECTION 6 — Target Architecture Proposal (Two separated flows)
+Based on audit evidence ONLY:
+- Propose final wiring that enforces separation:
+  UNIQUE RETURN must reference:
+   - unique_purchase_invoices (header link)
+   - unique_items (items link)
+   - unique_item_movements (movements)
+  GENERAL RETURN must reference:
+   - invoices (purchase) (header link)
+   - purchase_invoice_lines/jewelry_items (or your general SoT) (items link)
+   - item_movements (if still used) or the general movements SoT
+- State what tables/functions/endpoints should exist for each flow.
+
+SECTION 7 — Priority Fix Plan (No code, just plan)
+Output:
+P0: blockers to create unique return today (minimal safe fix)
+P1: missing listening (JE/movements/payments) per flow
+P2: cleanup legacy constraints/routes
+
+DELIVERABLES:
+- Complete audit report with evidence.
+- Final two-flow architecture blueprint.
+- Prioritized fix list.
+NO CHANGES. STOP.

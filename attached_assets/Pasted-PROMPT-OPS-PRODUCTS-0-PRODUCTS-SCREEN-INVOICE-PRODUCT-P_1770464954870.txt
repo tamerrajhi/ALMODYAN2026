@@ -1,0 +1,70 @@
+PROMPT — OPS-PRODUCTS-0 | PRODUCTS SCREEN + INVOICE PRODUCT PICKER AUDIT | BUGFIX ONLY | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon)
+MODE: OPS-FIRST / BUGFIX ONLY / NO REFACTOR
+
+GOAL:
+Unblock Purchase Invoice creation by ensuring Products are visible/selectable:
+- Products list page loads and shows products (or empty but no errors).
+- Product search/picker in PurchaseInvoiceFormPage returns products.
+- Create Product works end-to-end if UI provides it.
+Minimal changes only.
+
+SCOPE:
+- Product-related pages + shared services they call
+- DB tables/views/functions directly related to products
+- server/routes.ts allowlist + aliases only if needed
+
+STEP 1 — ROUTE + DEPENDENCY MAP (NO CHANGES)
+A) Identify product UI routes from sidebar and App routes:
+- Products list page route(s)
+- Product create/edit route(s) if present
+B) For each, list:
+- Component file path
+- Service functions called
+- API endpoints used (/api/table-read, /api/* custom, /api/rpc/*)
+C) Do the same for the product picker/search in:
+- src/pages/purchasing/PurchaseInvoiceFormPage.tsx
+- Any helper services used by it to load/search products
+
+STEP 2 — SMOKE TEST (READ-ONLY)
+A) Logged-in open:
+- Products page
+- PurchaseInvoiceFormPage (product picker/search)
+Capture:
+- Console errors
+- Failing network requests (URL + status + response snippet)
+B) Reproduce failing requests via curl (AUTHENTICATED) and show outputs.
+
+STEP 3 — DIAGNOSE ROOT CAUSE
+Check and show:
+- Does table 'products' exist? (\d+ products)
+- Is it empty? (SELECT count(*) FROM products;)
+- Column names? (SELECT * FROM products LIMIT 1;)
+- Is 'products' in TABLE_READ_ALLOWLIST?
+- Are required aliases present for UI expectations (product_name/product_code/etc.)?
+- Any view/table used by invoice search instead of products?
+
+STEP 4 — FIX LOOP (MINIMAL)
+Apply minimal fix based on actual failure:
+- If HTML fallback → add missing server route or fix frontend to use existing /api/table-read
+- If allowlist missing → update server/routes.ts allowlists/orderable columns
+- If column mismatch → add SELECT aliases in table-read alias map (preferred) OR add DB view
+- If table empty → add ONE seed product (idempotent) for verification (do NOT add big seed data)
+- If create path uses forbidDirectWrite → ensure there is an RPC path to create product, or minimal UI fix if unavoidable
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff --
+C) DB proof:
+   - \d+ products
+   - SELECT count(*) FROM products;
+   - If seed added: SELECT id, product_code, product_name, created_at FROM products ORDER BY created_at DESC LIMIT 3;
+D) curl proofs (AUTHENTICATED):
+   - Product list read (table-read or custom endpoint)
+   - Product search used by invoice form
+E) npx tsc --noEmit (Exit 0)
+F) Re-test:
+   - Products page loads
+   - PurchaseInvoiceForm product picker shows products and allows selection
+STOP.

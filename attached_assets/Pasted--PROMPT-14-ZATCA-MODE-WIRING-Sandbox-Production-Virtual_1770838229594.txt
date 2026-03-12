@@ -1,0 +1,93 @@
+✅ PROMPT 14 — ZATCA MODE WIRING (Sandbox/Production + Virtual) | MINIMAL SCOPE | EVIDENCE | STOP
+
+ROLE: Full-Stack Engineer
+
+GOAL
+ربط إعدادات ZATCA (zatca_mode + integration_enabled) مع كل نقاط الاستخدام في الفواتير (POS + ERP) بحيث:
+
+1) sandbox + integration_enabled = false
+   → Virtual Mode ONLY:
+   - يسمح بتوليد/عرض الـ artifacts محلياً (zatca_status, qr/xml preview إن وجد) بدون أي إرسال للهيئة
+   - زر الإرسال يكون Disabled مع Tooltip واضح: "وضع تجريبي (Virtual) — فعّل التكامل للإرسال"
+
+2) sandbox + integration_enabled = true
+   → يسمح بالإرسال الحقيقي إلى بيئة Sandbox عبر Edge Functions
+
+3) production + integration_enabled = false
+   → يمنع الإرسال (Disabled) + رسالة واضحة
+
+4) production + integration_enabled = true
+   → يسمح بالإرسال الحقيقي ONLY إذا كانت متطلبات الشهادة/الـ onboard مكتملة
+   - إذا ناقص شيء → Hard-block + رسالة ما ينقصه
+
+SCOPE (STRICT)
+تعديل هذه الملفات فقط (لا غير):
+- src/hooks/useZatcaSettings.ts
+- src/pages/settings/ZatcaSettingsPage.tsx
+- src/components/zatca/ZatcaSubmitButton.tsx
+- src/components/zatca/ZatcaStatusBadge.tsx (إذا لزم لتوضيح الحالة)
+- supabase/functions/zatca-submit/index.ts
+- supabase/functions/zatca-generate/index.ts
+- supabase/functions/zatca-sign/index.ts
+- supabase/functions/zatca-onboard/index.ts
+
+FORBIDDEN
+- لا تغيّر جداول DB أو migrations
+- لا تغيّر مسارات App.tsx أو Sidebar
+- لا تغيّر منطق المبيعات/القيود/الفواتير
+- لا تضيف صفحات جديدة
+
+IMPLEMENTATION RULES
+A) Single Source of Truth
+- useZatcaSettings يرجّع دائماً:
+  { zatca_mode: 'sandbox'|'production', integration_enabled: boolean, branch_id?, cert_status? ... }
+- كل UI components تعتمد على hook فقط (لا تعتمد على local state لنفس القيم)
+
+B) UI Behavior
+- ZatcaSubmitButton:
+  - يقرأ الإعدادات من useZatcaSettings
+  - يحسب canSubmit = (integration_enabled === true) AND (if production: cert/onboard ready)
+  - إذا !canSubmit → button disabled + tooltip عربي واضح يذكر السبب (Virtual/شهادة ناقصة/…)
+  - إذا sandbox + integration_enabled=true → يسمح submit ويظهر label "إرسال Sandbox"
+  - إذا production + integration_enabled=true → label "إرسال Production"
+
+- ZatcaStatusBadge:
+  - يدعم عرض حالة إضافية "Virtual" عندما integration_enabled=false في sandbox
+  - ما تغيّرش الـ statuses الحالية، فقط أضف حالة عرض/Badge إضافية إن لزم
+
+C) Edge Functions Guards (Critical)
+- zatca-submit:
+  - يستقبل mode + integration_enabled ضمن payload أو headers
+  - إذا integration_enabled=false → RETURN 400 مع errorCode = 'ZATCA_VIRTUAL_MODE'
+  - إذا mode='production' && cert/onboard not ready → RETURN 400 errorCode='ZATCA_NOT_READY'
+  - إذا mode='sandbox' → يوجّه للـ sandbox base URL/config فقط
+  - إذا mode='production' → يوجّه للـ production base URL/config فقط
+  - ممنوع أي fallback صامت
+
+- zatca-generate (Virtual support):
+  - يجب أن يعمل حتى لو integration_enabled=false:
+    يرجع data للتجربة (مثل XML/QR payload) بدون إرسال
+  - لو integration_enabled=true: يسمح generate + sign بحسب التدفق الحالي
+
+- zatca-sign / zatca-onboard:
+  - لازم يحترم mode (sandbox/prod)
+  - يمنع production operations بدون integration_enabled=true
+
+D) Error Mapping (Arabic)
+- في UI، اعرض رسائل عربية حسب errorCode:
+  - ZATCA_VIRTUAL_MODE: "الوضع تجريبي (Virtual) — فعّل التكامل للإرسال"
+  - ZATCA_NOT_READY: "إعدادات الشهادة/التسجيل غير مكتملة للإنتاج"
+  - INVALID_MODE: "وضع ZATCA غير صالح"
+  - ... حافظ على أي رسائل موجودة، فقط أضف الجديدة
+
+EVIDENCE REQUIRED (RAW)
+1) git diff --stat
+2) git diff (كامل للملفات المعدلة)
+3) 4 Gate Tests (بالصور/نص نتائج console):
+   - GT1: sandbox + integration_enabled=false → زر الإرسال Disabled + tooltip + generate يعمل
+   - GT2: sandbox + integration_enabled=true → submit ينجح (أو يصل للـ function) ويظهر أنه Sandbox
+   - GT3: production + integration_enabled=false → Disabled + رسالة
+   - GT4: production + integration_enabled=true مع نقص شهادة → Hard-block errorCode=ZATCA_NOT_READY (UI يعرض عربي)
+
+STOP AFTER EVIDENCE
+لا تعمل أي تحسينات إضافية خارج المطلوب.

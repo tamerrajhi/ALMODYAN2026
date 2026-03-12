@@ -1,0 +1,193 @@
+✅ PROMPT (Replit) — Evidence Pack + Root Cause Audit for “Failed to load items” + Paste Correctness
+قواعد صارمة
+
+ممنوع تعديل DB / RPCs / Migrations في هذا البرومبت.
+
+مسموح: Logging آمن في الفرونت/السيرفر + إصلاحات UI/Fetch فقط لو الخطأ سببه fetch/credentials/response parsing.
+
+لازم تخرج Evidence خام (أوامر + outputs) لكل خطوة.
+
+PART 1 — Confirm Data Contract (No Guessing)
+A) افتح ملف الـ RPC call المستخدم في Save (Unique invoice edit save)
+
+اعثر على dataGateway.rpc('...') المستخدم للحفظ داخل الـ Edit Dialog.
+
+اطبع اسم الـ RPC + شكل الـ args اللي بيتبعت.
+
+Evidence A1
+
+لقط سطر/بلوك الكود اللي يبعت الـ payload للحفظ (بدون حذف أي أسرار).
+
+B) طابق Fields: Grid Row → RPC Payload
+
+اعمل جدول mapping داخل تعليق (في نفس الملف) يوضح:
+
+Grid column key
+
+RPC payload key
+
+Transform إن وجد (number parsing, trim, etc.)
+
+لو في key موجود في grid ومش بيتبعت، أو بيتبعت باسم مختلف: اعتبره “Mismatch” واطبع تحذير واضح في console أثناء Save (مرة واحدة).
+
+Evidence A2
+
+Snapshot للـ mapping (as code comment) + Console output في حالة mismatch.
+
+PART 2 — Reproduce Paste With Deterministic Test Data
+A) Test Clipboard Sample (No headers)
+
+استخدم النص التالي كنص لصق في Paste Dialog (No Headers):
+
+وصف1	موديل1	Necklace	21	12.34	5000	ملاحظة1
+وصف2	موديل2	Ring	18	5.50	2500	ملاحظة2
+
+B) Test Clipboard Sample (With Headers - Arabic)
+وصف	كود	تصنيف	عيار	وزن	تكلفة	ملاحظات
+وصف3	موديل3	Earring	21	3.20	1200	-
+
+
+Evidence B
+
+Output من Preview: عدد الصفوف + الأعمدة + errors = 0
+
+بعد Apply:
+
+عدد الصفوف الجديدة المضافة
+
+pastedCells.size
+
+Sample من أول صفين (console.log sanitized)
+
+ممنوع صور — فقط logs كفاية.
+
+PART 3 — Active Cell Paste (Ctrl+V) Proof
+A) Scenario
+
+افتح grid
+
+اضغط على خلية “cost” في صف موجود (row 0)
+
+Ctrl+V لصق نص 2x2:
+
+111	222
+333	444
+
+
+Expected:
+
+يملأ cost,row0=111
+
+next column (مثلاً weight أو notes حسب ترتيب columns) = 222
+
+row1 cost=333 …
+
+بدون إضافة صفوف لو عندك صفين بالفعل
+
+Evidence C
+
+log قبل paste: activeCell {row,col,key}
+
+log بعد paste: values changed for rows[0], rows[1]
+
+highlight count > 0
+
+PART 4 — Root Cause Audit: “Failed to load items”
+A) Identify the fetch call
+
+ابحث في UniqueInvoiceEditDialog أو UniqueItemsGridEditor عن الاستدعاء:
+
+/api/purchasing/unique-invoice-items/:id أو ما شابه
+
+اطبع:
+
+URL
+
+method
+
+هل فيه credentials: 'include'؟
+
+هل بيستخدم apiRequest أو fetch خام؟
+
+B) Add TEMP diagnostics (No secrets)
+
+أضف logging عند الفشل فقط:
+
+status, statusText
+
+content-type
+
+أول 200 حرف من response text (sanitize)
+
+C) Determine which case it is
+
+صنّف سبب الفشل واحد من:
+
+AUTH_401_403
+
+NOT_FOUND_404
+
+SERVER_500
+
+INVALID_JSON (HTML returned)
+
+SHAPE_MISMATCH (json ok but missing expected keys)
+
+Evidence D
+
+output log يثبت التصنيف
+
+لو AUTH: اطبع هل المستخدم logged in؟ (من useAuth)
+
+لو INVALID_JSON: اطبع snippet يبين HTML
+
+D) Fix (UI-only) if needed
+
+لو السبب AUTH_401_403:
+
+تأكد أن fetch يستخدم cookies (credentials: 'include') أو يستخدم نفس helper المستخدم في باقي النظام (apiRequest/queryClient).
+
+لو السبب INVALID_JSON:
+
+اعمل guard: لو content-type مش JSON → اعرض رسالة عربية واضحة + زر retry.
+
+لو السبب SHAPE_MISMATCH:
+
+عدّل parsing ليناسب الـ shape الفعلي (بدون تغيير السيرفر).
+
+Evidence D2
+
+إعادة المحاولة بعد fix: isLoading -> success و rows count > 0
+
+PART 5 — Safety Guarantees (No DB Writes Outside RPC)
+A) Search Proof
+
+نفّذ grep وأخرج النتائج:
+
+أي supabase.from( داخل dialog/editor
+
+أي fetch( لغير endpoints read-only
+
+أي pool.query( متعلق بالـ UI (لازم 0)
+
+Evidence E
+
+outputs من grep commands
+
+Required Output Format
+
+في آخر الرد، اعرض:
+
+✅ Paste works: Preview + Apply + Ctrl+V evidence
+
+✅ Data contract: Grid keys match RPC payload
+
+✅ Failed to load items: root cause classified + fix applied (UI-only)
+
+✅ Safety: proof no direct DB writes
+
+وقدم:
+
+git diff --stat
+
+git diff

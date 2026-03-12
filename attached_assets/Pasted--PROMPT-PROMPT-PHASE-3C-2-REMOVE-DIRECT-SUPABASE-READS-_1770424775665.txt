@@ -1,0 +1,86 @@
+✅ PROMPT جاهز لريبلت (انسخه حرفيًا)
+
+PROMPT — PHASE-3C-2 | REMOVE DIRECT SUPABASE READS FROM UI (BATCH-1) | UI ONLY | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+MODE: UI ONLY (TS/TSX ONLY) — NO SERVER CHANGES
+
+SCOPE (ONLY these 2 files, do not touch anything else):
+
+src/pages/accounting/InvoicesPage.tsx
+
+src/pages/UsersPage.tsx
+
+GOAL:
+
+Remove all direct Supabase data reads in these two files:
+
+supabase.from(...)
+
+supabase.rpc(...)
+
+Replace with Neon-compatible reads using existing client utilities ONLY:
+
+Prefer dataGateway.* functions if they already exist.
+
+Otherwise use dataGateway.queryTable() (generic) for table reads.
+
+Do NOT add or edit any server endpoints.
+
+Do NOT touch server/routes.ts or any backend code.
+
+Do NOT touch Edge Functions or storage in this prompt.
+
+STRICT RULES (NO EXCEPTIONS):
+
+Do not change UI behavior, layout, RTL, texts, toasts, validation, or loading states.
+
+Preserve the same return shapes/fields that the UI currently uses.
+
+If the current file was doing joins/embeds in Supabase:
+
+Reproduce the same data shape by doing multiple reads via dataGateway.queryTable() and join in memory (map by ids) without changing what the user sees.
+
+Keep React Query keys and invalidation logic unchanged.
+
+If there are writes/mutations in these pages:
+
+Do not modify them in this prompt unless they directly use supabase.from/rpc inside these two files. If a write depends on missing backend endpoint, STOP and report it — do not invent endpoints.
+
+IMPLEMENTATION HINTS (allowed):
+
+Add: import * as dataGateway from '@/lib/dataGateway';
+
+Use await dataGateway.queryTable('<table>', { select: '...', filters: ..., orderBy: ... })
+(match current select/order semantics as closely as possible)
+
+For ordering: use actual column names that exist in Neon schema (if you already know them from the codebase). Do not guess new columns.
+
+EVIDENCE REQUIRED (RAW, SEPARATE SECTIONS):
+A) BEFORE/AFTER grep (show before then after):
+
+rg -n "supabase\.(from|rpc)\(" -S src/pages/accounting/InvoicesPage.tsx src/pages/UsersPage.tsx
+
+rg -n "from\s+['\"]@/integrations/supabase/client['\"]" -S src/pages/accounting/InvoicesPage.tsx src/pages/UsersPage.tsx
+
+B) git diff --stat
+
+C) git diff --
+(Show full unified diffs for the TWO files only)
+
+D) Typecheck:
+
+npx tsc --noEmit (must be Exit 0)
+
+E) Quick runtime proof (text only):
+
+Confirm both pages load without crash:
+
+/accounting/invoices (or the invoices route you have)
+
+/users
+
+Confirm “no console errors” related to the changes.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

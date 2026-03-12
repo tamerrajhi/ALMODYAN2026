@@ -1,0 +1,46 @@
+نفّذ التالي بالترتيب وارجع لي بـ Evidence خام فقط (outputs). لا تبدأ Batch-2 قبل ما تخلص Gate-1 Evidence بالكامل.
+
+A) Gate-1 FINAL Evidence (Default Supabase + Toggle)
+1) Git evidence:
+- git status
+- git show --stat 63efd93
+- git show 63efd93
+
+2) UI / Console proof (لازم تكون 2 حالات):
+- افتح التطبيق، اضغط RESET في DataBackendBadge (هذا يجب أن يعمل: removeItem('data_backend_override') ثم reload).
+  بعد reload التقط/انسخ سطر console:
+  [ACTIVE_DATA_BACKEND] supabase (reason=env/default, env=supabase, override=none)
+- بعدها اضغط NEON (override=neon) ثم reload.
+  التقط/انسخ سطر console:
+  [ACTIVE_DATA_BACKEND] neon (reason=override, env=supabase, override=neon)
+
+3) Endpoint check في وضع NEON فقط (curl outputs):
+- curl -s http://localhost:5000/api/health/fingerprint
+- curl -s "http://localhost:5000/api/branches?active=true"
+- curl -s "http://localhost:5000/api/user-role?user_id=62137817-7fe3-4f09-98c0-7e91cb8a4a14"
+
+B) AFTER Gate-1 is proven → START Batch-2 (Purchasing Domain Services) Scope
+المطلوب في Batch-2 فقط:
+- ترحيل هذين الملفين فقط لا غير:
+  1) src/domain/purchasing/purchasingReadService.ts
+  2) src/domain/purchasing/purchasingWriteService.ts
+- استبدل أي supabase.from()/supabase.rpc() في هذين الملفين إلى dataGateway فقط.
+- ممنوع تعديل أي Pages/Hooks/Components أخرى.
+- Edge functions تبقى كما هي (supabase.functions.invoke) مؤقتًا.
+- Auth يبقى Supabase كما هو.
+
+إذا واجهت queries مع joins/filters لا يدعمها dataGateway الحالي:
+- لا تعمل “generic /api/query”.
+- بدلًا من ذلك: أضف فقط endpoints محددة minimal في server/routes.ts لأكثر 3 استعلامات heavy شيوعًا داخل purchasingReadService/purchasingWriteService، وبأسماء واضحة (مثلاً /api/purchasing/...).
+- أي كتابة/إنشاء/ترحيل بيانات يجب أن يظل عبر RPC atomic فقط.
+
+Batch-2 Evidence المطلوب بعد التنفيذ:
+1) git diff --stat
+2) git diff
+3) Grep proof (لازم صفر):
+   rg -n "supabase\.from\(|supabase\s*\.\s*from\(" src/domain/purchasing/purchasingReadService.ts src/domain/purchasing/purchasingWriteService.ts
+   rg -n "supabase\.rpc\(" src/domain/purchasing/purchasingReadService.ts src/domain/purchasing/purchasingWriteService.ts
+4) Smoke test سريع:
+- افتح Purchasing screens الأساسية (UnifiedPurchaseDocument / PurchaseRequisitions / Returns hub إن أمكن) بدون crash.
+- في NEON mode: verify /api/health/fingerprint OK.
+STOP بعد تقديم Evidence. لا تبدأ Batch-3.

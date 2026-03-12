@@ -1,0 +1,48 @@
+ROLE: Database + Frontend Engineer
+MODE: ATOMIC MIGRATION (PRODUCTS ONLY) — STOP AFTER DONE
+
+GOAL:
+Re-enable Products Add/Edit/Archive (and Jewelry items if they share the same entry form) using Atomic RPCs only.
+Keep Atomic-Only Enforcement intact (NO direct writes).
+
+SCOPE:
+- Products module only (products table + optional jewelry_items if used by UI).
+- Update only the code paths currently hitting forbidDirectWrite in:
+  components/products/*
+  ProductsPage (or equivalent)
+  JewelryItemFormDialog / ProductFormDialog (if present)
+
+DB WORK (REQUIRED):
+1) Implement/ensure these RPCs (SECURITY DEFINER) with strict validation and branch/company scoping:
+   - product_create_atomic(p_client_request_id uuid, p_name text, p_sku text, p_type text, p_uom text, p_vat_rate numeric, p_cost numeric, p_price numeric, p_is_active boolean, ... ) returns uuid
+   - product_update_atomic(p_client_request_id uuid, p_product_id uuid, p_name text, p_sku text, p_uom text, p_vat_rate numeric, p_cost numeric, p_price numeric, p_is_active boolean, ... ) returns void
+   - product_archive_atomic(p_client_request_id uuid, p_product_id uuid, p_reason text) returns void
+2) Idempotency:
+   - Use atomic_workflow_requests with client_request_id + workflow_type = 'product_create'/'product_update'/'product_archive'
+3) Audit:
+   - Insert into audit_logs for create/update/archive with entity_type='product' and entity_code if exists.
+4) Constraints:
+   - Prevent duplicate SKU per company (or per branch if that is your model).
+   - Validate p_type against allowed enum/list used by UI (e.g., jewelry/product/service/cost). If unknown, throw error.
+
+UI WORK (REQUIRED):
+5) Replace blocked direct writes in product components/pages with RPC calls:
+   - On create: call product_create_atomic, then refresh list.
+   - On update: call product_update_atomic, then refresh.
+   - On delete/archive: call product_archive_atomic (soft delete) and update UI.
+6) Preserve reads as-is. Do NOT add new direct writes.
+7) Handle errors with Arabic toast:
+   - "تعذر حفظ المنتج (Atomic). راجع البيانات أو الصلاحيات."
+   - Include underlying error message for debugging if app already shows it.
+
+EVIDENCE (MANDATORY):
+A) Paste the exact SQL definitions for the 3 RPCs (as created in migrations).
+B) List UI files changed + line numbers where supabase.rpc(...) was added.
+C) Prove direct writes still blocked (must be EMPTY):
+   grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+D) Manual test results:
+   - Create product with SKU -> returns product_id
+   - Update price -> verify updated
+   - Archive -> verify is_active=false (or archived_at set)
+STOP AFTER COMPLETION. NO EXTRA MODULES.
+NO GUESSING.

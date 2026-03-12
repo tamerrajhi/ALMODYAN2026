@@ -1,0 +1,96 @@
+ROLE: Replit Agent on my repository.
+MODE: Two-phase work. Phase A is READ-ONLY audit. Phase B is implementation ONLY after audit evidence is produced.
+ABSOLUTE RULE: No guessing. If any required fact is missing, you must discover it from the codebase and report it in Phase A before making changes.
+
+========================
+PHASE A — AUDIT (READ-ONLY)
+========================
+Goal: Collect all missing data needed to implement POS Admin endpoints safely and precisely.
+
+A1) Confirm POS Admin auth middleware
+- Locate the implementation of requirePosAdminToken.
+- Report:
+  - File path
+  - Function signature
+  - What it reads (cookie name etc.)
+  - What it attaches to req (exact property names)
+  - Exact failure response (status code + JSON)
+
+A2) Confirm where POS routes are registered
+- Identify where server/posSession.ts endpoints are mounted/registered on the Express app.
+- Report:
+  - The file where posSession.ts is imported/used
+  - The exact function call (e.g., registerPosSessionRoutes(app) or app.use(...))
+  - Confirm that adding endpoints to server/posSession.ts will actually expose them.
+
+A3) Locate the existing ERP admin endpoints to mirror
+- In server/routes.ts (or wherever they exist), locate these ERP endpoints by searching exact strings:
+  - "/api/admin/branches-with-sellers"
+  - "/api/admin/profiles/active"
+  - "/api/admin/branch-sellers/assign"
+  - "/api/admin/branch-sellers/remove"
+- For each endpoint, extract an Evidence Block:
+  - File path
+  - Start/end line numbers (or a stable code marker if lines are unstable)
+  - The exact SQL queries / db calls used
+  - The exact request payload used in POST (body fields)
+  - The exact response structure (what JSON is returned)
+  - Any validation or error handling inside
+
+A4) Locate the POS Sellers UI calls
+- Open src/pages/pos/POSUsersPage.tsx and find every fetch/mutation URL used for the Sellers tab.
+- Report:
+  - File path
+  - Exact lines or code snippet showing the 4 URLs
+  - Any wrappers used (apiFetch, axios, fetchJson, react-query mutation, etc.)
+  - Confirm the HTTP methods match what backend expects.
+
+A5) Identify required shared helpers
+- If ERP endpoints use shared helpers (db instance, sql tag, requireSession, etc.), confirm the same helpers are available in server/posSession.ts.
+- Report any required imports so we can copy logic 1:1 without refactoring.
+
+PHASE A OUTPUT FORMAT (MANDATORY)
+- A "Facts" section with bullet points for A1–A5
+- Then an "Evidence Pack" section with 4 endpoint blocks (one per ERP endpoint), each with:
+  - Location
+  - Logic summary (no rewriting; just describe what’s there)
+  - Inputs/Outputs
+  - Any edge cases
+
+STOP after Phase A and WAIT for Phase B instruction ONLY IF:
+- You have produced all required facts and evidence.
+Otherwise, continue auditing until all required facts are discovered.
+
+========================
+PHASE B — IMPLEMENTATION (ONLY AFTER PHASE A EVIDENCE)
+========================
+Implement ONLY what is proven by Phase A:
+
+B1) Add NEW POS Admin endpoints (no modification to existing ERP endpoints)
+- File: server/posSession.ts
+- Add these 4 endpoints:
+  - GET  /api/pos/admin/branches-with-sellers
+  - GET  /api/pos/admin/profiles-active
+  - POST /api/pos/admin/branch-sellers/assign
+  - POST /api/pos/admin/branch-sellers/remove
+- Protection: requirePosAdminToken (use the exact middleware verified in A1).
+- Logic: Copy the EXACT SAME SQL/db logic from the ERP endpoints evidenced in A3.
+  - No refactor, no logic changes, no schema changes.
+  - Only route path and middleware differ.
+
+B2) Update frontend URLs only
+- File: src/pages/pos/POSUsersPage.tsx
+- Change ONLY the 4 URLs from /api/admin/* to /api/pos/admin/* as discovered in A4.
+- No UI changes, no state changes, no behavior changes.
+
+B3) Verification steps (must be performed and reported)
+- With no __pos_admin cookie: confirm each /api/pos/admin/* returns the exact auth failure proven in A1.
+- With valid POS Admin session: confirm the 4 endpoints return 200 and the Sellers tab loads.
+
+PHASE B OUTPUT FORMAT (MANDATORY)
+- Files changed list
+- Minimal diff summary (what endpoints added, what URLs changed)
+- Test evidence (status codes + UI confirmation)
+- Explicit statement: "No changes were made to existing /api/admin/* endpoints."
+
+END.

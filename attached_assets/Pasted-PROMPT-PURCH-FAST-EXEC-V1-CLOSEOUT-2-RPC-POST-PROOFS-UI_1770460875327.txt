@@ -1,0 +1,44 @@
+PROMPT — PURCH-FAST-EXEC-V1-CLOSEOUT-2 | RPC POST PROOFS + UI GATE TESTS + API SESSION ROUTE | VERIFICATION + MINIMAL PATCH IF REQUIRED | STOP
+
+ROLE: Senior Full-Stack Engineer
+MODE: Verification-first. No new features. Patch ONLY if required to produce proofs.
+
+GOALS:
+1) Provide real RPC POST proofs (curl) for the 3 MIN-mode returns RPCs.
+2) Provide UI gate test proof for ALL Purchasing sidebar pages (PASS/FAIL).
+3) Fix /api/auth/session returning HTML (SPA fallback) by either:
+   A) Implementing an explicit JSON route, OR
+   B) Proving correct session endpoint and updating clients ONLY if they are calling the wrong one.
+No refactors.
+
+A) RPC POST PROOFS (REQUIRED)
+1) Identify the exact RPC endpoint URL in server/routes.ts (e.g. POST /api/rpc, /api/rpc/:fn, etc.). Print it.
+2) Provide AUTHENTICATED curl commands and outputs (include -i):
+   - complete_purchase_return_general_atomic (success)
+   - complete_purchase_return_unique_items_atomic (success)
+   - void_purchase_return_atomic (success)
+3) Each curl must send the correct body shape:
+   {"args":{"p_payload":{...}}}
+4) Include one idempotency proof:
+   - Run the SAME request twice with same client_request_id and show idempotent response (no duplicate rows).
+5) For each success, show DB proof:
+   - SELECT id, return_number, status, created_at FROM purchase_returns ORDER BY created_at DESC LIMIT 3;
+   - SELECT count(*) FROM purchase_return_items WHERE return_id = '<id>';
+   - SELECT count(*) FROM purchase_return_lines WHERE return_id = '<id>';
+
+B) /api/auth/session HTML FALLBACK (REQUIRED)
+1) curl -i /api/auth/session and show it returns HTML currently.
+2) Implement the smallest fix so /api/auth/session returns JSON with session/me info OR a structured 404 JSON.
+3) Provide curl -i proof showing Content-Type: application/json.
+
+C) UI GATE TESTS (REQUIRED)
+1) Logged-in, open ALL purchasing sidebar pages (the 23 routes).
+2) Output a PASS/FAIL list.
+3) For each FAIL: include failing network request URL + status + response snippet.
+
+D) EVIDENCE
+1) git diff --stat (only if you changed anything in this closeout-2)
+2) git diff --
+3) npx tsc --noEmit (Exit 0) if code changed.
+
+STOP after producing all proofs.

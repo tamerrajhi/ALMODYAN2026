@@ -1,0 +1,66 @@
+PROMPT — P5A-Hardening (BranchesPage) — NO SCHEMA / NO BACKEND CHANGES
+هدف البرومبت: تحسين بسيط “Enterprise-safe” على Branch Accounts في UI فقط بدون تشعب:
+1) منع أي edge-case في enabled
+2) منع تحذير “بدون حساب” لو فشل تحميل branch-accounts (unknown state)
+3) منع Toast مضلل لو auto-revoke فشل
+
+قيود صارمة:
+- تعديل ملف واحد فقط: src/pages/BranchesPage.tsx
+- ممنوع أي تغييرات في server/ أو DB schema أو endpoints
+- نفس UI الحالي، فقط hardening منطقي ورسائل
+
+المطلوب تنفيذًا:
+
+A) Query branch-accounts
+1) خَلّي enabled صريح:
+   enabled: isAdmin === true
+
+2) خَلّي queryFn يرجّع null عند الخطأ بدل [] (عشان null = Unknown):
+   - نوع useQuery يكون: BranchAccount[] | null
+   - في queryFn:
+     - لو apiClient.get رجّع error => return null
+     - استخرج rows من nested wrapper:
+       const rows = (data as any)?.data ?? data;
+       return Array.isArray(rows) ? rows : null;
+
+B) branchHasAccount helper
+- عدّل branchHasAccount ليُرجع: boolean | null
+  - لو branchAccounts === null => return null (Unknown)
+  - لو branchAccounts مصفوفة:
+     find by branch_id
+     return acc?.has_account ?? false
+
+C) Warning badge logic (Branch card)
+- لو branchHasAccount(branch.id) === false => اعرض warning badge “لا يوجد حساب دخول”
+- لو === true => لا تعرض تحذير
+- لو === null (Unknown بسبب فشل/عدم تحميل) => لا تعرض تحذير إطلاقًا (تجنب false positives)
+
+D) Auto-revoke sessions after set credentials (existing behavior) + truthful toasts
+داخل setCredMutation.onSuccess:
+- نفّذ revoke-sessions في try/catch لكن خزّن النتيجة:
+  let revokedOk = false;
+  try { await apiClient.post('/api/admin/branch-accounts/revoke-sessions', { branchId: variables.branchId }); revokedOk = true; } catch { revokedOk = false; }
+
+- بعدها:
+  queryClient.invalidateQueries({ queryKey: ['branch-accounts'] });
+
+- Toasts:
+  - لو revokedOk:
+      toast.success('تم حفظ بيانات دخول الفرع وإلغاء الجلسات السابقة');
+  - لو فشل revoke:
+      toast.success('تم حفظ بيانات دخول الفرع');
+      toast.warning('تعذّر إلغاء الجلسات تلقائيًا — يمكنك استخدام زر "إلغاء الجلسات"');
+
+- ثم اغلق الديالوج وامسح الحقول كالمعتاد عبر handleCloseCredDialog()
+
+E) Evidence المطلوب بعد التنفيذ (لا تخمين)
+اطبع في الرد:
+- git diff --stat (يجب يظهر ملف واحد فقط BranchesPage.tsx)
+- تأكيد: لا تغييرات في server/ ولا DB
+- نقاط اختبار يدوي (مختصرة):
+  1) Admin: فتح BranchesPage -> التحذير يظهر فقط للفروع بدون حساب (عند نجاح تحميل القائمة)
+  2) Admin: فصل الانترنت/فشل endpoint -> لا تظهر تحذيرات “بدون حساب” (Unknown)
+  3) Admin: تعيين credentials -> يظهر toast صحيح حسب نجاح/فشل revoke
+  4) Non-admin: لا يتم استدعاء /api/admin/branch-accounts أساسًا (enabled false)
+
+ابدأ التنفيذ الآن بنفس القيود.

@@ -1,0 +1,61 @@
+IMPLEMENTATION — 6A (READ RBAC, SALES-FIRST)
+
+STRICT RULES:
+- Keep changes minimal.
+- Do NOT change SQL or payloads.
+- Add a small RBAC middleware based on custom_roles.role_key.
+- Apply it ONLY to a limited SALES read bucket in this prompt.
+- Evidence required: git diff --stat + git diff + smoke tests.
+
+Policy:
+- Admin (any role with is_admin=true): allow everything (bypass).
+- Non-admin:
+  - role_key 'branch_seller_pos_only' => allow SALES read bucket.
+  - role_key 'branch_supervisor_pos_plus_unique_returns' => allow SALES read bucket.
+  - Any other non-admin role => deny (403) for these protected endpoints.
+
+A) Add helper in server/routes.ts (near requireSession/requireAdminRole):
+1) A function to get user's role_keys + is_admin:
+   SELECT cr.role_key, cr.is_admin
+   FROM user_custom_roles ucr
+   JOIN custom_roles cr ON cr.id = ucr.role_id
+   WHERE ucr.user_id = $1;
+
+2) Middleware: requireRoleKeys(allowedKeys: string[])
+   - assumes requireSession already ran and set req.userId
+   - if user is admin => next()
+   - else if any role_key in allowedKeys => next()
+   - else return 403 { error: { message: 'غير مصرح لك' } } (consistent style)
+
+B) Apply middleware to SALES read bucket (GET only) — add AFTER requireSession:
+Protect these endpoints (must exist; if any path differs, use the exact existing one):
+- GET /api/customers
+- GET /api/customers-list
+- GET /api/customer-by-id/:id
+- GET /api/customer-sales
+- GET /api/products
+- GET /api/sale-items
+- GET /api/sale-items-by-barcode
+- GET /api/sales
+- GET /api/returns
+- GET /api/sales-invoices-list
+- GET /api/sales-returns-invoices
+- GET /api/invoices (if used for sales list; otherwise skip and report)
+
+Each should become:
+app.get('/api/...', requireSession, requireRoleKeys(['branch_seller_pos_only','branch_supervisor_pos_plus_unique_returns']), async ...)
+
+Do NOT apply this middleware to admin/user management endpoints yet.
+
+C) Smoke tests:
+1) Unauthenticated -> /api/customers => 401
+2) Auth Seller -> /api/customers => 200
+3) Auth Seller -> /api/suppliers => 403 or 401? (should remain requireSession only; DO NOT change suppliers in this prompt)
+4) Auth role 'accountant' (if available) -> /api/customers => 403
+5) Auth Admin -> /api/customers => 200
+
+Evidence:
+A) git diff --stat
+B) git diff
+C) Smoke test results (status codes)
+STOP.

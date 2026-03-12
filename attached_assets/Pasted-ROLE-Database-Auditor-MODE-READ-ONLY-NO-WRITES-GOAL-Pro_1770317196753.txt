@@ -1,0 +1,120 @@
+ROLE: Database Auditor
+MODE: READ-ONLY (NO WRITES)
+GOAL: Produce TWO comparable schema snapshots (Supabase vs Neon) so we can diff them and confirm they are identical (tables/columns/indexes/functions/enums/extensions).
+
+IMPORTANT RULES:
+- DO NOT run any ALTER/CREATE/DROP/INSERT/UPDATE/DELETE.
+- Only run SELECT queries against system catalogs / information_schema.
+- Output MUST be deterministic and ordered.
+- Provide all output in Markdown code blocks.
+- If you cannot access one of the databases, clearly state which one and why, and still produce the snapshot for the one you can access.
+
+STEP 0 — CONNECTIONS
+We have two Postgres targets:
+A) Supabase (Lovable) DB (the frontend currently uses VITE_SUPABASE_URL + KEY)
+B) Neon DB (Replit) (backend uses DATABASE_URL)
+Your job: generate the same snapshot from both targets.
+
+For each target, label the output clearly:
+=== SNAPSHOT: SUPABASE ===
+=== SNAPSHOT: NEON ===
+
+STEP 1 — BASIC IDENTIFICATION
+Run:
+1) SELECT current_database() as db, current_schema() as schema, version() as version;
+2) SHOW server_version;
+3) SELECT extname, extversion FROM pg_extension ORDER BY extname;
+
+STEP 2 — TABLE LIST (public schema only)
+Run:
+SELECT tablename
+FROM pg_tables
+WHERE schemaname='public'
+ORDER BY tablename;
+
+STEP 3 — COLUMNS (public schema only)
+Run:
+SELECT table_name, column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_schema='public'
+ORDER BY table_name, ordinal_position;
+
+STEP 4 — INDEXES + UNIQUE CONSTRAINTS
+Run:
+SELECT tablename, indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public'
+ORDER BY tablename, indexname;
+
+Also constraints:
+SELECT tc.table_name, tc.constraint_name, tc.constraint_type, kcu.column_name
+FROM information_schema.table_constraints tc
+LEFT JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema
+WHERE tc.table_schema='public'
+ORDER BY tc.table_name, tc.constraint_type, tc.constraint_name, kcu.ordinal_position;
+
+STEP 5 — FUNCTIONS / RPCs (public schema only)
+We need full function signatures + definitions (critical for atomic RPC parity).
+First list:
+SELECT p.proname AS function_name,
+       pg_get_function_identity_arguments(p.oid) AS args,
+       pg_get_function_result(p.oid) AS returns,
+       n.nspname AS schema
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public'
+ORDER BY function_name, args;
+
+Then dump definitions for ONLY the “critical set” below (full create or replace text):
+CRITICAL FUNCTIONS LIST (must dump full definition):
+- purchase_invoice_create_atomic
+- purchase_invoice_post_atomic
+- purchase_invoice_void_atomic
+- purchase_invoice_supp_inv_precheck
+- je_create_atomic
+- je_post_atomic
+- je_reverse_atomic
+- (if exists) purchase_invoice_import_unique_atomic
+- begin_workflow_request
+- stable_payload_hash
+- core_workflow_success
+- core_workflow_failed
+- generate_purchase_invoice_number_atomic
+- reverse_journal_entry_atomic
+- generate_journal_entry_number
+- (transfers) create_transfer_v2, reverse_transfer_v2, generate_transfer_number
+- (imports) import_purchase_batch_create_atomic, import_jewelry_sets_upsert_atomic
+
+For each function in that list, run:
+SELECT pg_get_functiondef('public.<FUNCTION_NAME>'::regproc);
+
+If a function is missing, output:
+MISSING: <FUNCTION_NAME>
+
+STEP 6 — ENUMS / TYPES (if any)
+Run:
+SELECT t.typname as enum_name, e.enumlabel as enum_value
+FROM pg_type t
+JOIN pg_enum e ON t.oid=e.enumtypid
+JOIN pg_namespace n ON n.oid=t.typnamespace
+WHERE n.nspname='public'
+ORDER BY enum_name, e.enumsortorder;
+
+STEP 7 — “Schema Fingerprint Summary”
+At the end of each snapshot, output a summary:
+- counts: tables, columns, indexes, functions, enums, extensions
+- and a small “critical parity checklist” for:
+  invoices.supplier_invoice_no exists?
+  unique index invoices_purchase_supp_inv_uq exists?
+  purchase_invoice_*_atomic exist?
+  pos_workflow_requests + workflow_types exist?
+  journal_entries reverse/void columns exist?
+
+DELIVERABLE FORMAT
+Return a single message containing:
+1) === SNAPSHOT: SUPABASE === (all sections)
+2) === SNAPSHOT: NEON === (all sections)
+3) === DIFF HINTS === (quick notes on likely mismatches you saw)
+NO CHANGES MADE.
+STOP.

@@ -1,0 +1,117 @@
+PROMPT — SAFE MODE (Enterprise / Atomic / Rollback-Safe)
+
+هدف الـ PR:
+Hardening فقط بدون تغيير Business Logic:
+(A) لفّ كل الـ multi-step writes المذكورة بـ DB transactions حقيقية
+(B) جعل revoke للـ tokens/sessions idempotent (revoked_at) بدل DELETE
+(C) (اختياري وآمن فقط) إضافة INDEXes + تقرير duplicates — ممنوع UNIQUE/ALTER constraints في نفس PR
+
+⚠️ قواعد إلزامية قبل أي تنفيذ:
+1) ممنوع إضافة UNIQUE constraints أو ALTER CONSTRAINTS أو DROP/RECREATE constraints في هذا الـ PR نهائياً.
+2) أي migration ضمن (C) يكون INDEX فقط + Query تقرير duplicates فقط. لا تغيير بيانات.
+
+========================
+SCOPE (المخالفات الحالية المطلوب إصلاحها)
+========================
+V1 — DELETE /api/roles/:id (routes.ts) — 3 deletes بدون TX
+V2 — POST /api/admin/users/delete (routes.ts) — عدة عمليات بدون TX
+V3 — POST /api/users/:userId/active (routes.ts) — UPDATE + DELETE بدون TX
+V5 — POS admin select-branch (posSession.ts) — revoke + create sessions/tokens بدون TX
+V6 — POS admin assume-self (posSession.ts) — revoke + create sessions/tokens بدون TX
+
+ملاحظة: V4 (POS customers create) = single INSERT مقبول (لا يلزم تغييره)
+
+========================
+A) TRANSACTION HARDENING (مطلوب)
+========================
+لـ V1/V2/V3/V5/V6:
+- استخدم pattern ثابت:
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    ... (كل queries داخل نفس client.query)
+    await client.query('COMMIT');
+    res.json(...)
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+- ممنوع استعمال pool.query داخل الـ transaction block.
+- ممنوع أي network calls داخل TX.
+- أي return/response يجب أن يكون بعد COMMIT فقط.
+- أي خطأ يضمن rollback كامل.
+
+========================
+B) IDEMPOTENT REVOKE بدل DELETE (مطلوب)
+========================
+بدل DELETE للجلسات/التوكنز:
+- اعمل revoke بـ:
+  UPDATE ... SET revoked_at = now()
+  WHERE token_hash = $1 AND revoked_at IS NULL;
+
+- في حالة branch_sessions:
+  UPDATE branch_sessions SET revoked_at = now()
+  WHERE token_hash = $1 AND revoked_at IS NULL;
+
+- في pos_session_tokens:
+  UPDATE pos_session_tokens SET revoked_at = now()
+  WHERE token_hash = $1 AND revoked_at IS NULL;
+
+- في pos_admin_tokens:
+  UPDATE pos_admin_tokens SET revoked_at = now()
+  WHERE token_hash = $1 AND revoked_at IS NULL;
+
+قواعد:
+- revoke يتم بأضيق نطاق ممكن (بالـ token_hash أو admin_id/session_id حسب المتاح).
+- لا revoke جماعي لكل الفروع أو لكل المستخدمين.
+- الهدف: retries لا تعمل آثار جانبية.
+
+تطبيق B داخل A:
+- أي revoke operations في V5/V6 تكون داخل نفس transaction بتاع V5/V6 (ما عدا clearCookie لأنه HTTP response).
+
+========================
+C) INDEX + DUPLICATES REPORT (اختياري SAFE فقط)
+========================
+مسموح فقط:
+1) إنشاء INDEXes غير فريدة (NON-UNIQUE) على الأعمدة المستخدمة في lookups:
+   - token_hash في branch_sessions / pos_session_tokens / pos_admin_tokens
+   - pos_sessions(pos_admin_id) لو عليه بحث
+2) Queries تقرير duplicates (بدون تعديل بيانات) مثل:
+   - token_hash duplicates (لو موجود)
+   - username duplicates في pos_admin_accounts (لو موجود)
+ممنوع:
+- UNIQUE / ALTER TABLE ... ADD CONSTRAINT UNIQUE
+- أي DELETE/UPDATE لإصلاح duplicates ضمن نفس PR
+
+لو في duplicates تُكتشف:
+- اعمل تقرير واضح في PR comment فقط، ولا تغيّر بيانات.
+
+========================
+EVIDENCE إلزامي داخل الرد
+========================
+بعد التطبيق قدّم Evidence واضح (بدون تخمين):
+
+1) git diff --stat
+2) Snippets (10–30 سطر) من كل endpoint يوضح:
+   - BEGIN/COMMIT/ROLLBACK
+   - استخدام client.query فقط
+3) grep proof:
+   - grep يثبت عدم وجود "pool.query(" داخل blocks التي تبدأ بـ BEGIN في الملفات المعدلة
+4) idempotency proof:
+   - snippet يوضح شرط "revoked_at IS NULL"
+5) Smoke tests (curl) للـ endpoints المعدلة:
+   - نجاح سيناريو طبيعي
+   - إعادة نفس الطلب مرتين (retry) لا يسبب crash ولا يخلق sessions مكررة (على الأقل يرجع OK أو نفس نتيجة منطقية)
+
+========================
+DO NOT CHANGE
+========================
+- ممنوع تغيير أي RPC signatures أو business posting logic
+- ممنوع تعديل جداول البيع/المخزون/القيود المحاسبية
+- ممنوع إضافة auth dependencies جديدة على ERP
+- لا تغيّر UI/Frontend في هذا PR
+
+ابدأ التنفيذ الآن وفق SAFE MODE أعلاه، وقدّم Evidence في النهاية.

@@ -1,0 +1,252 @@
+PROMPT — UNIQUE-IMPORT SMOKE E2E (MATCHES RPC PARSING) | EXCEL → DB → JE | STRICT EVIDENCE | NO GUESS | STOP-GATED
+
+ROLE: Senior Engineer
+MODE: Execute real end-to-end smoke tests and print RAW evidence only.
+RULES:
+- Do NOT guess IDs or schema. Query DB and paste outputs.
+- Use the REAL excel file in workspace. If missing, STOP and print ls for likely locations.
+- Build args JSON EXACTLY as RPC expects:
+  { client_request_id, supplier_id, branch_id, vat_rate, created_by, uploaded_file_name, files:[{supp_inv, invoice_date, rows:[{raw_headers_json, raw_values_json, raw_row_json, ...}]}] }
+- Duplicate policy ONLY on SUPP INV per supplier. Prove precheck + unique index behavior.
+- Idempotency must be proven by repeating same client_request_id with same payload.
+- VAT test A: vat_rate=0; VAT test B: vat_rate=0.15 (must create 2105 line only when >0)
+- Print RAW outputs exactly as requested. No narrative until STOP-6 end verdict.
+
+========================
+STOP-1 (PREP — DISCOVER IDS + BASELINE + EXCEL STATS)
+========================
+A) Pick supplier_id + branch_id (raw SQL outputs):
+1) Suppliers:
+SELECT id, supplier_name, supplier_code, is_active, created_at
+FROM suppliers
+WHERE is_active=true
+ORDER BY created_at DESC
+LIMIT 10;
+
+2) Branches:
+SELECT id, code, name, is_active, is_main, created_at
+FROM branches
+WHERE is_active=true
+ORDER BY is_main DESC, created_at DESC
+LIMIT 10;
+
+Choose:
+- supplier_id = latest active supplier (or the one you used previously in tests if present)
+- branch_id = MAIN branch (is_main=true) if exists, else latest active branch
+Also capture branch_code (code) for COA checks.
+
+B) COA existence for branch (raw):
+SELECT account_code, account_name
+FROM chart_of_accounts
+WHERE account_code IN ('1301','2101','2105')
+   OR account_code IN (
+      '<BRANCHCODE>-1301','<BRANCHCODE>-2101','<BRANCHCODE>-2105',
+      'MAIN-1301','MAIN-2101','MAIN-2105','BR01-1301','BR01-2101','BR01-2105','BR3-1301','BR3-2101','BR3-2105'
+   )
+ORDER BY account_code;
+
+C) Baseline counts BEFORE any import (raw):
+SELECT count(*) AS unique_batches FROM unique_purchase_batches;
+SELECT count(*) AS unique_invoices FROM unique_purchase_invoices;
+SELECT count(*) AS unique_items FROM unique_items;
+SELECT count(*) AS je_count FROM journal_entries;
+SELECT count(*) AS jel_count FROM journal_entry_lines;
+SELECT count(*) AS uim_count FROM unique_item_movements;
+
+D) Locate and parse the Excel file (NO GUESS):
+1) Print these:
+- pwd
+- ls -la /mnt/data || true
+- ls -la . || true
+- find . -maxdepth 4 -type f -iname "*.xlsx" -print
+
+If the file exists, pick the correct path (prefer "Purchase 1 SUPP.xlsx").
+Then parse and print (raw):
+- file_path
+- sheet_names
+- row_count (data rows excluding header)
+- col_count
+- list empty-header positions (0-based and 1-based)
+- distinct SUPP INV count + first 5 values (upper/trim)
+
+STOP after printing outputs.
+
+========================
+STOP-2 (PRECHECK — SUPP INV POLICY)
+========================
+A) Build p_supp_invs array from the Excel distinct list (upper/trim).
+B) Call RPC via HTTP (raw request + response):
+POST /api/rpc/unique_purchase_supp_inv_precheck
+Body:
+{"args":{"p_supplier_id":"<supplier_id>","p_supp_invs":["<inv1>","<inv2>"]}}
+
+Print:
+- HTTP status
+- raw JSON response (exists array)
+
+STOP after printing outputs.
+
+========================
+STOP-3 (IMPORT TEST A — vat_rate=0 + FULL DB PROOFS)
+========================
+A) Build args json EXACTLY as the RPC parsing expects:
+
+args = {
+  "client_request_id": "SMOKE-EXCEL-VAT0-001",
+  "supplier_id": "<supplier_id>",
+  "branch_id": "<branch_id>",
+  "vat_rate": 0,
+  "created_by": "" (or a real uuid if available; keep "" if unknown),
+  "uploaded_file_name": "<actual_excel_filename>",
+  "files": [
+    {
+      "supp_inv": "<supp_inv_from_excel>",
+      "invoice_date": "<YYYY-MM-DD>",
+      "rows": [
+        {
+          "raw_headers_json": [ ... positional headers length=col_count ... ],
+          "raw_values_json":  [ ... positional values same length ... ],
+          "raw_row_json":     { ... header->value map; use __COL_<idx>__ keys for empty headers ... }
+        }
+      ]
+    }
+  ]
+}
+
+IMPORTANT:
+- Preserve header order exactly as in Excel.
+- Preserve empty headers as "" in raw_headers_json.
+- Preserve raw_values_json same length exactly (empty string stays empty).
+- raw_row_json must NOT lose any column. For empty headers, use __COL_<idx>__ key (1-based or 0-based — but be consistent and print the convention used).
+
+B) Call import RPC (raw request + response):
+POST /api/rpc/unique_purchase_import_excel_atomic
+Body: {"args": <args>}
+
+Print:
+- HTTP status
+- JSON response (must include batch_id + batch_no + items_created + invoices_created + items_failed)
+
+C) Counts AFTER import (raw — same queries):
+SELECT count(*) AS unique_batches FROM unique_purchase_batches;
+SELECT count(*) AS unique_invoices FROM unique_purchase_invoices;
+SELECT count(*) AS unique_items FROM unique_items;
+SELECT count(*) AS je_count FROM journal_entries;
+SELECT count(*) AS jel_count FROM journal_entry_lines;
+SELECT count(*) AS uim_count FROM unique_item_movements;
+
+D) DB proofs for created objects (raw):
+Using batch_id from response:
+1) Batch:
+SELECT id, batch_no, status, rows_total, rows_imported, created_at
+FROM unique_purchase_batches
+WHERE id='<batch_id>';
+
+2) Invoices created:
+SELECT id, invoice_number, supp_inv, status, vat_rate, subtotal, tax_amount, total_amount, journal_entry_id, created_at
+FROM unique_purchase_invoices
+WHERE batch_id='<batch_id>'
+ORDER BY created_at DESC;
+
+3) Items sample (latest 10 from this batch window):
+SELECT serial_no, stockcode, model, description, tag_price, sale_status, sold_at, branch_id, created_at,
+       jsonb_array_length(raw_headers_json) AS hlen,
+       jsonb_array_length(raw_values_json)  AS vlen
+FROM unique_items
+WHERE created_at >= (now() - interval '2 hours')
+ORDER BY created_at DESC
+LIMIT 10;
+
+E) JE proof for VAT=0 (raw):
+Using journal_entry_id from the invoice row above:
+1) Header + line count:
+SELECT je.entry_number, je.total_debit, je.total_credit, COUNT(jel.id) AS lines
+FROM journal_entries je
+JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+WHERE je.id = '<je_id>'
+GROUP BY 1,2,3;
+
+2) Lines:
+SELECT coa.account_code, jel.debit_amount, jel.credit_amount
+FROM journal_entry_lines jel
+JOIN chart_of_accounts coa ON coa.id = jel.account_id
+WHERE jel.journal_entry_id = '<je_id>'
+ORDER BY coa.account_code;
+
+Expected for vat_rate=0:
+- 2 lines only: <BR>-1301 debit=subtotal ; <BR>-2101 credit=total
+- NO 2105 line
+
+F) Excel "as-is" proof (raw):
+Pick 2 items from this import and print:
+SELECT serial_no,
+       jsonb_array_length(raw_headers_json) AS hlen,
+       jsonb_array_length(raw_values_json) AS vlen,
+       raw_headers_json->>25 AS h25,
+       raw_headers_json->>26 AS h26,
+       raw_headers_json->>27 AS h27,
+       raw_headers_json->>29 AS h29,
+       raw_headers_json->>30 AS h30
+FROM unique_items
+WHERE created_at >= (now() - interval '2 hours')
+ORDER BY created_at DESC
+LIMIT 2;
+
+STOP after printing outputs.
+
+========================
+STOP-4 (IDEMPOTENCY — SAME client_request_id)
+========================
+A) Call the SAME import RPC again with the SAME args (same client_request_id: "SMOKE-EXCEL-VAT0-001")
+B) Print raw response JSON.
+C) Re-run these counts and prove unchanged:
+SELECT count(*) AS unique_batches FROM unique_purchase_batches;
+SELECT count(*) AS unique_invoices FROM unique_purchase_invoices;
+SELECT count(*) AS unique_items FROM unique_items;
+
+D) atomic_workflow_requests proof (raw):
+SELECT client_request_id, workflow_type, status, created_at, completed_at,
+       (result_payload IS NOT NULL) AS has_result
+FROM atomic_workflow_requests
+WHERE client_request_id = 'SMOKE-EXCEL-VAT0-001'
+ORDER BY created_at DESC
+LIMIT 5;
+
+STOP after printing outputs.
+
+========================
+STOP-5 (IMPORT TEST B — vat_rate=0.15 + VAT LINE PROOF)
+========================
+A) Build a second args with:
+client_request_id = "SMOKE-EXCEL-VAT15-001"
+vat_rate = 0.15
+IMPORTANT: supp_inv must be unique to avoid the unique index collision:
+- Use the real supp_inv but append "-VAT15" OR if the Excel has only one supp_inv, clone it with suffix.
+
+B) Call import RPC and print raw response.
+C) Fetch invoice row and JE lines and print raw:
+- invoice totals (subtotal, tax_amount, total_amount)
+- JE header + line count
+- JE lines by account_code
+
+Expected for vat_rate=0.15:
+- 3 lines: <BR>-1301 debit=subtotal ; <BR>-2105 debit=tax_amount ; <BR>-2101 credit=total_amount
+- Balanced sums
+
+STOP after printing outputs.
+
+========================
+STOP-6 (SELLABLE VISIBILITY QUICK CHECK)
+========================
+A) Confirm POS filters alignment (unique_items sellable):
+SELECT
+  count(*) AS total,
+  count(*) FILTER (WHERE sold_at IS NULL AND (sale_status IS NULL OR sale_status='available')) AS sellable
+FROM unique_items
+WHERE created_at >= (now() - interval '24 hours');
+
+B) If view exists, also:
+SELECT count(*) AS v_sellable_count FROM v_sellable_unique_items;
+
+STOP after printing outputs ONLY.
+Then provide ONE PARAGRAPH verdict: PASS/FAIL based strictly on evidence.

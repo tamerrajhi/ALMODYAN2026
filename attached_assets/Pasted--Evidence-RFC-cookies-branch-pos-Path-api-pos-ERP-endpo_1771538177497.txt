@@ -1,0 +1,45 @@
+نحتاج Evidence عملي (ليس فقط RFC) أن cookies __branch/__pos (Path=/api/pos) لا تصل لأي ERP endpoint خارج /api/pos/*.
+
+قواعد:
+- لا نحتاج ERP login.
+- لا نضيف endpoints دائمة.
+- مسموح فقط Log مؤقت لمدة اختبار واحد ثم حذفه.
+
+(1) أضف log مؤقت في 2 أماكن موجودة وتُستدعى بدون session:
+A) Endpoint عام/بدون session مثل:
+- GET /api/public/branches-list  (أو أي /api/public/* لديك)
+اطبع:
+console.log("[COOKIEPROOF][PUBLIC] has __pos=", req.headers.cookie?.includes("__pos=") ?? false,
+            "has __branch=", req.headers.cookie?.includes("__branch=") ?? false,
+            "path=", req.path);
+
+B) Endpoint POS مثل:
+- GET /api/pos/session/context
+اطبع نفس السطر:
+console.log("[COOKIEPROOF][POS] has __pos=", ..., "has __branch=", ..., "path=", req.path);
+
+(2) نفّذ طلبين curl من نفس بيئة السيرفر (لا يحتاج login):
+curl -i http://localhost:<PORT>/api/public/branches-list
+curl -i http://localhost:<PORT>/api/pos/session/context
+
+مهم:
+- هذه الطلبات من curl لن تحمل cookies افتراضيًا.
+لذلك لإثبات الـPath behavior عمليًا، أضف header Cookie يدويًا في كل curl:
+curl -i -H "Cookie: __pos=TESTPOS; __branch=TESTBRANCH" http://localhost:<PORT>/api/public/branches-list
+curl -i -H "Cookie: __pos=TESTPOS; __branch=TESTBRANCH" http://localhost:<PORT>/api/pos/session/context
+
+التوقع:
+- في PUBLIC endpoint: السيرفر سيستقبل header Cookie لأن curl أرسله، لكن هذا لا يثبت browser behavior.
+لذلك نحتاج إثبات browser behavior أيضًا:
+
+(3) إثبات browser behavior بدون login:
+- افتح /pos في المتصفح، اعمل Branch login + enter PIN (أي حسابات POS موجودة).
+- ثم افتح في نفس المتصفح صفحة عامة خارج /api/pos (مثلاً أي صفحة ERP أو حتى /auth).
+- راقب server logs: يجب أن ترى أن استدعاءات /api/public/branches-list أو /api/auth/* لا تحتوي __pos/__branch (COOKIEPROOF).
+إذا لم نستطع عمل flow كامل، على الأقل افتح /pos حتى يصل طلب /api/pos/session/context واطبع COOKIEPROOF هناك.
+
+(4) بعد إثبات اللوج مرة واحدة:
+- احذف اللوجات المؤقتة.
+- ارجع بالمخرجات:
+  - سطور [COOKIEPROOF] من السيرفر
+  - git diff --stat (بعد حذف اللوج = صفر تغييرات إضافية أو فقط ملفاتك الأساسية)

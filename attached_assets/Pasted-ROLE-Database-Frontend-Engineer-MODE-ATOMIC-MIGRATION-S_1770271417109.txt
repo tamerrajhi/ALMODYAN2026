@@ -1,0 +1,51 @@
+ROLE: Database + Frontend Engineer
+MODE: ATOMIC MIGRATION (SUPPLIERS ONLY) — STOP AFTER DONE
+
+GOAL:
+Re-enable Suppliers Add/Edit/Delete in an atomic, RPC-only way.
+No direct writes from UI. UI must call RPCs.
+Keep Atomic-Only Enforcement intact.
+
+SCOPE:
+- Supplier CRUD only (create, update, archive/delete).
+- Update affected UI/hook: useSuppliers.ts and any Supplier forms/pages that currently hit forbidDirectWrite.
+
+DB WORK (REQUIRED):
+1) Create/ensure a suppliers table exists (use existing if present). DO NOT redesign other modules.
+2) Implement these RPCs (SECURITY DEFINER) with strict validation:
+   - supplier_create_atomic(p_client_request_id uuid, p_branch_id uuid, p_name text, p_phone text, p_vat_no text, p_address text, p_notes text, ...) returns uuid
+   - supplier_update_atomic(p_client_request_id uuid, p_supplier_id uuid, p_name text, p_phone text, p_vat_no text, p_address text, p_notes text, ...) returns void
+   - supplier_archive_atomic(p_client_request_id uuid, p_supplier_id uuid, p_reason text) returns void
+3) Idempotency:
+   - Use p_client_request_id to prevent duplicate creates/updates.
+   - Implement a small request ledger table if none exists:
+     atomic_requests(request_id uuid pk, created_at timestamptz, actor_user_id uuid, action text, entity text, entity_id uuid, status text)
+   - If ledger already exists, reuse it (do not duplicate).
+4) Security / RLS:
+   - Enforce branch access inside RPC using existing helper (e.g., has_role / get_user_branches) if present.
+   - Ensure normal users cannot bypass by direct table writes (RLS must stay enabled).
+5) Audit trail:
+   - Insert an audit row (or reuse existing audit log) per RPC call: who, when, what changed.
+
+UI WORK (REQUIRED):
+6) In useSuppliers.ts and supplier pages/components:
+   - Replace any blocked write path with supabase.rpc() calls to these new RPCs.
+   - Generate p_client_request_id on client (uuid).
+   - Keep reads as they are.
+7) Error handling:
+   - Show Arabic toast on failure with the error message.
+   - Keep the legacy-block message only for other modules not in scope.
+
+EVIDENCE (MANDATORY):
+A) List created/updated SQL functions + any new tables with exact names.
+B) Show exact file paths changed in UI and line numbers where RPC calls were added.
+C) Prove no direct writes returned:
+   - grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+   - output must remain EMPTY.
+D) Provide a quick manual test script (steps):
+   - Create supplier → verify row exists
+   - Edit supplier → verify updated
+   - Archive supplier → verify archived flag/date
+STOP AFTER COMPLETION.
+NO EXTRA MODULES.
+NO GUESSING.

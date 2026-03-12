@@ -1,0 +1,104 @@
+هدف الإصلاح الجذري (بدون تخمين):
+حل “الخلط” بين ERP و POS بسبب cookies __branch و __pos مضبوطة على path="/".
+المطلوب: عزل cookies بحيث لا تُرسل إلا لواجهات POS/Branch APIs فقط، مع تنظيف legacy cookies القديمة، وإضافة POS logout.
+
+قواعد:
+- نفّذ التعديل في أقل عدد ملفات.
+- لا تغيّر منطق POS/ERP غير الضروري.
+- رجّع Evidence واضح (diff + headers + logs) بعد التنفيذ.
+
+=== (1) تعديل server/branchAuth.ts ===
+في handler: POST /api/branch/login
+حالياً:
+res.cookie("__branch", rawToken, { ..., path: "/", expires: expiresAt })
+
+المطلوب:
+1) قبل set الجديد: امسح legacy cookie القديمة على path="/"
+2) اكتب cookie جديدة على path="/api/branch"
+
+مثال (التزم بنفس options: httpOnly/secure/sameSite/expires):
+res.clearCookie("__branch", {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+});
+res.cookie("__branch", rawToken, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/api/branch",
+  expires: expiresAt,
+});
+
+=== (2) تعديل server/posSession.ts ===
+في handler: POST /api/pos/cashier/enter
+حالياً:
+res.cookie("__pos", rawToken, { ..., path: "/", expires: expiresAt })
+
+المطلوب:
+1) قبل set الجديد: امسح legacy cookie القديمة على path="/"
+2) اكتب cookie جديدة على path="/api/pos"
+
+res.clearCookie("__pos", {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+});
+res.cookie("__pos", rawToken, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/api/pos",
+  expires: expiresAt,
+});
+
+ملاحظة مهمة:
+- لا تستخدم path="/pos" لأن الطلبات تذهب إلى /api/... ولن تُرسل cookie.
+- تأكد أن /api/pos/session/context (وأي endpoint يقرأ __pos) يقع تحت /api/pos/*.
+- تأكد أن /api/branch/context/login (وأي endpoint يقرأ __branch) يقع تحت /api/branch/*.
+
+=== (3) إضافة endpoint لخروج POS بدون logout ERP ===
+أضف:
+POST /api/pos/logout
+يمسح cookies scoped paths (الجديدة):
+- __pos على path "/api/pos"
+- (اختياري) __branch على path "/api/branch" لو نريد خروج كامل من وضع POS
+
+مثال:
+app.post("/api/pos/logout", (req, res) => {
+  res.clearCookie("__pos", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/api/pos",
+  });
+  res.clearCookie("__branch", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/api/branch",
+  });
+  res.json({ ok: true });
+});
+
+=== (4) Evidence إلزامي بعد التنفيذ ===
+أ) اطبع:
+git rev-parse HEAD
+git diff --stat
+
+ب) أثبت Set-Cookie headers (بنصها) بعد:
+- POST /api/branch/login  => لازم Path=/api/branch
+- POST /api/pos/cashier/enter => لازم Path=/api/pos
+(اعرض Response headers التي تحتوي Set-Cookie فقط)
+
+ج) أثبت أن ERP endpoints لا تستقبل __pos/__branch:
+- أضف log مؤقت (ثم احذفه) في أي ERP endpoint مثل /api/purchases/* يطبع:
+  req.cookies.__pos, req.cookies.__branch
+المفروض undefined.
+
+د) أثبت أن POS endpoint يستقبل __pos:
+- log مؤقت في /api/pos/session/context يطبع req.cookies.__pos (لا تطبع القيمة كاملة، يكفي Boolean موجود/غير موجود)
+
+ارجع بالمخرجات كاملة (diff + headers + logs). لا تعمل تغييرات إضافية غير المذكور.

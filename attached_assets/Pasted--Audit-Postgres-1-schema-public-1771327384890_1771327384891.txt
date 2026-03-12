@@ -1,0 +1,59 @@
+أحتاج منك تعمل Audit شامل لقاعدة البيانات (Postgres) لاستخراج:
+
+1) قائمة كل الجداول في schema public (وغيره لو مستخدم) مع:
+   - row count (يفضل exact في dev، أو تقديري من pg_class لو العدد كبير)
+   - هل الجدول “تشغيلي” (transactions/ledger/inventory/docs/movements/etc) أم “مرجعي/إعدادات” (branches, suppliers, items catalog, roles, permissions, settings, lookups)
+
+2) FK map:
+   - مين يعتمد على مين (child -> parent)
+   - وبناءً عليه اقترح ترتيب TRUNCATE/DELETE آمن
+
+3) Output واضح:
+   - Section A: Tables with data > 0 (مرتبة تنازليًا)
+   - Section B: FK edges (child_table.child_col -> parent_table.parent_col)
+   - Section C: اقتراح "Factory Reset Plan" مقسّم:
+       * التشغيل فقط (Invoices, Items, Movements, Journal Entries, Ledger lines, Transfers, Returns, Payments, etc.)
+       * مع استثناء جداول المرجع/الإعدادات (Users, Roles, Branches, Suppliers, Chart of Accounts, Settings, etc.) — *اقترح قائمة مبدئية ثم أكدها من أسماء الجداول الفعلية*
+
+نفّذ SQL queries التالية (أو محسّنة) واطبع النتائج:
+
+-- 1) List all tables
+select schemaname, tablename
+from pg_tables
+where schemaname not in ('pg_catalog','information_schema')
+order by schemaname, tablename;
+
+-- 2) Row counts (exact) لكل جدول في public (Dev)
+-- استخدم DO block يولد counts لكل جدول ويجمعها في temp table
+-- ثم اطبع فقط اللي count>0
+-- (مسموح تستخدم format() و execute)
+
+-- 3) FK map
+select
+  tc.table_schema as child_schema,
+  tc.table_name as child_table,
+  kcu.column_name as child_column,
+  ccu.table_schema as parent_schema,
+  ccu.table_name as parent_table,
+  ccu.column_name as parent_column,
+  tc.constraint_name
+from information_schema.table_constraints tc
+join information_schema.key_column_usage kcu
+  on tc.constraint_name = kcu.constraint_name
+ and tc.table_schema = kcu.table_schema
+join information_schema.constraint_column_usage ccu
+  on ccu.constraint_name = tc.constraint_name
+ and ccu.table_schema = tc.table_schema
+where tc.constraint_type='FOREIGN KEY'
+  and tc.table_schema not in ('pg_catalog','information_schema')
+order by parent_table, child_table;
+
+بعدها استنتج جداول التشغيل من أسماء مثل:
+invoice, journal, ledger, movement, stock, inventory, transfer, receipt, payment, voucher, return, batch, import, pos, sale, purchase, settlement, adjustment, correction
+ولا تلمس جداول auth/users/roles/settings/lookups إلا لو المستخدم طلب.
+
+أريد منك في النهاية أن تُنتج:
+- قائمة TRUNCATE المقترحة لجداول التشغيل
+- وقائمة KEEP TABLES المقترحة (المرجعية)
+- وملاحظات عن المخاطر لو في جداول تشغيل مرتبطة بـ auth/permissions
+بدون تنفيذ أي مسح الآن.

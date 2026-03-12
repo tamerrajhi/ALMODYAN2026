@@ -1,0 +1,109 @@
+PROMPT — PV-FULL-EXEC-1 | PAYMENT VOUCHERS FULL (DB+SERVER+MIN UI PRINT FIX) | BUGFIX ONLY | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon/Postgres)
+MODE: BUGFIX ONLY / AUDIT-BASED (NO GUESSING)
+
+CONTEXT (FROM AUDIT - DO NOT RE-AUDIT):
+- PV list reads from public.payments where payment_type='payment'
+- PV writes call these RPCs with jsonb p_payload:
+  generate_payment_number (no args or payment_type_param)
+  payment_voucher_atomic(jsonb)
+  payment_voucher_update_atomic(jsonb)
+  payment_voucher_void_atomic(jsonb)
+- DB missing:
+  those 4 functions + supplier_payment_allocations table + payments has no status/client_request_id
+- company_settings table does NOT exist; printing uses getCompanySettingsForVoucherPrint() which currently reads company_settings.
+
+GOAL:
+Make /purchasing/payment-vouchers fully operational:
+- Create/Update/Void works end-to-end (no NOT_IMPLEMENTED, no 500)
+- Creates balanced journal entry + lines
+- Applies invoice allocations using a real table
+- Idempotent create using atomic_workflow_requests
+- Print header works by reading from existing app_settings (minimal UI fix)
+
+STRICT RULES:
+- No refactor.
+- Minimal migrations only.
+- Use existing tables: payments, invoices, journal_entries, journal_entry_lines, payment_account_settings, app_settings.
+- Do NOT create company_settings table (use app_settings instead).
+- All RPC responses must be structured JSON (data/error), not raw 500.
+
+BATCH 1 — DB MIGRATIONS (MINIMAL)
+A) Create table supplier_payment_allocations with:
+- id uuid pk default gen_random_uuid()
+- payment_id uuid not null references payments(id) on delete cascade
+- invoice_id uuid not null references invoices(id)
+- supplier_id uuid null references suppliers(id)
+- amount numeric not null check(amount > 0)
+- created_at timestamptz not null default now()
+- created_by uuid null
+- unique(payment_id, invoice_id)
+Add indexes on (payment_id), (invoice_id), (supplier_id).
+
+B) Add minimal columns to payments to support void/update cleanly:
+- status text not null default 'posted'
+- void_reason text null
+- voided_at timestamptz null
+(Do NOT add client_request_id column; use atomic_workflow_requests)
+
+Provide migration file(s) idempotent.
+
+BATCH 2 — DB FUNCTIONS (CREATE OR REPLACE, JSONB)
+Implement these functions returning jsonb:
+1) generate_payment_number() and generate_payment_number(text) (to match server handler branch)
+2) payment_voucher_atomic(p_payload jsonb)
+3) payment_voucher_update_atomic(p_payload jsonb)
+4) payment_voucher_void_atomic(p_payload jsonb)
+
+FUNCTION REQUIREMENTS:
+- Accept payload shapes exactly as audit listed (p_payload.payment, p_payload.journal, optional lines, allocations).
+- Create uses p_payload.client_request_id with atomic_workflow_requests idempotency.
+- Create inserts into payments (payment_type='payment') and sets journal_entry_id.
+- Create inserts allocations rows and updates invoices paid_amount/remaining_amount + status.
+- JE creation:
+  - If p_payload.lines provided: write those as JE lines.
+  - Else derive:
+    - Credit account from payment_account_settings by payment_method (cash/bank/check/card), branch_id or null.
+    - Debit account = AP fallback by chart_of_accounts code '2101' if supplier has no account_id.
+  - Ensure sum(debit)=sum(credit).
+- Update:
+  - Reverse previous allocations and invoice amounts, create reversal JE (link via reversal_of_je_id / reversed_by_je_id).
+  - Apply new allocations and create new JE; update payments row and journal_entry_id.
+- Void:
+  - Reverse allocations + invoice paid fields, create reversal JE, set payments.status='voided', set voided_at, void_reason.
+
+BATCH 3 — SERVER + UI MIN PATCH
+A) server/routes.ts:
+- Remove PV RPCs from NOT_IMPLEMENTED_RPCS:
+  payment_voucher_atomic, payment_voucher_update_atomic, payment_voucher_void_atomic, generate_payment_number
+- Ensure RPC handler path stays same.
+
+B) UI minimal patch for print:
+- Modify getCompanySettingsForVoucherPrint() to read from app_settings (existing) instead of company_settings (missing).
+- Keep response shape stable for PrintablePaymentVoucher.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+1) git diff --stat
+2) git diff --
+3) Migration SQL contents (full)
+4) DB proof:
+   - \d+ supplier_payment_allocations
+   - \d+ payments (show new columns)
+   - SELECT proname FROM pg_proc WHERE proname IN ('generate_payment_number','payment_voucher_atomic','payment_voucher_update_atomic','payment_voucher_void_atomic');
+5) AUTHENTICATED curl proofs (body must use {"args":{"p_payload":...}}):
+   A) generate_payment_number -> returns PV-...
+   B) payment_voucher_atomic -> success (returns payment_id, payment_number, journal_entry_id)
+   C) payment_voucher_update_atomic -> success
+   D) payment_voucher_void_atomic -> success
+6) Accounting proof:
+   - For created journal_entry_id: SELECT sum(debit_amount), sum(credit_amount) FROM journal_entry_lines WHERE journal_entry_id=...
+7) Allocation proof:
+   - Show allocations rows inserted
+   - Show invoice before/after paid_amount + remaining_amount + status
+   - Show reversal after void
+8) UI retest proof:
+   - PaymentVouchersPage loads, create/update/void buttons succeed (no console/network errors)
+9) npx tsc --noEmit (Exit 0)
+
+STOP.

@@ -1,0 +1,95 @@
+ROLE: Database Engineer
+MODE: DB ONLY — GATE TEST PURCHASE INVOICE ATOMIC — STOP AFTER EVIDENCE
+
+GOAL:
+Provide strict evidence that purchase_invoice_create_atomic / post / void exist and work end-to-end:
+- invoice created in invoices table
+- journal_entry_id not null
+- JE totals non-zero and balanced
+- post transitions status correctly
+- void creates reversal JE and marks invoice voided
+
+HARD RULES:
+- NO schema changes in this step.
+- Only SELECT + calling RPCs.
+- Provide outputs verbatim.
+
+STEP 1 — EXISTENCE CHECK (MANDATORY):
+Run and paste:
+SELECT routine_name
+FROM information_schema.routines
+WHERE routine_schema='public'
+AND routine_type='FUNCTION'
+AND routine_name IN (
+  'purchase_invoice_create_atomic',
+  'purchase_invoice_post_atomic',
+  'purchase_invoice_void_atomic'
+)
+ORDER BY routine_name;
+
+STEP 2 — PREPARE TEST INPUTS:
+A) Find one real supplier_id and branch_id:
+SELECT id, name FROM suppliers ORDER BY created_at DESC NULLS LAST LIMIT 1;
+SELECT id, name FROM branches ORDER BY created_at DESC NULLS LAST LIMIT 1;
+
+B) Find one real inventory account and AP account if your RPC needs them.
+If not needed, skip.
+
+STEP 3 — CALL CREATE RPC (MANDATORY):
+Call purchase_invoice_create_atomic with minimal valid payload exactly matching your function signature.
+- Use client_request_id = gen_random_uuid()
+- Use supplier_id, branch_id from Step 2
+- Provide 2 line items with unit_cost > 0 so totals aren’t zero
+Return must include invoice_id (or equivalent) and journal_entry_id (or je_id).
+PASTE:
+- the exact SQL call
+- the returned JSON result
+
+STEP 4 — VERIFY DB RECORDS (MANDATORY):
+A) Verify invoice row exists:
+SELECT id, invoice_number, invoice_type, status, supplier_id, branch_id, total_amount, journal_entry_id, created_at
+FROM invoices
+WHERE id = '<INVOICE_ID_FROM_RPC>';
+
+B) Verify JE header is non-zero and balanced:
+SELECT id, entry_number, status, is_posted, total_debit, total_credit, posted_at
+FROM journal_entries
+WHERE id = '<JOURNAL_ENTRY_ID_FROM_INVOICE>';
+
+C) Verify JE lines count and any zero lines:
+SELECT COUNT(*) AS lines_count,
+       SUM(CASE WHEN COALESCE(debit_amount,0)=0 AND COALESCE(credit_amount,0)=0 THEN 1 ELSE 0 END) AS zero_lines
+FROM journal_entry_lines
+WHERE journal_entry_id = '<JOURNAL_ENTRY_ID_FROM_INVOICE>';
+
+STEP 5 — POST RPC TEST (IF CREATE DID NOT AUTO-POST OR IF POST EXISTS):
+Call purchase_invoice_post_atomic for the created invoice (new client_request_id).
+Paste:
+- SQL call
+- JSON result
+Then re-run invoice + JE header query to show status changes.
+
+STEP 6 — VOID RPC TEST (MANDATORY):
+Call purchase_invoice_void_atomic for the created invoice (new client_request_id + reason Arabic).
+Paste:
+- SQL call
+- JSON result
+
+Then verify:
+A) invoice status is voided/void and has void timestamp/reason (whatever your schema uses)
+B) original JE status is reversed/voided OR has reversed_by_je_id set
+C) reversal JE exists:
+- Show reversal JE header totals non-zero and balanced
+- Show link fields (reversal_of_je_id / reversed_by_je_id) if present
+
+STEP 7 — FINAL PASS/FAIL TABLE (MANDATORY):
+Create a small table:
+Check | PASS/FAIL | Evidence (query output line)
+- RPCs exist
+- Create writes invoice row
+- Create writes JE row
+- JE balanced and non-zero
+- Post works
+- Void creates reversal JE and updates statuses
+
+STOP AFTER OUTPUT.

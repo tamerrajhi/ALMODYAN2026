@@ -1,0 +1,69 @@
+نفّذ حذف كامل لمسار Legacy Edit (الزر الأصفر + can-edit gate + RPC legacy) بدون المساس بمسار Rebuild الحالي.
+
+⚠️ قواعد صارمة:
+- ممنوع حذف UniqueInvoiceEditDialog.tsx لأنه هو واجهة الـRebuild الحالية.
+- الهدف: إزالة Legacy فقط + ربط زر الواجهة بـ Rebuild Gate بدل Can-Edit القديم.
+
+========================================
+A) Frontend: PurchaseInvoiceViewPage.tsx
+========================================
+1) احذف زر "Edit" الأصفر القديم فقط.
+2) احذف useQuery الخاص بـ can-edit القديم بالكامل:
+   - احذف import checkUniqueInvoiceCanEdit
+   - احذف query unique-invoice-can-edit
+   - احذف canEditInvoice state/variable
+3) بدلاً من ذلك:
+   - استخدم بوابة Rebuild الموجودة بالفعل (fetchRebuildGate أو checkUniqueInvoiceCanRebuild حسب الموجود عندك)
+   - اجعل شرط ظهور زر "تعديل/إعادة بناء" يعتمد على:
+     isImportInvoice && canRebuild === true
+4) الزر الجديد:
+   - نفس الفعل الحالي: يفتح UniqueInvoiceEditDialog (editDialogOpen = true)
+   - غير نص الزر إلى: "إعادة بناء الفاتورة" (أو "تعديل (Rebuild)") بدل Edit
+   - (اختياري) لون محايد/أزرق بدل الأصفر التحذيري
+
+========================================
+B) Frontend: حذف الدوال الميتة فقط
+========================================
+1) احذف الدالة dead code:
+   src/domain/purchasing/purchasingWriteService.ts
+   - editUniqueInvoiceAtomic() التي تستدعي unique_purchase_invoice_edit_atomic
+2) احذف من dataGateway.ts:
+   - checkUniqueInvoiceCanEdit() لأنها لن تستخدم بعد الآن
+
+========================================
+C) Backend: routes.ts
+========================================
+1) احذف endpoint:
+   GET /api/purchasing/unique-invoice/:id/can-edit
+2) احذف من RPC_ALLOWLIST:
+   'unique_purchase_invoice_edit_atomic'
+⚠️ لا تلمس:
+- rebuild gate endpoint
+- unique_purchase_invoice_rebuild_atomic allowlist
+- unique_purchase_import_excel_atomic
+
+========================================
+D) DB: حذف الدوال legacy
+========================================
+نفّذ:
+DROP FUNCTION IF EXISTS public.can_edit_unique_purchase_invoice(uuid);
+DROP FUNCTION IF EXISTS public.unique_purchase_invoice_edit_atomic(jsonb);
+
+========================================
+E) Gates + Evidence
+========================================
+1) rg gates (لازم 0 matches):
+rg -n "can_edit_unique_purchase_invoice|unique_purchase_invoice_edit_atomic|checkUniqueInvoiceCanEdit|editUniqueInvoiceAtomic" src server || true
+
+2) DB gate:
+select p.proname
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname='public'
+and p.proname in ('can_edit_unique_purchase_invoice','unique_purchase_invoice_edit_atomic');
+
+لازم 0 rows.
+
+3) Evidence:
+A) git diff --stat
+B) git diff
+C) لقطة/وصف: زر Edit الأصفر اختفى، ويوجد زر "إعادة بناء الفاتورة" يعمل ويفتح الديالوج.

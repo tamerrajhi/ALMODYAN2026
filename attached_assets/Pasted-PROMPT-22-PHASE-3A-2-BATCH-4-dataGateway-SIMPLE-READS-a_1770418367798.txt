@@ -1,0 +1,51 @@
+PROMPT 22 — PHASE-3A.2 (BATCH-4) | dataGateway SIMPLE READS → /api/table-read (NEON) | EVIDENCE | STOP
+
+ROLE: Frontend/Data Layer Engineer
+MODE: FRONTEND ONLY
+SCOPE: src/lib/dataGateway.ts ONLY
+
+GOAL:
+For NEON backend ONLY, migrate these SIMPLE functions to use /api/table-read (allowlist) instead of any direct DB logic.
+Keep SUPABASE behavior unchanged.
+
+TARGET FUNCTIONS (MUST DO ALL):
+1) fetchModuleSettings()
+2) fetchUserRole(userId: string)
+3) fetchJewelrySets()
+4) fetchProducts()
+5) fetchChartOfAccounts()
+
+STRICT RULES:
+- Modify ONLY these 5 functions.
+- Do NOT touch queryTable() generic engine or any complex embedded selects (transfers/journal_entry_lines/purchasing embeds).
+- For NEON backend path:
+  - Use GET /api/table-read with params: table, select, filters, orderBy, ascending, limit, offset (match server contract).
+  - Ensure orderBy uses allowed columns:
+    module_settings: display_order asc
+    user_roles: (no order needed; limit 1)
+    jewelry_sets: set_code (if exists) or no order; keep same as current
+    products: name asc
+    chart_of_accounts: account_code asc
+- Preserve return shape EXACTLY (whatever the function currently returns in supabase mode: { data, error } OR plain data — keep consistent).
+
+- If any of these functions ALREADY has a Neon endpoint path (like Batch-3), DO NOT change it; report it explicitly with proof and skip only that function.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- (full diffs for ONLY the changed functions)
+C) Grep proof (post-change):
+   rg -n "supabase\\.from\\('module_settings'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('user_roles'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('jewelry_sets'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('products'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('chart_of_accounts'\\)" src/lib/dataGateway.ts
+   (Should remain ONLY in Supabase fallback blocks, with Neon blocks calling /api/table-read.)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+E) Runtime verification:
+   - Hit the relevant endpoints (or simulate via curl) showing /api/table-read called for:
+     module_settings, user_roles, jewelry_sets, products, chart_of_accounts
+   - Provide status codes (200) and one sample payload.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

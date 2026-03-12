@@ -1,0 +1,140 @@
+PROMPT — UNIQUE-PURCH-MODULE-V1-PASSFIX | STRICT | NO GUESS | RAW EVIDENCE | STOP-GATED
+
+ROLE: Senior DB + Backend Engineer
+MODE: Fix + Prove. No speculative claims.
+RULES:
+- DO NOT change anything outside what is explicitly requested.
+- Every change MUST be via migration SQL files only (NO direct SQL in console).
+- Paste RAW outputs for every requested command/query.
+- If something is missing, query DB and paste results; do not assume.
+
+========================================
+STOP-0 (AUDIT ONLY — NO CHANGES)
+========================================
+A) Show current constraints on item_movements:
+- Run SQL:
+  SELECT conname, pg_get_constraintdef(c.oid) AS def
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+  WHERE t.relname = 'item_movements'
+  ORDER BY conname;
+
+B) Show whether ANY migration file mentions dropping that FK:
+- grep -Rni "item_movements.*drop constraint|drop constraint.*item_movements|item_movements_item_id_fkey" migrations/ || true
+
+C) Confirm unique_items raw arrays schema:
+- \d+ public.unique_items
+STOP after pasting outputs.
+
+========================================
+STOP-1 (DB FIX — RESTORE SAFETY, NO BREAKING GENERAL)
+========================================
+Goal: NO shared-table FK weakening. We must NOT leave item_movements without a safe constraint strategy.
+
+Implement ONE of these two options (choose the safest without breaking existing general flows), but you MUST justify choice by DB evidence:
+
+OPTION A (Preferred): Re-add FK to jewelry_items and DO NOT write unique items into item_movements.
+- Create migration file:
+  migrations/unique_purch_module_v1_fix_movements.sql
+  It MUST:
+  1) Re-add FK: item_movements(item_id) -> jewelry_items(id) if currently missing.
+  2) Ensure unique RPCs stop writing item_movements rows (remove those INSERTs in RPC migration, via CREATE OR REPLACE FUNCTION).
+  3) Add a NEW table unique_item_movements for unique items movements instead, with FK to unique_items(id).
+
+OPTION B: Keep shared item_movements but make it polymorphic WITHOUT dropping integrity:
+- Create migration that introduces:
+  item_movements.reference_item_type + reference_item_id
+  and enforces integrity with triggers (ONLY if needed) — but this is more complex.
+Choose A unless DB constraints make it impossible.
+
+Evidence required:
+1) cat migrations/unique_purch_module_v1_fix_movements.sql
+2) psql apply output
+3) Re-run STOP-0.A constraint query to show final constraints
+4) \d+ unique_item_movements (if created)
+STOP.
+
+========================================
+STOP-2 (EXCEL “AS-IS” PROOF — HEADERS/VALUES MUST MATCH REAL FILE)
+========================================
+We must prove we preserve ALL Excel columns, order, and blank/no-header columns.
+
+Do NOT guess the file structure. Read the provided file:
+- File path: /mnt/data/Purchase 1 SUPP.xlsx
+
+Create a small script (Node or Python) that:
+1) Loads the FIRST sheet
+2) Extracts headers EXACTLY by column position:
+   - For each column index from 1..maxCol:
+     header_value = cell in row 1 (can be empty)
+     store as "" if empty
+3) For each data row, extract values in the SAME column order, preserving empties as "".
+4) Print:
+   - headers_count
+   - first 10 headers (including empties shown as "")
+   - for first data row: values_count and first 10 values
+5) Build the exact payload sent to unique_purchase_import_excel_atomic:
+   raw_headers_json = array of ALL headers (same length)
+   raw_values_json  = array of ALL values (same length)
+   raw_row_json     = object mapping header->value (but for empty headers, use key like "__COL_<index>__")
+
+Then run import with 1 file and 2 rows from that Excel (or 2 rows from parsed output).
+
+DB proofs required (RAW SQL outputs):
+- Show the inserted unique_items row for the import:
+  SELECT serial_no,
+         jsonb_array_length(raw_headers_json) AS headers_len,
+         jsonb_array_length(raw_values_json) AS values_len,
+         raw_headers_json,
+         raw_values_json
+  FROM unique_items
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+Acceptance:
+- headers_len == values_len == headers_count from the file
+- raw_headers_json shows empties as "" and preserves order
+STOP.
+
+========================================
+STOP-3 (VAT CALC FIX — MUST BE NUMERICALLY CORRECT)
+========================================
+Bug: VAT test produced tax=1.50 for subtotal=1000 at 15%.
+Fix unique_purchase_import_excel_atomic VAT calculation:
+
+Rules:
+- vat_rate default = 0
+- tax_amount = round(subtotal * vat_rate, 2)
+- JE posting:
+  Debit inventory: subtotal
+  Debit VAT input (2105): tax_amount ONLY IF tax_amount > 0
+  Credit AP: subtotal + tax_amount
+
+Implement via migration:
+migrations/unique_purch_module_v1_fix_vat.sql
+(CREATE OR REPLACE FUNCTION only)
+
+Evidence required:
+1) cat migrations/unique_purch_module_v1_fix_vat.sql
+2) psql apply output
+
+Then run two imports (authenticated curl):
+A) vat_rate=0, subtotal=1000 -> tax=0, JE has 2 lines only
+B) vat_rate=0.15, subtotal=1000 -> tax=150, JE has 3 lines with 2105=150
+
+DB proofs (RAW):
+- SELECT subtotal, tax_amount, total_amount FROM unique_purchase_invoices ORDER BY created_at DESC LIMIT 2;
+- SELECT account_id, debit_amount, credit_amount
+  FROM journal_entry_lines
+  WHERE journal_entry_id = '<latest_je_id>'
+  ORDER BY created_at;
+
+STOP after raw outputs only.
+
+========================================
+FINAL OUTPUT (ONE LINE ONLY)
+========================================
+After STOP-1/2/3 pass:
+VERDICT = PASS
+Otherwise:
+VERDICT = FAIL + list failing STOP numbers

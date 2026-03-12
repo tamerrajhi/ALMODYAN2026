@@ -1,0 +1,130 @@
+PROMPT — UNIQUE-PURCH-V1 | POST-BUILD VERIFICATION | RAW EVIDENCE ONLY | NO CHANGES | STOP
+
+ROLE: Senior Engineer
+MODE: AUDIT / VERIFICATION ONLY (NO CODE CHANGES, NO DB CHANGES)
+OUTPUT: RAW outputs only (psql / grep / curl). No explanations.
+
+Goal: Verify the Unique Purchases module is correct and did not break General Purchases.
+
+1) General Purchases Smoke (must not break)
+
+Do a minimal end-to-end for general purchase:
+
+Create a general purchase invoice (existing flow)
+
+Post it
+
+Confirm JE and any inventory movement paths used by general flow still work
+
+Provide RAW:
+A) The exact API/RPC calls used (names + endpoints)
+B) The final responses (JSON) for create + post
+C) SQL counts before/after:
+
+SELECT count(*) FROM invoices WHERE invoice_type='purchase';
+SELECT count(*) FROM journal_entries;
+SELECT count(*) FROM journal_entry_lines;
+SELECT count(*) FROM item_movements;
+
+
+STOP if any step fails and paste the error.
+
+2) item_movements FK integrity (critical)
+
+We must confirm no dangerous FK drop occurred, and schema is consistent.
+
+Paste RAW:
+
+\d+ public.item_movements
+SELECT conname, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid='public.item_movements'::regclass
+ORDER BY conname;
+
+
+Also show if any migration contains “DROP CONSTRAINT” related to item_movements:
+
+grep -Rni "item_movements.*drop constraint\|drop constraint.*item_movements" migrations/ || true
+
+3) Confirm unique_* isolation + ImportPage wiring
+
+Paste RAW:
+
+\dt public.unique_*
+
+
+Paste RAW grep proof:
+
+grep -n "unique_purchase_" src/pages/ImportPage.tsx
+grep -n "purchase_invoice_import_unique_atomic" src/pages/ImportPage.tsx || true
+grep -n "jewelry_sets" src/pages/ImportPage.tsx || true
+grep -n "forbidDirectWrite" src/pages/ImportPage.tsx || true
+
+4) Excel “as-is” storage proof (headers + values + empties)
+
+Show last 2 imported unique_items rows:
+
+SELECT
+  id,
+  serial_no,
+  jsonb_array_length(raw_headers_json) AS headers_len,
+  jsonb_array_length(raw_values_json)  AS values_len,
+  raw_headers_json,
+  raw_values_json
+FROM unique_items
+ORDER BY created_at DESC
+LIMIT 2;
+
+
+(We need to see same length + blanks preserved.)
+
+5) VAT behavior proof (default 0 + conditional posting)
+
+Run 2 authenticated curl tests for import RPC:
+
+Test A: vat_rate = 0
+
+Test B: vat_rate = 0.15
+
+Each test: 1 file, 2 rows.
+
+Then paste RAW SQL for the created JE lines showing account codes used and whether 2105 exists only in vat_rate>0 test.
+
+For each test, after you get the returned journal_entry_id, paste:
+
+SELECT
+  jel.debit_amount,
+  jel.credit_amount,
+  coa.account_code
+FROM journal_entry_lines jel
+JOIN chart_of_accounts coa ON coa.id = jel.account_id
+WHERE jel.journal_entry_id = '<JE_ID_HERE>'
+ORDER BY coa.account_code;
+
+6) SUPP INV uniqueness policy (per supplier) + multi-file support
+
+A) Show the partial unique index on unique_purchase_invoices (RAW):
+
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public'
+  AND tablename='unique_purchase_invoices'
+ORDER BY indexname;
+
+
+B) Precheck curl with 2 supp invs, then attempt import with one duplicate for same supplier.
+Paste RAW:
+
+precheck response JSON
+
+import response JSON (must reject duplicate)
+
+FINAL LINE (ONE LINE ONLY)
+
+After all RAW outputs, print exactly:
+
+VERDICT: PASS if all checks are clean
+
+VERDICT: FAIL if any check fails (and do not propose fixes)
+
+STOP.

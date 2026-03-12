@@ -1,0 +1,59 @@
+نفّذ بالترتيب. لا تشرح. رجّع Outputs/Evidence فقط.
+
+========================================
+P0 — Evidence (قبل أي تعديل)
+========================================
+1) Screenshot الحالي لـ /auth (تبويب "دخول نقطة البيع") للتأكيد إنه branch-login فقط.
+
+2) أوامر بحث (مع line numbers):
+rg -n "دخول نقطة البيع|فتح نقطة البيع|branch-main|اسم مستخدم الفرع|كلمة مرور الفرع" src/pages/AuthPage.tsx
+rg -n "POS|pos|دخول نقطة البيع|Tab|tabs" src/pages/AuthPage.tsx
+rg -n "BranchLoginGate|branch/login|branches-list" src/pages/AuthPage.tsx src/components/pos/BranchLoginGate.tsx
+
+3) اعرض snippet (20–60 سطر) من AuthPage.tsx يوضح الـ POS tab بيرندر ايه بالضبط.
+
+========================================
+P1 — Patch (إظهار خيارين في /auth قبل اختيار الفرع)
+========================================
+المطلوب (Enterprise):
+داخل تبويب "دخول نقطة البيع" في AuthPage:
+- أول شاشة لازم تعرض خيارين واضحين:
+  A) دخول نقطة البيع (Cashier/Supervisor)
+  B) دخول أدمن نقطة البيع (POS Admin)
+
+سلوك A (Cashier/Supervisor):
+- اعرض نفس نموذج branch-login الحالي كما هو (اختيار الفرع + username/password للفرع)
+- بعد نجاح branch-login: navigate إلى /pos (replace)
+
+سلوك B (POS Admin) — قبل اختيار الفرع:
+- اعرض فورم username/password للأدمن (POS Admin) (بدون branch)
+- submit → POST /api/pos/admin/login (credentials include)
+- بعد نجاح login: اعرض قائمة فروع (dropdown) من:
+  GET /api/pos/admin/branches-list  (أو endpoint موجود عندكم يعيد branches للأدمن بدون branch session)
+- بعد اختيار الفرع: POST /api/pos/admin/select-branch (أو endpoint مكافئ)
+  (ده لازم ينشئ branch session + pos session ويرجع ok)
+- بعد نجاح select-branch: navigate إلى /pos (replace)
+
+مهم:
+- لا تغيّر Flow /pos الحالي للكاشير.
+- لا تغيّر POSLayout/MainLayout هنا.
+- لو /api/pos/admin/login حالياً عليه requireBranchSession → شيله (لازم يكون Admin-first).
+- استخدم نفس CSS/Components الموجودة (Buttons/Cards) بدون تعقيد.
+
+========================================
+P2 — Evidence (بعد التعديل)
+========================================
+1) Screenshots:
+A) /auth (تبويب "دخول نقطة البيع") يظهر خيارين (Cashier/Supervisor) و (POS Admin)
+B) اختيار POS Admin يظهر فورم username/password قبل أي branch
+C) بعد admin login يظهر dropdown للفروع (بدون username/password للفرع)
+D) بعد اختيار الفرع يتحول إلى /pos ويظهر POSLayout + sidebar أدمن (5 links)
+E) اختيار Cashier/Supervisor يرجع للنموذج القديم ثم بعد نجاحه /pos يظهر 3 links للكاشير
+
+2) Network proof (snippets قصيرة):
+- Response من POST /api/pos/admin/login (status + JSON مختصر)
+- Response من GET /api/pos/admin/branches-list
+- Response من POST /api/pos/admin/select-branch
+- Response من GET /api/pos/session/context بعد الدخول للأدمن (يبين pos_admin=true)
+
+3) git diff --stat + أسماء الملفات المتأثرة فقط.

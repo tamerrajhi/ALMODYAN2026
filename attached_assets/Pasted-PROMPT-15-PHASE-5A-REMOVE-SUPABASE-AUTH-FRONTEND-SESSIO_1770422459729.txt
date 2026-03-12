@@ -1,0 +1,116 @@
+PROMPT 15 — PHASE-5A | REMOVE SUPABASE AUTH (FRONTEND) → SESSION-ONLY AUTH | EVIDENCE | STOP
+
+ROLE: Frontend/Typescript Engineer
+MODE: FRONTEND ONLY (NO SERVER CHANGES)
+
+SCOPE (ONLY THESE FILES):
+
+src/contexts/AuthContext.tsx
+
+src/pages/AuthPage.tsx
+
+src/lib/supabaseToken.ts (remove or deprecate if becomes unused)
+
+(Minimal callers ONLY if compile breaks بسبب تغيّر exports/types)
+
+GOAL:
+إزالة Supabase Auth بالكامل من الواجهة (Frontend) وتحويل النظام إلى Session-only auth باستخدام:
+
+POST /api/auth/login
+
+GET /api/auth/me
+
+POST /api/auth/logout
+مع cookies (credentials: "include")
+بعد هذا البرومبت: لا يوجد أي supabase.auth.* في production code (استثناء وحيد: ملفات health/test إذا كانت خارج السكوب — لا تلمسها الآن).
+
+STRICT RULES (NO EXCEPTIONS):
+
+✅ ممنوع أي استخدام لـ supabase.auth.* داخل الملفات في السكوب بعد التعديل.
+
+✅ لا تغيّر أي ملفات سيرفر.
+
+✅ لا تغيّر UI/RTL/text/messages إلا لو ضروري لإزالة supabase.auth.
+
+✅ احفظ شكل useAuth() قدر الإمكان (user shape) حتى لا تنكسر consumers:
+
+consumers يعتمدون غالبًا على user.id و user.email
+
+✅ AuthContext:
+
+مصدر الحقيقة الوحيد للمستخدم: /api/auth/me
+
+on mount: call /api/auth/me → set user
+
+signIn: call /api/auth/login → set user من response
+
+signOut: call /api/auth/logout → set user null
+
+لا يوجد onAuthStateChange, getSession, signUp عبر supabase
+
+✅ AuthPage.tsx:
+
+يجب أن يعمل login بالكامل عبر session endpoint (حتى لو كان سابقًا يدعم supabase mode)
+
+MFA/OTP flow إن كان موجود: حافظ على نفس الـ UI flow ولكن لا تستخدم supabase.auth.getSession/getUser/signOut
+
+إذا كانت خطوة OTP تحتاج “user.id” استخدم:
+
+بعد login success → اعتبر المستخدم authenticated (navigate /)
+
+أو استدعاء /api/auth/me للحصول على user ثم أكمل checks
+
+✅ supabaseToken.ts:
+
+إذا صار غير مستخدم بعد إزالة supabase.auth، احذفه.
+
+إذا كان مطلوب لشيء آخر غير auth (نادر)، اشرح السبب بدليل grep.
+
+PROCESS:
+
+عدّل AuthContext ليصبح Session-only:
+
+عرّف types لرد /api/auth/me (user/profile/roles/branches) حسب الموجود
+
+وفّر user object بسيط بحد أدنى: { id: string; email?: string }
+
+عدّل AuthPage لتسجيل الدخول فقط عبر /api/auth/login (credentials include)
+
+أي تحقق “active” أو profile checks: استخدم response أو /api/auth/me
+
+احذف أي كود خاص بـ supabase-mode داخل السكوب (feature flags, shims, getSession, signOut من supabase…)
+
+احذف src/lib/supabaseToken.ts إذا أصبح غير مستخدم
+
+تأكد أن التطبيق مازال يشتغل وProtectedRoute يعتمد على useAuth().user
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- (Full diff for الملفات في السكوب فقط)
+C) Grep proofs:
+
+rg -n "supabase\.auth\." -S src/contexts/AuthContext.tsx src/pages/AuthPage.tsx src/lib/supabaseToken.ts
+→ NO MATCHES (Exit 1)
+
+rg -n "supabase\.auth\." -S src
+→ مسموح فقط health/test لو موجودة خارج السكوب، اذكرها سطرين.
+D) Typecheck:
+
+npx tsc --noEmit → Exit 0
+E) Runtime checks (curl raw):
+
+curl -i http://localhost:5000/api/auth/me (بدون cookie) → 401
+
+curl -i -c /tmp/cj.txt -H "Content-Type: application/json" -d '{"email_or_username":"admin@system.local","password":"test123"}' http://localhost:5000/api/auth/login → 200 + Set-Cookie
+
+curl -i -b /tmp/cj.txt http://localhost:5000/api/auth/me → 200 + user payload
+
+curl -i -b /tmp/cj.txt -X POST http://localhost:5000/api/auth/logout → 200
+F) Short rationale:
+
+أكد إن كل production auth في الواجهة أصبح session-only
+
+أكد إن لا يوجد أي اعتماد على Supabase Auth في الملفات داخل السكوب
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

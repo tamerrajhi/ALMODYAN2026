@@ -1,0 +1,103 @@
+IMPLEMENTATION PROMPT — POS UI FIXES (NO GUESSING)
+
+Constraints:
+- Do NOT change business logic or accounting flows.
+- Prefer Frontend fixes. Only touch backend if strictly required to expose missing data (must be justified with evidence).
+- Provide final evidence: file/line references + rg outputs + manual smoke steps.
+
+Targets (3 issues):
+(1) POS Sidebar: Cashier must see ONLY 3 routes in sidebar:
+    - /pos
+    - /pos/invoices
+    - /pos/returns
+    (No /pos/customers for cashier)
+(2) Branch name badge: show Branch Name (Code), never UUID snippet if public branches list is available.
+(3) Seller selection: After branch login + PIN, cashier MUST choose seller from list before doing any POS operations.
+    - Remove/avoid indefinite "جاري التحميل..." state.
+    - Display "البائع: اختر بائع" until chosen.
+    - Disable checkout / core actions until seller selected.
+
+====================================================
+PHASE A — AUDIT (paste evidence before coding)
+A1) POS sidebar gating:
+- Open src/components/pos/POSLayout.tsx
+- Paste with line numbers:
+  - posMenuSections
+  - filtering logic (current useMemo filter)
+  - how isPosAdmin + hasBranch + pos session are determined (context calls)
+- Confirm current behavior: pos-sales section lacks adminOnly so customers is always visible.
+
+A2) Branch name badge data source:
+- Open src/components/pos/BranchLoginGate.tsx
+- Paste with line numbers:
+  - public branches fetch logic
+  - how branchName is computed (prop match + public match + fallback)
+- Confirm /api/public/branches-list response shape (fields and names).
+
+A3) Seller selection:
+- Open src/pages/POSPage.tsx
+- Paste with line numbers:
+  - seller badge render block
+  - any seller dropdown / selection UI (confirm if missing)
+  - currentSellerName derivation and SellerSync usage
+- Confirm whether /api/branches/:branchId/sellers is already used anywhere in POSPage.
+
+STOP after audit paste. Then implement.
+
+====================================================
+PHASE B — IMPLEMENT (minimal, precise edits)
+
+B1) Sidebar restriction for cashiers (POSLayout.tsx):
+- Add a boolean “isCashierMode” derived ONLY from POS session context (NOT admin context):
+  Rule:
+   - If /api/pos/session/context returns 200 AND pos_admin !== true => cashier mode.
+   - If pos_admin === true => admin mode.
+- Implement allowlist filtering when cashier mode:
+  Keep ONLY sections/items whose href is one of:
+    ['/pos', '/pos/invoices', '/pos/returns']
+- Do NOT rely on adminOnly alone.
+- Provide code change in POSLayout.tsx only (unless unavoidable).
+
+B2) Branch name display robustness (BranchLoginGate.tsx):
+- Ensure public branches fetch runs in POS standalone (no ERP session).
+- Ensure matching uses exact same key: compare branchId (from context) to publicBranches[i].branch_id
+- If the public list loads and a match exists, display: “{name} ({code})”
+- Only fall back to “Branch: xxxxx...” if:
+  - public list failed to load OR no match found
+- Add a small debug-friendly internal comment (no console logs) noting the fallback reason.
+- Keep behavior unchanged otherwise.
+
+B3) Seller selection step (POSPage.tsx):
+Required UX:
+- After cashier PIN is accepted (POSCashierGate passed), show a REQUIRED seller select dropdown:
+  - Data source MUST be branch-scoped seller list:
+    Use existing endpoint: GET /api/branches/:branchId/sellers if available for POS.
+    If it requires ERP auth and fails, you MUST justify with evidence and propose a minimal backend equivalent for POS (but don’t implement backend unless necessary).
+- Default state:
+  - No seller selected => badge shows “البائع: اختر بائع” (amber)
+  - Disable primary actions (checkout/complete sale) until seller chosen.
+- When seller chosen:
+  - badge shows “البائع: {sellerName}” (green)
+  - Store selectedSellerId in state
+- Remove reliance on SellerSync auto-population for seller display.
+  (You can keep SellerSync if needed, but the UI must not get stuck on loading, and selection must be enforced.)
+- Make sure POS return flow also shows seller/branch name in header consistently if applicable (only if seller is used there).
+
+====================================================
+PHASE C — EVIDENCE (must paste)
+C1) rg proofs:
+- rg "posMenuSections|adminOnly|filteredSections" src/components/pos/POSLayout.tsx
+- rg "branches-list|public/branches-list|branchName" src/components/pos/BranchLoginGate.tsx
+- rg "selectedSeller|seller|SellerSync|اختر بائع" src/pages/POSPage.tsx
+
+C2) Manual smoke steps (write exact steps + expected UI):
+1) Open /pos (no ERP session) -> Branch login gate appears.
+2) Login branch -> branch badge shows Name(Code) (not UUID).
+3) Enter cashier PIN -> sidebar shows ONLY 3 items (/pos, /pos/invoices, /pos/returns).
+4) Before selecting seller -> badge shows “البائع: اختر بائع”, checkout disabled.
+5) Select seller -> badge shows seller name, checkout enabled.
+
+Deliverables:
+- List of modified files
+- Line references for key changes
+- No unrelated refactors

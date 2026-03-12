@@ -1,0 +1,249 @@
+PROMPT — PURCH-FAST-EXEC-V1 | PURCHASING TAB FULL RECOVERY (SAFE FAST-TRACK) | BUGFIX ONLY | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon)
+MODE: OPS-FIRST / BUGFIX ONLY / NO REFACTOR
+
+PRIMARY GOAL:
+Make the entire Purchasing tab (all sidebar pages under /purchasing/*) OPEN and LOAD without console/network errors,
+and make Returns operational end-to-end in MIN mode (create/complete/void works, even if accounting/movements are deferred).
+
+ABSOLUTE RULES:
+- Do NOT refactor architecture. Do NOT restructure folders. Do NOT rewrite domain layer.
+- Fix only what is broken, guided by real failing errors.
+- Prefer DB migrations + server fixes (server/routes.ts) over UI changes.
+- UI changes allowed ONLY to remove remaining Supabase reads and unblock pages.
+- Every /api/* route must return JSON. Any /api/* returning HTML = FAIL (SPA fallback).
+- No sensitive data leaks (password_hash/tokens/secrets). Ban SELECT * in modified endpoints.
+- Work in SMALL BATCHES. Do not mix unrelated changes.
+
+SCOPE:
+Purchasing tab ONLY:
+All pages listed in sidebar under Purchasing (about 23 routes). Do not touch Sales/Accounting except shared utilities that block Purchasing.
+
+KNOWN ISSUES TO ADDRESS (FROM AUDIT):
+- Missing DB objects: purchase_returns, purchase_return_items, purchase_return_lines, purchase_order_receipts, pr_approval_thresholds, v_returns_hub
+- Missing allowlist registrations for new tables/view
+- Remaining Supabase reads in 7 purchasing files:
+  * src/pages/purchasing/PRApprovalThresholdsPage.tsx
+  * src/pages/purchasing/ReturnsHubPage.tsx
+  * src/pages/purchasing/ReturnsHubDetailsPage.tsx
+  * src/pages/purchasing/ReturnsHubResolverPage.tsx
+  * src/pages/purchasing/PurchaseReturnsListPage.tsx
+  * src/pages/purchasing/PurchasingMonitoringPage.tsx
+  * src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+- Receive PO action depends on purchase_order_receipts table
+- Returns subsystem broken due to missing tables/view and missing RPCs:
+  * complete_purchase_return_unique_items_atomic
+  * complete_purchase_return_general_atomic
+  * void_purchase_return_atomic
+- Payment voucher creation blocked by missing payment_voucher_atomic (DEFER FULL IMPLEMENTATION)
+
+================================================================================
+BATCH A — DB FOUNDATIONS (DDL ONLY) | NO SERVER/NO UI | EVIDENCE | STOP
+================================================================================
+
+A1) Create missing tables with MINIMAL columns needed to unblock current reads.
+Start minimal. Expand ONLY if actual queries fail due to missing columns. IDs are UUID.
+MUST create (idempotent):
+1) purchase_returns
+2) purchase_return_items
+3) purchase_return_lines
+4) purchase_order_receipts
+5) pr_approval_thresholds
+
+A2) Create view v_returns_hub (minimal) to power ReturnsHub:
+- Base: purchase_returns
+- Joins: suppliers, branches, invoices (or purchase_invoices if that is the correct table)
+- Expose only columns needed by UI now:
+  return_number, return_date, supplier_name, branch_name, invoice_number, purchase_type, status, total_cost, total_items
+
+DDL/MIGRATION RULES:
+- Additions only. No ALTER of existing tables unless absolutely required by an error.
+- Migrations must be idempotent (IF NOT EXISTS / CREATE OR REPLACE VIEW).
+- No triggers/complex constraints in this batch.
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) Migration proof in psql:
+   - \d+ purchase_returns
+   - \d+ purchase_return_items
+   - \d+ purchase_return_lines
+   - \d+ purchase_order_receipts
+   - \d+ pr_approval_thresholds
+   - SELECT count(*) FROM each table;
+   - SELECT * FROM v_returns_hub LIMIT 5;
+
+STOP AFTER BATCH A. WAIT FOR NEXT PROMPT.
+
+================================================================================
+BATCH B — SERVER REGISTRATION (routes.ts ONLY) | EVIDENCE | STOP
+================================================================================
+
+B1) Update server/routes.ts:
+- Add new tables + v_returns_hub to TABLE_READ_ALLOWLIST
+- Add SAFE orderable columns for each to TABLE_ORDERABLE_COLUMNS
+- Ensure /api/table-read requests for these objects return JSON (not HTML)
+
+B2) HTML FALLBACK PURGE for Purchasing:
+- Identify any /api/* called by purchasing pages that returns HTML.
+- For each:
+  a) Add an explicit Express route returning JSON (even if structured 404),
+  OR
+  b) Prove purchasing UI no longer calls it (show callsite removed in later batch).
+- After this batch, any /api/* tested must return Content-Type: application/json.
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) Authenticated curl proofs (must include session cookie):
+   - /api/table-read for each new table (simple select) -> 200 JSON
+   - /api/table-read for v_returns_hub -> 200 JSON
+4) Show headers proving JSON:
+   - curl -i ... (Content-Type)
+5) npx tsc --noEmit (Exit 0) if routes changes affect TS build.
+
+STOP AFTER BATCH B. WAIT FOR NEXT PROMPT.
+
+================================================================================
+BATCH C — UI MIGRATION OFF SUPABASE (READS ONLY) | 7 FILES | EVIDENCE | STOP
+================================================================================
+
+C1) Remove remaining Supabase READ usage from these Purchasing files (reads only):
+- src/pages/purchasing/PRApprovalThresholdsPage.tsx
+- src/pages/purchasing/ReturnsHubPage.tsx
+- src/pages/purchasing/ReturnsHubDetailsPage.tsx
+- src/pages/purchasing/ReturnsHubResolverPage.tsx
+- src/pages/purchasing/PurchaseReturnsListPage.tsx
+- src/pages/purchasing/PurchasingMonitoringPage.tsx
+- src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+
+Replacement rules:
+- Replace supabase.from('X').select(...) with dataGateway.queryTable('X', { select, filters, order, limit })
+- Use existing domain services where present (preferred).
+- Preserve response shapes and UI behavior. No redesign.
+- Remove Supabase imports if unused after migration.
+- UploadSetImagesPage may keep Supabase Storage temporarily (out of scope).
+
+C2) Ensure no Purchasing page reads from Supabase after this batch (except storage).
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) Grep/scan proof: remaining "supabase.from(" in purchasing pages should be ZERO (except storage file if applicable)
+4) npx tsc --noEmit (Exit 0)
+5) Re-test (logged-in): open every Purchasing sidebar page and list any remaining failing network requests (URL + status + snippet)
+
+STOP AFTER BATCH C. WAIT FOR NEXT PROMPT.
+
+================================================================================
+BATCH D — RETURNS RPCs (MIN OPERATIONAL MODE ONLY) | DB ONLY | EVIDENCE | STOP
+================================================================================
+
+D1) Implement ONLY these 3 RPCs in Postgres (SQL functions) using the same response pattern {data, error} used by existing atomic RPCs:
+- complete_purchase_return_unique_items_atomic
+- complete_purchase_return_general_atomic
+- void_purchase_return_atomic
+
+MIN MODE BEHAVIOR (MANDATORY):
+- Implement idempotency using client_request_id (reject duplicates or return prior result).
+- Writes/updates ONLY to:
+  purchase_returns + purchase_return_items (unique) OR purchase_return_lines (general).
+- Status transitions only (draft -> completed/posted; void sets status=voided).
+- Set journal_entry_id = NULL. NO journal entries. NO inventory movements. NO reversing logic in MIN mode.
+- Validate required foreign keys exist (supplier/branch/invoice) and return clear errors.
+
+D2) Ensure routes/rpc dispatcher can call these functions (jsonb args supported). If overload needed, create jsonb overload wrappers.
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) SQL function definitions (in migration file(s), idempotent create or replace)
+4) Proof queries:
+   - SELECT proname FROM pg_proc WHERE proname IN ('complete_purchase_return_unique_items_atomic', 'complete_purchase_return_general_atomic', 'void_purchase_return_atomic');
+5) Authenticated curl (or app call) proofs for each RPC:
+   - Success response -> returns created/updated return id
+   - Duplicate client_request_id -> idempotent behavior
+6) Re-test UI:
+   - Create return (general + unique) works
+   - View return loads (no errors)
+   - Void return works (status changes) with no crash
+7) npx tsc --noEmit (Exit 0) if any TS touched.
+
+STOP AFTER BATCH D. WAIT FOR NEXT PROMPT.
+
+================================================================================
+BATCH E — RECEIVE PO + PAYMENT VOUCHERS (SAFE HANDLING) | EVIDENCE | STOP
+================================================================================
+
+E1) Receive PO:
+- Ensure ReceivePurchaseOrderPage action does not fail due to missing DB objects.
+- If it needs purchase_order_receipts inserts, implement minimal writes to that table (either via existing RPC path or minimal DB function) WITHOUT accounting/movements expansions unless already implemented elsewhere.
+
+E2) Payment Vouchers:
+- DO NOT implement full payment_voucher_atomic in this run.
+- If the UI crashes due to missing RPC, implement one of:
+  Option B (default): RPC stub that returns structured NOT_IMPLEMENTED error without server 500/crash.
+- Page must OPEN and READ successfully; Create action may show NOT_IMPLEMENTED but must not crash.
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) curl proofs (authenticated) for receive/voucher calls:
+   - Receive action returns 200 with JSON or successful RPC response
+   - payment_voucher_atomic returns {data:null, error:{code:'NOT_IMPLEMENTED', message:'...'}} (no 500)
+4) Re-test the exact pages:
+   - /purchasing/receive/:id
+   - /purchasing/payment-vouchers
+
+STOP AFTER BATCH E. WAIT FOR NEXT PROMPT.
+
+================================================================================
+FINAL — PURCHASING SMOKE TEST + EXCEL INVOICE TEST | EVIDENCE | STOP
+================================================================================
+
+F1) Smoke test ALL Purchasing sidebar pages (about 23):
+- No console errors
+- No network 401/403/404/500
+- No /api/* returns HTML (must be JSON)
+
+F2) Excel Invoice Test:
+- /purchasing/invoices/new -> upload xlsx -> preview -> save invoice -> open invoice view -> post -> verify JE/movements page loads
+
+EVIDENCE REQUIRED (RAW):
+- List of pages tested with PASS/FAIL
+- For any failure: URL + status + snippet + fix reference
+- Confirm grep: no supabase.from/rpc in purchasing pages (except storage if kept)
+- npx tsc --noEmit (Exit 0)
+
+STOP.
+
+================================================================================
+DEFERRED SCOPE (MUST NOT BE FORGOTTEN) — DOCUMENTATION REQUIREMENT
+================================================================================
+
+After completing MIN mode, you MUST update replit.md (or PROJECT_STATUS.md) with a new section:
+
+"Deferred Scope (Must-do after PURCH-FAST-EXEC-V1)"
+
+Include EXACTLY these items with acceptance criteria:
+1) payment_voucher_atomic FULL:
+   - Create voucher writes payments + creates balanced journal_entries/journal_entry_lines
+   - Updates invoice allocation (paid_amount or correct source)
+   - Supports partial payments + multi-invoice allocation
+   - Supports void/reversal with ledger correctness
+   - Gate tests: 5 scenarios
+2) Returns FULL posting:
+   - complete_purchase_return_*_atomic creates JE + inventory movements / jewelry state updates
+   - Balanced entries + correct tax handling
+   - Gate tests: 5 scenarios
+3) Returns VOID FULL:
+   - void_purchase_return_atomic creates reversal JE and reverses movements/jewelry state
+   - Prevents void when downstream docs exist
+   - Gate tests: 5 scenarios
+
+Add STOP-GATES:
+- STOP-GATE-PURCH-RETURNS-FULL (must close before accounting go-live)
+- STOP-GATE-PAYMENTS-VOUCHERS-FULL (must close before voucher go-live)
+
+END OF PROMPT.

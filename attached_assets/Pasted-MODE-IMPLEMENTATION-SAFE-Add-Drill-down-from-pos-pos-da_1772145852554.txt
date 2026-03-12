@@ -1,0 +1,105 @@
+MODE: IMPLEMENTATION (SAFE). Add Drill-down from /pos/pos-dashboard to /pos/reports and finalize core POS Admin reports UI + endpoints. No schema changes.
+
+NON-NEGOTIABLE
+- No DB schema changes.
+- Do NOT touch ERP /api/admin/* endpoints.
+- All reports endpoints must be protected by requirePosAdminToken.
+- Do NOT loosen table-read protections; keep app_settings sensitive filter intact.
+- Keep response convention: Success {data:..., error:null} / Failure 500 {data:null, error:{message}}.
+
+GOAL
+1) Each dashboard widget has a "تفاصيل" action that opens /pos/reports with correct tab + date range + optional branch/seller filters.
+2) /pos/reports provides a professional report center with filters, summary KPIs, tables, and export CSV.
+
+PHASE 1 — REPORTS ROUTE + UI
+1) Ensure /pos/reports exists and is POS-admin-only (POSAdminGuard).
+2) Implement a tabbed UI with these tabs (keys):
+   - seller_net_profit
+   - branch_net_profit
+   - inventory_valuation
+   - inventory_aging
+   - returns_summary
+   - reconciliation
+   - payment_mix
+   - sold_items_margin
+3) Global filters (top of page):
+   - Quick ranges: Today / Last 7 days / This month
+   - Custom: start_date, end_date (ISO)
+   - Optional: branch_id (dropdown)
+   - Optional: seller_id (dropdown)
+4) Read query params and sync UI:
+   - tab, start, end, branch_id, seller_id
+   - Navigating from dashboard should pre-select the correct tab and dates.
+
+PHASE 2 — REPORTS ENDPOINTS (READ-ONLY)
+Add endpoints under /api/pos/admin/reports/* in server/posSession.ts (all requirePosAdminToken):
+
+R1 GET /api/pos/admin/reports/seller-net-profit?start=&end=&branch_id=&seller_id=
+- Use joins:
+  sales -> invoices (sale_id) -> sales_invoice_items -> unique_items(cost)
+- Returns derived via returns.original_sale_id -> return_items -> unique_items(cost)
+- Output per seller: revenue, cogs, gross_profit, return_amount, return_cost, net_profit, gp_percent
+
+R2 GET /api/pos/admin/reports/branch-net-profit?start=&end=&branch_id=
+- Same logic grouped by branch
+
+R3 GET /api/pos/admin/reports/inventory-valuation?branch_id=
+- unique_items where status='in_stock'
+- Output per branch: item_count, total_cost_value, total_tag_value, potential_margin
+
+R4 GET /api/pos/admin/reports/inventory-aging?branch_id=
+- bucket by unique_items.created_at: >30d, >60d, >90d + total_in_stock
+- per branch and overall totals
+
+R5 GET /api/pos/admin/reports/returns-summary?start=&end=&branch_id=&seller_id=
+- Returns grouped by derived seller (via original_sale_id -> sales.seller_profile_id)
+- Include counts and amounts, and top reasons if return_items.reason exists
+
+R6 GET /api/pos/admin/reports/reconciliation?start=&end=&branch_id=&limit=
+- Compare invoices.total_amount vs SUM(payments.amount)
+  payments.reference_type='invoice' and reference_id=invoices.id
+- Return only rows with delta != 0
+
+R7 GET /api/pos/admin/reports/payment-mix?start=&end=&branch_id=&seller_id=
+- payments grouped by payment_method + totals + count
+
+R8 GET /api/pos/admin/reports/sold-items-margin?start=&end=&branch_id=&seller_id=&limit=
+- per sold unique item: serial_no, invoice_number, sale_date, branch, seller, sale_price, cost, margin
+
+All endpoints must validate required date params where needed and handle optional filters safely.
+
+PHASE 3 — DASHBOARD DRILL-DOWN
+In src/pages/pos/POSDashboardPage.tsx:
+- For each widget card, add a "تفاصيل" button/link that navigates to /pos/reports with:
+  tab=<matching tab key>
+  start/end from current dashboard filter
+  branch_id/seller_id if currently selected
+Mappings:
+- Today KPIs -> seller_net_profit (or returns_summary) choose most relevant: seller_net_profit
+- Profit Snapshot -> seller_net_profit
+- Top Sellers -> seller_net_profit
+- Top Branches -> branch_net_profit
+- Inventory Valuation -> inventory_valuation
+- Inventory Aging -> inventory_aging
+- Reconciliation -> reconciliation
+
+PHASE 4 — EXPORT
+On /pos/reports:
+- Add "Export CSV" for each tab (client-side generation is fine).
+
+PHASE 5 — VERIFICATION / GATES
+- Without __pos_admin cookie: all /api/pos/admin/reports/* return 401.
+- With POS admin:
+  - Each tab loads (200) and renders table.
+  - Drill-down from dashboard lands on correct tab with same date range.
+- Run: npm run build and npx tsc --noEmit
+- Provide deliverable:
+  - Files changed list
+  - Sample 200 response for 2 reports (seller_net_profit + inventory_valuation)
+  - Proof of 401 without cookie
+
+DELIVERABLE
+A concise final report with:
+- New endpoints list + what each returns
+- UI screenshots or console evidence of drill-down working
+- Confirmation: no schema changes, ERP untouched

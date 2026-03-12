@@ -1,0 +1,58 @@
+ROLE: Auditor
+MODE: READ-ONLY DISCOVERY — STOP AFTER EVIDENCE
+
+GOAL:
+Discover exactly how purchase invoice import works today, and how "duplicate detection" is currently implemented (DB + RPC + UI).
+NO CHANGES allowed in this prompt.
+
+A) DB DISCOVERY (paste outputs):
+1) Identify purchase invoice tables:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND table_name ILIKE '%purchase%'
+AND (table_name ILIKE '%invoice%' OR table_name ILIKE '%invoices%');
+
+2) For each candidate table, list key columns:
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public'
+AND table_name IN (<paste names from step 1>)
+ORDER BY table_name, ordinal_position;
+
+3) Check whether any of these columns exist (any table):
+supplier_invoice_no, supp_inv, supp_invoice_no, supplier_inv_no
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public'
+AND column_name IN ('supplier_invoice_no','supp_inv','supp_invoice_no','supplier_inv_no')
+ORDER BY table_name;
+
+4) List functions that look like purchase invoice import/create/post:
+SELECT routine_name
+FROM information_schema.routines
+WHERE routine_schema='public'
+AND routine_type='FUNCTION'
+AND (
+  routine_name ILIKE '%purchase%invoice%'
+  OR routine_name ILIKE '%import%purchase%'
+  OR routine_name ILIKE '%invoice%import%'
+)
+ORDER BY routine_name;
+
+B) CODE DISCOVERY (paste grep outputs):
+Run and paste:
+1) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "PurchaseInvoiceImport|ImportPage|purchase.*invoice.*import" src
+2) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "duplicate|dedup|unique|hash|fingerprint|exists|already" src/pages src/lib src/hooks
+3) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supplier_invoice_no|SUPP INV|supp_inv" src
+4) grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supabase\.rpc\(" src/pages src/lib src/hooks | grep -i "purchase\|invoice\|import"
+
+C) OUTPUT SUMMARY (mandatory):
+Produce a short structured summary with:
+- Actual purchase invoice header table name
+- Actual import RPC name(s) used
+- Where duplicate logic currently lives (UI? RPC? DB constraint?) and what key it uses today (e.g., file hash, invoice number, batch id, etc.)
+- Whether SUPP INV exists anywhere today
+
+STOP AFTER THIS SUMMARY + ALL PASTED EVIDENCE.
+NO CHANGES.

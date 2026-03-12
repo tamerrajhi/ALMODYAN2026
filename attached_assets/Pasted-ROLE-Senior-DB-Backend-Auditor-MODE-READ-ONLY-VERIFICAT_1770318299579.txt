@@ -1,0 +1,127 @@
+ROLE: Senior DB + Backend Auditor
+MODE: READ-ONLY VERIFICATION (NO WRITES)
+GOAL: Verify Neon(Postgres) database has ALL required schema objects and RPCs for the app (especially /import + purchasing + accounting + transfers) and generate a concrete evidence report. Optionally compare with Supabase if SQL access is available (but do NOT assume it is).
+
+STRICT RULES:
+- Forbidden: Any CREATE/ALTER/DROP/INSERT/UPDATE/DELETE/TRUNCATE. Absolutely no DB mutations.
+- Allowed: SELECT-only queries against system catalogs (pg_catalog / information_schema) and application tables for counts only.
+- Output must include: Exact SQL executed + results tables + PASS/FAIL checklist + actionable diff list.
+
+CONTEXT:
+We saw this error earlier on Supabase SQL Editor:
+ERROR 42883 function "public.purchase_invoice_import_unique_atomic" does not exist
+Also user saw many invoice indexes exist (uq_invoices_invoice_number / invoices_unique_per_supplier_branch etc).
+We are MIGRATING frontend from Supabase client to Express API + Neon DB, so Neon must have required objects.
+
+TASKS:
+A) CONNECTIVITY + IDENTITY (NEON)
+1) Print DB identity:
+- current_database(), current_schema, inet_server_addr(), inet_server_port(), version()
+2) List extensions:
+- pg_extension (extname, extversion)
+3) List search_path and default schema.
+
+B) SCHEMA INVENTORY (NEON)
+1) Tables list in public schema (ordered):
+- table_name, table_type
+2) For critical tables, dump columns (name, type, nullability, default):
+- invoices
+- purchase_batches
+- purchase_invoice_lines
+- jewelry_items
+- jewelry_sets
+- item_movements
+- journal_entries
+- journal_entry_lines
+- transfers
+- transfer_items
+- transfer_requests
+- transfer_request_items
+- audit_logs
+- pos_workflow_requests
+- workflow_types
+3) For each critical table, list constraints (PK/FK/UQ) and indexes (including partial indexes).
+IMPORTANT: For invoices, list ALL indexes and their definitions.
+
+C) REQUIRED RPC/FUNCTION VERIFICATION (NEON)
+We need a robust method that avoids regproc signature problems.
+Do NOT use 'public.fn_name'::regproc unless signature is known.
+Instead, query pg_proc + pg_namespace and return full function signatures.
+
+Required functions list (case-sensitive):
+- purchase_invoice_create_atomic
+- purchase_invoice_post_atomic
+- purchase_invoice_void_atomic
+- purchase_invoice_supp_inv_precheck
+- purchase_invoice_import_unique_atomic (if used by ImportPage)
+- je_create_atomic
+- je_post_atomic
+- reverse_journal_entry_atomic OR je_reverse_atomic (identify which exists)
+- begin_workflow_request
+- stable_payload_hash
+- core_workflow_success
+- core_workflow_failed
+- generate_purchase_invoice_number_atomic
+- generate_journal_entry_number
+- create_transfer_v2
+- reverse_transfer_v2
+- generate_transfer_number
+- import_purchase_batch_create_atomic
+- import_jewelry_sets_upsert_atomic
+
+For each function found:
+- show schema, proname, argument list (names + types), return type, security definer flag, and full definition (pg_get_functiondef) WITH OID-based selection.
+For each missing function:
+- mark MISSING (FAIL).
+
+D) REQUIRED INDEXES / DEDUPE INVARIANTS (NEON)
+Check these invariants explicitly:
+1) invoices has column supplier_invoice_no (text)
+2) Unique index for SUPP INV dedupe exists:
+   invoices_purchase_supp_inv_uq
+   on (supplier_id, upper(trim(supplier_invoice_no)))
+   WHERE invoice_type='purchase' AND supplier_invoice_no not null/empty AND status<>'voided'
+3) Identify conflicting/legacy uniqueness constraints on invoices.invoice_number:
+- uq_invoices_invoice_number
+- uq_invoices_number
+- invoices_unique_per_supplier_branch
+Report: which exist + exact definitions + whether they conflict with current design.
+
+E) ENUMS + TYPES (NEON)
+List enums used by critical tables (especially batch_status/purchase status if enums exist):
+- enum name + values
+
+F) LIGHT DATA SANITY (NEON) (counts only)
+Return counts (0/Non-zero) for:
+- invoices, journal_entries, journal_entry_lines, jewelry_items, purchase_batches, purchase_invoice_lines, item_movements, transfers, transfer_items, audit_logs, pos_workflow_requests
+No row dumps unless specifically asked; counts only.
+
+G) OPTIONAL: SUPABASE COMPARISON (only if direct SQL connection exists)
+If we have a SUPABASE_DATABASE_URL (service role) in env:
+- run the exact same inventory queries on Supabase and output a diff:
+  - missing tables
+  - missing columns
+  - missing functions
+  - differing function signatures
+  - differing index definitions
+If no SQL access, clearly state "Supabase SQL comparison skipped due to no direct connection" and STOP.
+
+DELIVERABLE:
+1) A single markdown report with sections A-F (and G optional).
+2) A PASS/FAIL checklist for:
+   - Neon has all required tables
+   - Neon has all required columns
+   - Neon has all required functions (and their signatures)
+   - Neon has required SUPP INV unique index
+   - Identify any conflicting invoice_number unique constraints
+3) A concise "Action List" if anything is missing or conflicting.
+
+IMPLEMENTATION NOTES:
+- Use SQL queries against:
+  - information_schema.tables, information_schema.columns
+  - pg_class/pg_namespace/pg_index/pg_constraint
+  - pg_proc + pg_get_function_identity_arguments + pg_get_functiondef
+- For function defs: fetch by OID from pg_proc to avoid signature ambiguity.
+- Ensure everything is filtered to schema 'public' unless function exists elsewhere.
+- Print the SQL queries you ran (as code blocks) and the results (as tables).
+STOP AFTER REPORT. Do not perform any changes.

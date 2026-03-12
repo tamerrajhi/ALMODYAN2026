@@ -1,0 +1,51 @@
+EVIDENCE ONLY — لا تشرح.
+
+(1) Git
+- git rev-parse HEAD
+- git log -1 --oneline
+- git status
+- git diff --stat
+
+(2) DB proof (schema + constraints)
+اعرض SQL outputs التالية:
+A) pos_admin_accounts:
+- SELECT column_name, is_nullable, data_type FROM information_schema.columns WHERE table_name='pos_admin_accounts' ORDER BY ordinal_position;
+
+B) pos_admin_sessions/pos_admin_tokens (أي اسم استخدمته):
+- SELECT column_name, is_nullable, data_type FROM information_schema.columns WHERE table_name IN ('pos_admin_sessions','pos_admin_tokens') ORDER BY table_name, ordinal_position;
+
+C) pos_sessions:
+- SELECT column_name, is_nullable, data_type FROM information_schema.columns WHERE table_name='pos_sessions' ORDER BY ordinal_position;
+- (مهم) إثبات الحقول الخاصة بالكاشير للأدمن: cashier_kind / cashier_admin_id / pos_admin_id أو ما يعادلهم.
+
+(3) API proof (admin قبل الفرع)
+من المتصفح الحقيقي:
+A) افتح /pos → Screenshot يوضح اختيار: (كاشير/مشرف) و (أدمن نقطة البيع) قبل أي branch login.
+B) اختار "أدمن نقطة البيع" → Screenshot فورم username/password قبل الفرع.
+C) بعد admin login → Screenshot قائمة اختيار الفروع.
+D) بعد اختيار الفرع → اعرض response snippet من:
+GET /api/pos/session/context
+لازم يوضح:
+- pos_admin=true
+- branch_id = <uuid>
+- cashier info يوضح إنه الأدمن هو الكاشير (cashier_kind/admin + cashier_name أو equivalent)
+(انسخ JSON مختصر).
+
+(4) Functional proof (الأهم)
+A) إثبات أن الأدمن يقدر يبيع بدون seller/PIN:
+- Screenshot داخل /pos بعد اختيار الفرع يوضح "البائع/الكاشير: <اسم الأدمن>" و زر الدفع غير disabled.
+- اعرض (من Network أو server logs) request/response لعملية بيع واحدة (status 200) + أي id للفاتورة الناتجة.
+
+B) إثبات أن الأدمن يعمل مرتجع بدون Supervisor confirm:
+- Screenshot لعملية مرتجع تمت بدون dialog المشرف.
+- اعرض (من logs أو DB query) دليل أن العملية اتسجلت مع performed_by_admin_id أو equivalent + cashier info.
+
+(5) Guard proof (sidebar)
+- Screenshot: Sidebar للأدمن داخل POS يظهر 5 روابط (includes /pos/reports و /pos/settings).
+- Screenshot: Sidebar للكاشير/المشرف يظهر 3 روابط فقط.
+
+(6) Logout proof
+- اعرض snippet من كود logout endpoint يوضح مسح __pos_admin و __pos و __branch مع path="/api/pos"
+- اعرض Set-Cookie headers أو log يثبت الإزالة.
+
+ارجع بكل الـoutputs المذكورة فقط.

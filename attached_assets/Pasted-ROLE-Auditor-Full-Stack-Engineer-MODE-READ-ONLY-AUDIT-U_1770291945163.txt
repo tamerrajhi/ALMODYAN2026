@@ -1,0 +1,173 @@
+ROLE: Auditor + Full-Stack Engineer
+MODE: READ-ONLY AUDIT (UI + DB + ATOMIC + ACCOUNTING) — STOP AFTER EVIDENCE
+
+GOAL:
+Produce an evidence-based audit for the purchase invoice screen(s) to answer:
+1) Is the flow ATOMIC (RPC-only) or does it contain any direct DB writes?
+2) Does Post generate correct accounting journal entries (non-zero, balanced, with lines)?
+3) Does Post generate correct stock/item movements so items appear in POS/transfers/read-model?
+4) Provide a concise PASS/FAIL summary with blockers and exact evidence.
+
+HARD RULES:
+- DO NOT modify any code or DB.
+- Only run read-only greps and SELECT queries.
+- If you cannot run a UI action, still provide a read-only audit using code + schema + RPC definitions.
+- STOP after output.
+
+========================
+A) IDENTIFY THE SCREEN(S) (CODE DISCOVERY)
+========================
+1) Find purchase import and purchase invoice details pages:
+Run and paste outputs:
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "ImportPage|PurchaseInvoiceImport|PurchaseInvoiceDetails|Unique Purchase Invoice|purchase invoice" src
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "path=.*purchases|/purchases|purchase" src
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "<Route " src
+
+2) From the results, list the exact file paths for:
+- Excel purchase import screen
+- Purchase invoice details screen
+- Purchase invoice list screen (if exists)
+
+========================
+B) ATOMIC CHECK (RPC-ONLY vs DIRECT WRITES)
+========================
+For each identified screen + its service/hooks files:
+1) List all RPC calls:
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supabase\.rpc\(" <file_paths>
+
+2) Prove direct writes are absent/present:
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" <file_paths>
+
+3) Global direct-write proof (must be empty if Atomic-only):
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+
+OUTPUT:
+- For each flow step (Create/Update/Post/Void), map: Screen/Service -> RPC name -> purpose.
+- If any direct write exists, mark ATOMIC = FAIL and show exact line numbers.
+
+========================
+C) DB SCHEMA + RPC DISCOVERY (PURCHASE INVOICE + POST)
+========================
+Run these SQL queries and paste outputs:
+
+1) Find the real purchase invoice header table:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND table_name ILIKE '%purchase%'
+AND (table_name ILIKE '%invoice%' OR table_name ILIKE '%invoices%')
+ORDER BY table_name;
+
+2) For candidate tables, list columns:
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema='public'
+AND table_name IN (<paste candidate names>)
+ORDER BY table_name, ordinal_position;
+
+3) Identify journal tables:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND (table_name ILIKE '%journal%' OR table_name ILIKE '%entry%')
+ORDER BY table_name;
+
+4) Identify movement tables:
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema='public'
+AND (table_name ILIKE '%movement%' OR table_name ILIKE '%stock%' OR table_name ILIKE '%transfer%')
+ORDER BY table_name;
+
+5) List relevant RPC functions:
+SELECT routine_name
+FROM information_schema.routines
+WHERE routine_schema='public'
+AND routine_type='FUNCTION'
+AND (
+  routine_name ILIKE '%purchase%invoice%'
+  OR routine_name ILIKE '%import%purchase%'
+  OR routine_name ILIKE '%post%'
+  OR routine_name ILIKE '%journal%'
+  OR routine_name ILIKE '%movement%'
+)
+ORDER BY routine_name;
+
+========================
+D) POST ACCOUNTING AUDIT (JE NON-ZERO + BALANCED)
+========================
+Goal: prove the purchase invoice Post creates JE correctly.
+
+1) From code results in section B, identify the POST RPC name for purchase invoice.
+If multiple, list them.
+
+2) From DB, find how invoice links to journal entries:
+- Search for foreign keys referencing journal_entries / journal_entry_lines:
+SELECT
+  tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY'
+AND (ccu.table_name ILIKE '%journal%' OR ccu.table_name ILIKE '%entry%')
+ORDER BY tc.table_name;
+
+3) Find audit logs entries for posting purchase invoice:
+SELECT action_type, entity_type, entity_id, description, created_at
+FROM audit_logs
+WHERE (entity_type ILIKE '%purchase%' OR description ILIKE '%purchase%' OR description ILIKE '%فاتورة%')
+AND (action_type ILIKE '%post%' OR action_type ILIKE '%create%' OR action_type ILIKE '%update%')
+ORDER BY created_at DESC
+LIMIT 50;
+
+4) Pick the latest posted purchase invoice id from audit_logs if available.
+If not available, pick the latest posted invoice record from the invoice table (status='posted' or is_posted=true).
+Show the SELECT used.
+
+5) For that invoice, find related journal entry(ies) by any link you discovered (fk, reference_id, memo contains invoice no, etc).
+Then output:
+- JE header totals (total_debit/total_credit) and status
+- JE lines count
+- Any lines with 0 debit and 0 credit
+
+Provide queries + outputs.
+
+PASS CRITERIA:
+- total_debit > 0, total_credit > 0
+- total_debit = total_credit
+- lines_count >= 2
+- not all lines are zeros
+
+========================
+E) STOCK/MOVEMENTS AUDIT (ITEM VISIBILITY)
+========================
+Goal: prove that after Post, imported unique items are visible where expected.
+
+1) Identify which table/view POS and transfers use to check item availability.
+Do this via grep:
+- grep -RIn --exclude-dir=node_modules --exclude-dir=dist "available|availability|branch_id|item_movements|jewelry_items|stock_movements" src/pages src/lib src/hooks
+
+2) For the same posted purchase invoice used in section D:
+- find the imported items created by that invoice (by invoice_id FK or audit logs).
+- pick one item_id and show:
+  a) its current branch_id
+  b) its availability status field (if exists)
+  c) movement records (item_movements or equivalent) related to purchase/import/post
+
+Provide queries + outputs.
+
+PASS CRITERIA:
+- item exists and is linked to the invoice
+- item is in correct branch
+- POS/transfer read-model query would find it (based on the discovered query/table)
+
+========================
+F) FINAL OUTPUT (MANDATORY)
+========================
+Provide a final table with:
+Area | Status (PASS/FAIL) | Evidence pointers (file:line or SQL query result)
+- Atomic (no direct writes)
+- Post Accounting JE
+- Movements/Visibility
+
+STOP AFTER THIS REPORT.

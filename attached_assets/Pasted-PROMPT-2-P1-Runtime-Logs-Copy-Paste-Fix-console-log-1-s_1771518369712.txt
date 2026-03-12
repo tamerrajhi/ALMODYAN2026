@@ -1,0 +1,75 @@
+PROMPT 2 — P1 Runtime Logs فقط (Copy/Paste لريبلت)
+
+ممنوع أي Fix. مسموح فقط console.log مؤقت.
+
+1) src/components/layout/MainLayout.tsx
+
+في نفس useEffect اللي بيعمل:
+fetch('/api/pos/session/context'...)
+أضف لوجز بعد الـfetch مباشرة:
+
+console.log("[POSDBG][MainLayout] loc=", window.location.pathname + window.location.search);
+console.log("[POSDBG][MainLayout] cookies=", document.cookie);
+console.log("[POSDBG][MainLayout] posContext status=", res.status);
+console.log("[POSDBG][MainLayout] posContext body=", data);
+
+
+ثم قبل الفلترة وبعدها (عند getMenuSections أو filteredMenuSections):
+
+console.log("[POSDBG][MainLayout] isPosMode=", isPosMode);
+console.log("[POSDBG][MainLayout] POS_ALLOWED_PATHS=", POS_ALLOWED_PATHS);
+
+console.log("[POSDBG][MainLayout] BEFORE sections=",
+  allMenuSections?.map(s => ({
+    title: s.title,
+    href: s.href,
+    items: s.items?.map(i => i.href),
+  }))
+);
+
+console.log("[POSDBG][MainLayout] AFTER sections=",
+  filteredMenuSections?.map(s => ({
+    title: s.title,
+    href: s.href,
+    items: s.items?.map(i => i.href),
+  }))
+);
+
+
+مهم: لو أسماء المتغيرات عندك مختلفة (allMenuSections, filteredMenuSections) عدّلها فقط لتطابق الكود.
+
+2) src/components/pos/BranchLoginGate.tsx
+
+بعد ما يجيب publicBranches من /api/public/branches-list اطبع:
+
+console.log("[POSDBG][BranchLoginGate] loc=", window.location.pathname + window.location.search);
+console.log("[POSDBG][BranchLoginGate] branchId=", branchId);
+console.log("[POSDBG][BranchLoginGate] publicBranches.len=", publicBranches?.length);
+console.log("[POSDBG][BranchLoginGate] publicMatch=", publicBranches?.find(b => b.branch_id === branchId));
+console.log("[POSDBG][BranchLoginGate] resolved branchName=", branchName);
+
+3) خطوات تشغيل إلزامية لإخراج الدليل
+
+نفّذ السيناريوهين دول وارجع بالـLogs:
+
+سيناريو A (Admin Dashboard):
+
+افتح Dashboard كـ Admin
+
+انسخ كل Logs التي تبدأ بـ [POSDBG]
+
+من Network: status للـ /api/pos/session/context
+
+سيناريو B (/pos بعد PIN):
+
+ادخل /pos وكمّل اختيار البائع + PIN
+
+انسخ Logs [POSDBG]
+
+من Network: status للـ /api/pos/session/context
+
+المطلوب منك ترجع:
+
+Logs كاملة للسيناريو A و B
+
+status codes للـ endpoint

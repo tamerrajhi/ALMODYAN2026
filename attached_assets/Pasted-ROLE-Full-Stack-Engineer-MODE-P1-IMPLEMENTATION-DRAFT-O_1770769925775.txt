@@ -1,0 +1,73 @@
+ROLE: Full-Stack Engineer
+MODE: P1 IMPLEMENTATION (DRAFT ONLY) + EVIDENCE
+SCOPE: ERP Sales Invoice creation ONLY (no posting, no journal entries, no payments)
+
+GOAL:
+Add a General/ERP Sales Invoice create flow that writes:
+1) invoices row with:
+   - invoice_type = 'sales' (use exact enum used in DB)
+   - sale_id = NULL
+   - status = 'draft' (or the draft status used in system)
+2) sales_invoice_items rows for selected unique_items
+
+HARD RULES:
+- Do NOT modify POS flow or complete_pos_sale_atomic.
+- Do NOT change DB schema.
+- Do NOT create journal entries, journal lines, payments, or stock movements in this step.
+- No direct writes from frontend (no supabase.from). Must use server endpoint OR existing RPC if a safe draft RPC exists.
+- Keep existing list separation logic:
+  ERP invoices must appear in /sales/invoices (sale_id NULL).
+  POS invoices must remain in /sales/pos-invoices.
+
+DISCOVERY (NO GUESSING):
+1) Identify current invoices schema expectations:
+   - Required columns for invoices insert (branch_id, customer_id, totals, invoice_number, etc.)
+2) Identify current pattern for creating drafts in other modules (e.g., purchase invoices drafts).
+3) Decide implementation path:
+   A) If there is an existing atomic RPC for sales draft creation, reuse it.
+   B) Else create a new server endpoint: POST /api/sales/erp-invoices (draft)
+      that performs the DB inserts inside a transaction and returns the created invoice.
+
+IMPLEMENTATION REQUIREMENTS:
+- Invoice number generation: follow existing convention (e.g., INV-S-YYYYMMDD-####). Reuse existing helper if present; do NOT invent a new numbering scheme.
+- Validation:
+  - must have branch_id
+  - must have customer_id (if required in schema) OR allow null if system supports cash customer
+  - must include at least 1 item
+- Items:
+  - use unique_items as SoT
+  - insert into sales_invoice_items with jewelry_item_id pointing to unique_items.id
+  - quantity should be 1 for unique items unless system supports multiples
+
+UI REQUIREMENTS (minimal):
+- Add a "Create Invoice" button ONLY on ERP invoices page (/sales/invoices).
+- Create a basic create screen or dialog:
+  - select branch
+  - select customer
+  - add items (search unique_items)
+  - save draft
+- After save:
+  - navigate to SalesInvoiceViewPage for the created invoice
+  - invoice must show status draft and appear in ERP list
+
+EVIDENCE PACK (REQUIRED):
+A) git diff --stat
+B) git diff (all changed files)
+C) rg proofs:
+   - confirm no forbidDirectWrite introduced
+   - confirm sale_items not used
+   - confirm sale_id is NULL for ERP create path
+D) DB proof (SQL outputs):
+   1) Show the created invoice row:
+      SELECT id, invoice_number, invoice_type, sale_id, status, branch_id, customer_id, created_at
+      FROM invoices
+      WHERE sale_id IS NULL AND invoice_type='sales'
+      ORDER BY created_at DESC LIMIT 3;
+   2) Show its items:
+      SELECT invoice_id, jewelry_item_id, quantity, unit_price, total_price
+      FROM sales_invoice_items
+      WHERE invoice_id = '<NEW_INVOICE_ID>';
+E) Runtime proof:
+   - Create one ERP draft invoice from UI and show it appears in /sales/invoices and NOT in /sales/pos-invoices.
+
+STOP after evidence. Do not implement posting/JE in this step.

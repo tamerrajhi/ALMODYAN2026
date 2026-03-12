@@ -1,0 +1,190 @@
+أنت Senior Full-Stack Engineer. ممنوع التخمين. ممنوع أي تغيير كاسر. المطلوب تنفيذ نظام “البائع” (Seller) في POS مع إدارة البائعين داخل صفحة /users الموجودة، وربطهم بالفروع، مع Seed تجريبي ضمن /admin/test-data. 
+
+# Context (Existing routes)
+- Users page route: /users (UsersPage.tsx)
+- Branches: /branches
+- Admin test data: /admin/test-data
+- Sidebar group "settings" already contains /users and /branches.
+=> المطلوب: نضيف “Seller Management” كتَب داخل /users (مش route جديدة).
+
+# Constraints (STRICT)
+- Additive only. لا تغيّر سلوك محاسبي/ضريبي قائم.
+- Frontend ممنوع يعمل writes مباشرة لقاعدة البيانات.
+- أي كتابة تكون عبر server routes أو RPC فقط.
+- لا تعتمد على قراءة user_branches من الفرونت (لتجنب RLS/403) — استخدم endpoints server-side.
+- Evidence REQUIRED: git diff --stat + git diff + SQL verification queries outputs.
+
+# Phase 0 — Reality Check (READ ONLY)
+قبل أي تغيير:
+1) اعرض schema للجداول:
+   profiles, branches, user_branches, sales, invoices
+2) أثبت علاقة profiles.id و profiles.user_id (هل id = profile uuid مستقل؟)
+3) أثبت وجود profiles.is_active و user_branches.is_primary (إن وجد)
+Evidence: SQL outputs.
+
+# Phase 1 — DB Migration (Additive)
+أضف الأعمدة (IF NOT EXISTS):
+- ALTER TABLE sales ADD COLUMN IF NOT EXISTS seller_profile_id uuid NULL;
+- ALTER TABLE invoices ADD COLUMN IF NOT EXISTS seller_profile_id uuid NULL;
+
+Indexes:
+- CREATE INDEX IF NOT EXISTS idx_sales_branch_seller ON sales(branch_id, seller_profile_id);
+- CREATE INDEX IF NOT EXISTS idx_invoices_branch_seller ON invoices(branch_id, seller_profile_id);
+
+# Phase 2 — Server Endpoints (READ + ADMIN) using existing patterns in server/routes.ts
+## 2A) READ: sellers list for a branch (used by POS)
+GET /api/branches/:branchId/sellers
+Return sellers allowed for that branch based on user_branches + profiles:
+SQL must be server-side.
+
+Result shape:
+{
+  data: { sellers: [{ profile_id, user_id, display_name, full_name, username }] },
+  error: null
+}
+
+Rules:
+- display_name = COALESCE(NULLIF(full_name,''), username)
+- only active profiles (if is_active exists)
+- order by display_name
+
+## 2B) ADMIN: list branches + their sellers (used in /users tab)
+GET /api/admin/branches-with-sellers
+Return:
+{
+  data: { branches: [{ id, name, code, sellers: [...] }] },
+  error: null
+}
+
+## 2C) ADMIN: list active profiles (for picker)
+GET /api/admin/profiles/active
+Return list of profiles (id, user_id, full_name, username, is_active)
+
+## 2D) ADMIN: assign seller to branch
+POST /api/admin/branch-sellers/assign
+Body: { branch_id: uuid, profile_id: uuid, is_primary?: boolean }
+Server resolves user_id from profiles.id, then upsert into user_branches:
+INSERT ... ON CONFLICT(user_id, branch_id) DO UPDATE SET is_primary=EXCLUDED.is_primary;
+
+Return success + updated seller row.
+
+## 2E) ADMIN: remove seller from branch
+POST /api/admin/branch-sellers/remove
+Body: { branch_id: uuid, profile_id: uuid }
+Resolve user_id then DELETE FROM user_branches.
+
+# Phase 3 — POS UI (Mandatory seller selection)
+في POSPage:
+1) استبدل أي query مباشر على user_branches بـ fetch:
+   GET /api/branches/${selectedBranchId}/sellers
+
+2) UI:
+- field label: "البائع" / "Seller"
+- Select options from endpoint (display_name)
+- value MUST be profile_id (not user_id, not text)
+- selection is mandatory ALWAYS (حتى لو واحد فقط — لا auto-select)
+
+3) Guard:
+- disable “Complete Sale” / “إتمام البيع” إذا seller not selected
+- show inline message:
+  AR: "اختيار البائع إلزامي لإتمام البيع"
+  EN: "Seller selection is required to complete the sale"
+
+4) Payload to RPC:
+- saleCmd must include seller_profile_id: <selected profile_id>
+
+# Phase 4 — RPC (Atomic enforcement) complete_pos_sale_atomic(jsonb)
+Modify RPC:
+- Read seller_profile_id from payload (uuid string)
+- If missing => return error code SELLER_REQUIRED
+- Validate profile exists + active => else INVALID_SELLER
+- Validate seller belongs to branch via user_branches (match profiles.user_id) => else SELLER_NOT_IN_BRANCH
+- Store seller_profile_id into INSERT INTO sales and INSERT INTO invoices
+- Return seller_profile_id in result payload
+
+IMPORTANT:
+- لا تغيّر أي حسابات/قيود أخرى.
+- فقط إضافة التحقق + التخزين.
+
+# Phase 5 — /users Page Enhancement (Seller Management tab داخل /users)
+في UsersPage.tsx (route /users):
+- Add a new Tab: "البائعون" / "Sellers"
+- Inside the tab:
+  A) Branch selector dropdown (fetch branches list from existing pattern OR reuse /api/admin/branches-with-sellers)
+  B) For selected branch:
+     - Show current sellers list (display_name) with “Remove” button
+     - Button “Add seller to this branch” opens Dialog:
+         - Multi-select OR single-select from GET /api/admin/profiles/active
+         - On confirm => POST /api/admin/branch-sellers/assign
+     - Optional is_primary toggle if supported
+
+Requirements:
+- Fully i18n (ar/en keys)
+- RTL friendly
+- Loading/empty/error states
+- No direct DB writes
+
+# Phase 6 — Dev Seed (Test Data) under /admin/test-data
+Add a “Seed Sellers” section in existing /admin/test-data page (do NOT create new route).
+Button “Seed sellers per branch (DEV)” calls:
+POST /api/admin/dev/seed-sellers
+
+Safety:
+- Endpoint MUST require:
+  process.env.NODE_ENV !== 'production' AND process.env.ALLOW_DEV_SEED === 'true'
+Otherwise return 403 with clear message.
+
+Idempotent behavior:
+- For each branch, create/ensure 2 seller profiles (or assign existing) using deterministic usernames:
+  seller_1_<branch_code>, seller_2_<branch_code>
+- If system cannot create auth users:
+  DO NOT GUESS.
+  Instead:
+   - Create ONLY profiles records if allowed (but only if Phase0 proves profiles.user_id is not FK to auth.users)
+   - If profiles.user_id MUST exist in auth.users, then abort with:
+     "AUTH_USER_CREATION_NOT_SUPPORTED"
+   - In that case, seed action only assigns existing users and returns message.
+
+Seed result response:
+{ data: { branchesProcessed, profilesCreated, assignmentsCreated }, error: null }
+
+# Evidence Pack (REQUIRED)
+A) git diff --stat
+B) git diff
+
+C) SQL verification:
+1) columns exist:
+SELECT column_name FROM information_schema.columns
+WHERE table_name IN ('sales','invoices') AND column_name='seller_profile_id';
+
+2) sellers per branch:
+SELECT b.id, b.name, COUNT(*) sellers
+FROM branches b
+LEFT JOIN user_branches ub ON ub.branch_id=b.id
+GROUP BY b.id, b.name
+ORDER BY b.name;
+
+3) recent sales/invoices seller:
+SELECT sale_code, branch_id, seller_profile_id, created_at
+FROM sales ORDER BY created_at DESC LIMIT 10;
+
+SELECT invoice_number, branch_id, seller_profile_id, created_at
+FROM invoices ORDER BY created_at DESC LIMIT 10;
+
+4) join to seller name:
+SELECT s.sale_code, COALESCE(p.full_name,p.username) seller_name
+FROM sales s
+JOIN profiles p ON p.id=s.seller_profile_id
+ORDER BY s.created_at DESC LIMIT 10;
+
+D) Endpoint proof:
+- Show sample response for:
+  GET /api/branches/<branchId>/sellers
+  GET /api/admin/branches-with-sellers
+
+# Non-goals
+- No seller analytics dashboard الآن (سنضيفها لاحقاً).
+- No print changes الآن.
+- No accounting changes الآن.
+
+ابدأ التنفيذ فوراً حسب المراحل بالترتيب، واطبع Evidence كاملة.

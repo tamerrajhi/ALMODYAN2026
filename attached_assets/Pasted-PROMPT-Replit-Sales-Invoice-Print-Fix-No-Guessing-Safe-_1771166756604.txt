@@ -1,0 +1,102 @@
+PROMPT (Replit) — Sales Invoice Print Fix (No Guessing, Safe)
+
+You must NOT guess. Do NOT change DB schema. Do NOT change any RPC logic unless explicitly instructed.
+Goal: Make printed saved sales invoices match POS math rules:
+
+Rule:
+
+Seller enters final GROSS total (VAT included).
+
+System derives NET subtotal = gross / (1+VAT).
+
+Discount ratio is applied across all items uniformly.
+
+Line prices displayed must be NET after discount (VAT excluded).
+
+VAT is shown only as tax line in totals.
+
+Step 0 — Evidence first (no changes)
+
+Identify exact meaning of these DB fields:
+
+invoices.subtotal
+
+invoices.discount_amount
+
+invoices.tax_amount
+
+invoices.total_amount
+
+sale_items.unit_price (if exists)
+
+sale_items.total_amount
+
+sale_items.discount_amount (if exists)
+
+any per-line tax fields
+
+Provide evidence queries (SELECT) for one invoice that was “correct in POS but wrong in print”, showing:
+
+invoice totals fields
+
+sale_items fields for each line
+
+computed checks:
+
+invoice.subtotal + invoice.tax_amount == invoice.total_amount ?
+
+sum(line_net_after_discount) == invoice.subtotal ?
+
+sum(line_total_amount) == invoice.total_amount ? (if line_total_amount is gross)
+
+Output the results clearly.
+
+Step 1 — Fix UI only (after evidence confirms)
+
+In SalesInvoiceViewPage.tsx:
+
+Remove hybrid recompute fallback:
+invoice.subtotal || recomputed
+
+Use DB totals ONLY for display and for PrintableInvoice props.
+
+In PrintableInvoice.tsx:
+
+Do not recompute totals.
+
+Display line unit price as NET after discount (VAT excluded) using the correct DB fields.
+
+If DB does not store net-after-discount per line, compute it ONLY from DB totals using a uniform ratio:
+ratio = invoice.subtotal / sum(original_net_line_amounts)
+line_net_after_discount = original_net_line_amount * ratio
+But do this only if “original_net_line_amounts” is clearly available and proven by evidence.
+
+Add an “Evidence panel” (console logs or dev-only block) behind a flag to print:
+
+gross target
+
+derived net
+
+discount ratio
+
+sum of derived line nets
+
+tax
+to verify no drift.
+
+Step 2 — Evidence after
+
+Provide:
+
+before/after screenshot placeholders in text
+
+exact diffs for the changed files only
+
+verification queries showing equality holds.
+
+Files expected to change:
+
+src/pages/sales/SalesInvoiceViewPage.tsx
+
+src/components/invoices/PrintableInvoice.tsx
+(Do NOT touch POSPage.tsx unless required by evidence.)

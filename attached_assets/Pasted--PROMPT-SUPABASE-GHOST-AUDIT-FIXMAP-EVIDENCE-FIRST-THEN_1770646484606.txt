@@ -1,0 +1,73 @@
+✅ PROMPT — SUPABASE-GHOST-AUDIT + FIXMAP | EVIDENCE FIRST | THEN PATCH PLAN | STOP
+
+ROLE: Lead Auditor / Fix Lead
+MODE: 1) Evidence-only commands 2) Produce a concrete patch plan 3) Verification steps
+NO GUESSING. If a claim is not proven by raw output, mark it as UNPROVEN.
+
+CONTEXT:
+We have an “impact map” claiming:
+- 106 files have live supabase.from()/rpc calls
+- only 6 files explicitly import { supabase } from src/integrations/supabase/client.ts
+- 100 files use supabase without import and are “broken”
+We must prove or refute that precisely, then output a fix plan.
+
+TASK A — PROVE “NO IMPORT” CLAIM (SAMPLE-BASED + HARD PROOF)
+A1) Take 10 random files from the “no import” set across different folders (pages + components + lib).
+For each file, print:
+- first 80 lines
+- the exact line(s) where `supabase` is referenced (show ±3 lines)
+Commands (repeat per file):
+sed -n '1,80p' <FILE>
+rg -n "supabase" <FILE>
+(If import exists, it MUST be visible in first 80 lines.)
+
+A2) Then do a global import scan:
+Run all of these and paste raw output (even if empty):
+rg -n --hidden --no-ignore-vcs "import\s+\{\s*supabase\s*\}\s+from\s+['\"].+['\"]" src
+rg -n --hidden --no-ignore-vcs "import\s+.*\bsupabase\b.*from\s+['\"].+['\"]" src
+rg -n --hidden --no-ignore-vcs "from\s+['\"].+supabase.+['\"]" src
+rg -n --hidden --no-ignore-vcs "export\s+\{\s*supabase\s*\}" src
+rg -n --hidden --no-ignore-vcs "export\s+const\s+supabase" src
+rg -n --hidden --no-ignore-vcs "globalThis\.supabase|window\.supabase" src
+
+A3) If the “no import” claim is TRUE, we should see `supabase` usage in the sample files with no import lines in their first 80 lines.
+State verdict: PROVEN or NOT PROVEN with evidence.
+
+TASK B — RUNTIME PROOF (NO GUESSING)
+B1) Run a production build:
+npm run build
+If it fails, paste the exact error.
+
+B2) Run dev server and open ONE affected page route (pick Dashboard):
+npm run dev
+Then open the browser and capture console error screenshot/text:
+- If you see `ReferenceError: supabase is not defined`, paste it.
+- If not, paste “NO ReferenceError observed” and show the network tab request(s) proving the page executed.
+
+(If you cannot open a browser, run a minimal node/ts check by printing the bundled chunk search:
+rg -n "supabase is not defined" -S dist || true
+This is weaker than runtime; mark it accordingly.)
+
+TASK C — FIX PLAN (ONLY AFTER A+B)
+Based on the evidence, output ONE of these two fix plans:
+
+PLAN C1 (If NO-IMPORT is PROVEN):
+- Output a mechanical patch plan:
+  - Add `import { supabase } from '@/integrations/supabase/client';` to every file that references `supabase`.
+  - Provide an exact command-driven approach:
+    - list files (from the earlier impact list) grouped by folder
+    - patch order: libs/context first, then shared components, then pages
+- Verification gates:
+  - `npm run build` must pass
+  - Open 5 key pages from S7 and confirm no ReferenceError
+  - grep gate: `rg -nU "supabase\s*(\r?\n)\s*\.from\(" src` still allowed for now (since we’re just fixing broken imports), but must be documented as remaining Supabase dependency.
+
+PLAN C2 (If NO-IMPORT is NOT PROVEN):
+- Output a targeted plan to locate the alternate source of supabase (re-export/alias) with additional evidence commands, and list exactly what is missing.
+
+TASK D — OUTPUT FORMAT (STRICT)
+1) Evidence A (raw outputs)
+2) Evidence B (raw outputs)
+3) Verdict (PROVEN / NOT PROVEN)
+4) Fix Plan (C1 or C2) with step-by-step + verification gates
+STOP

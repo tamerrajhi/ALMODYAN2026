@@ -1,0 +1,93 @@
+PROMPT B1 — PHASE-4B.1 | MIGRATE Edge Function: system-health → Express API | EVIDENCE | STOP
+
+ROLE: Fullstack Engineer
+MODE: SERVER + FRONTEND (NO DB MIGRATIONS)
+
+SCOPE (ONLY):
+
+server/routes.ts (add a new endpoint)
+
+src/pages/SystemHealthPage.tsx (replace invoke call)
+
+(Optional, only if needed) src/lib/apiClient.ts (NO behavioral refactor—imports only)
+
+GOAL:
+Remove supabase.functions.invoke('system-health') completely and replace it with an Express API endpoint:
+
+Frontend calls: GET /api/system-health-run (or similar)
+
+Server executes the logic without Supabase and returns JSON in the same shape the page expects.
+
+STRICT RULES (NO EXCEPTIONS):
+
+Only touch the 2 files listed above (plus optional apiClient import fix if TS forces it).
+
+Do NOT change UI layout, text, state names, or rendering logic.
+
+No refactors unrelated to this migration.
+
+Keep response shape stable: if the UI expects { data, error } keep that.
+
+If you must adjust response shape, do it on the server to keep UI unchanged.
+
+IMPLEMENTATION REQUIREMENTS
+1) Server: add endpoint
+
+Add in server/routes.ts:
+
+GET /api/system-health-run
+
+It returns JSON { data: <payload>, error: null } on success
+
+On failure: { data: null, error: { message: string } } with HTTP 500
+
+What should it do?
+
+For now, implement minimal health payload that matches what UI uses:
+
+If UI only prints a list, return an array.
+
+If UI expects object fields, return those fields.
+
+Important: Don’t call Supabase Edge Functions here. This endpoint is the replacement.
+
+2) Frontend: replace invoke
+
+In src/pages/SystemHealthPage.tsx:
+Replace:
+
+supabase.functions.invoke('system-health')
+
+
+With:
+
+apiClient.get('/api/system-health-run')
+
+
+(or fetch('/api/system-health-run') if that page doesn’t use apiClient)
+
+Remove supabase import if it becomes unused.
+
+EVIDENCE REQUIRED (RAW, SEPARATE)
+
+A) git diff --stat
+B) git diff -- (show FULL diffs for BOTH files)
+C) Grep proof (NO MATCHES after change):
+
+rg -n "functions\.invoke\('system-health'" -S src
+
+
+D) Runtime curl:
+
+curl -i http://localhost:5000/api/system-health-run
+curl -s http://localhost:5000/api/system-health-run | head -c 400
+
+
+E) Typecheck:
+
+npx tsc --noEmit
+
+
+(Exit 0)
+
+STOP. WAIT FOR MY NEXT PROMPT.

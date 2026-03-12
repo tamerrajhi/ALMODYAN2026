@@ -1,0 +1,48 @@
+نفّذ Stage-2A فقط: ترحيل supabase.rpc داخل
+src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+إلى dataGateway — بدون أي ترحيل إضافي، وبدون تعديل server/routes.ts.
+
+النطاق الدقيق:
+- يوجد 4 استدعاءات فقط:
+  generate_purchase_return_number (مرتين، مع p_branch_code)
+  generate_purchase_invoice_number (مرتين، بدون باراميتر)
+
+المطلوب (CODE CHANGES):
+1) افتح الملف وحدّد الـ 4 أماكن بالضبط (الأسطر حول 436/445/748/752).
+2) استبدل:
+   await supabase.rpc('generate_purchase_return_number', { p_branch_code: branchCode })
+   بـ:
+   await dataGateway.rpc('generate_purchase_return_number', { p_branch_code: branchCode })
+3) واستبدل:
+   await supabase.rpc('generate_purchase_invoice_number')
+   بـ:
+   await dataGateway.rpc('generate_purchase_invoice_number', {})
+   (مهم: مرّر {} لتفادي أي اختلاف في RPC wrapper)
+4) تأكد أن معالجة الأخطاء لا تتغير:
+   - لو الكود الحالي يعتمد على { data, error } بنفس الشكل، حافظ عليه.
+   - إذا dataGateway.rpc يرجع { data, error } بالفعل، استخدمه مباشرة.
+   - لا تغيّر أي منطق UI أو state أو messages.
+5) نظّف imports:
+   - لو supabase كان مستخدم فقط عشان rpc في الملف → احذف import supabase.
+   - أضف import dataGateway من المسار الصحيح المستخدم بالمشروع (نفس ما في الصفحات اللي تم ترحيلها سابقًا).
+
+ممنوع:
+- لا تلمس أي ملفات أخرى.
+- لا تضف endpoints جديدة.
+- لا تغيّر allowlist.
+- لا تعمل “تحسينات” أو refactor.
+
+التحقق (Evidence REQUIRED بعد التنفيذ):
+A) git diff --stat
+B) git diff -- src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+C) Grep proof على الملف فقط:
+   rg -n "supabase\\.rpc\\(" src/pages/purchasing/UnifiedPurchaseDocumentPage.tsx
+   لازم يكون Exit Code 1 (0 matches)
+D) Typecheck/build proof:
+   شغّل TypeScript check أو build سريع (المتاح عندك) وأظهر أنه لا أخطاء.
+E) Runtime smoke (minimal):
+   - افتح الصفحة (Supabase default mode) وتأكد أنها تفتح بدون crash
+   - جرّب الضغط الذي يولّد رقم فاتورة/مرتجع مرة واحدة لكل نوع
+   - سجّل من الـ console/server logs أن الـ request ذهب عبر /api/rpc/... (وليس Supabase client)
+
+STOP بعد عرض الـ Evidence. لا تبدأ Stage-2B ولا Batch-3.

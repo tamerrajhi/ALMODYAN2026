@@ -1,0 +1,87 @@
+PROMPT 1 — SALES/RETURNS SPLIT AUDIT (EVIDENCE ONLY) — STOP
+
+ROLE: System Auditor (DB + Backend + Frontend reader)
+MODE: READ-ONLY. NO CODE CHANGES. NO MIGRATIONS. NO "start building".
+
+GOAL:
+Prove (with direct evidence) whether the system truly has two sales flows (POS vs ERP) and two return flows (POS returns vs ERP returns), and whether each flow correctly posts to:
+- invoices / document tables
+- inventory (movements + unique_items snapshot)
+- accounting (journal_entries + lines)
+- payments/receipts (if applicable)
+
+OUTPUT FORMAT (STRICT):
+A) FLOW DEFINITIONS (as implemented, not intended)
+B) DATA MODEL MAP (tables + key columns) for:
+   - POS sale
+   - ERP sale
+   - POS return
+   - ERP return
+C) WRITE PATH EVIDENCE (exact code + SQL proof)
+D) LINKAGE EVIDENCE (DB queries showing relationships)
+E) GAP LIST (miswires + risks) prioritized P0/P1/P2
+F) STOP
+
+A) FLOW DEFINITIONS
+1) State the exact discriminator used to label invoices as POS vs ERP (e.g., invoices.sale_id NULL/NOT NULL) with DB query proof.
+2) State the discriminator used to label returns as POS vs ERP with DB query proof.
+
+B) DATA MODEL MAP (TABLES + COLUMNS)
+Provide the exact tables and columns used for each flow:
+- POS sale: sales, invoices, sales_invoice_items, unique_items, unique_item_movements, journal_entries, payments (confirm actual tables)
+- ERP sale: invoices (sale_id NULL), sales_invoice_items, unique_items, unique_item_movements, journal_entries, payments
+- POS return: returns (or equivalent), return items table, movements table, JE tables
+- ERP return: returns (or equivalent), return items table, movements table, JE tables
+Include: primary keys + foreign keys used.
+
+C) WRITE PATH EVIDENCE (CODE)
+For each of the 4 flows, show:
+1) the frontend page(s) and which API/RPC they call
+2) the backend endpoint/RPC handler
+3) the DB writes it performs (list INSERT/UPDATE targets)
+Provide raw evidence via:
+- rg output (file:line)
+- short code excerpts (max 15 lines each)
+
+Required searches:
+- "complete_pos_sale" / "pos" sale completion handler
+- "/api/sales-invoices/draft" and "/api/sales-invoices/:id/post" if exist
+- returns creation handlers for POS and ERP (search "return", "credit note", "original_sale_id", "original_invoice_id")
+- ANY writes to sale_items (prove if legacy or active)
+
+D) LINKAGE EVIDENCE (DB QUERIES)
+Run these queries and paste results (counts + 5 recent rows):
+1) Sales split:
+   SELECT count(*) FILTER (WHERE invoice_type='sales' AND sale_id IS NOT NULL) AS pos_cnt,
+          count(*) FILTER (WHERE invoice_type='sales' AND sale_id IS NULL) AS erp_cnt
+   FROM invoices;
+
+2) Returns split (adapt column/table names if different, but prove split with 2 counts):
+   - POS returns count (linked to original_sale_id)
+   - ERP returns count (linked to original_invoice_id where original invoice has sale_id NULL)
+
+3) For ONE POS sale invoice sample:
+   show invoice row + linked sale row + items rows + JE row + payment row + updated unique_items (sold markers) + movements rows.
+
+4) For ONE ERP sale invoice sample (if none exist, state NONE with query proof):
+   show draft vs posted behavior and whether JE/movements appear only on post.
+
+5) For ONE POS return sample (if exists):
+   show return row + JE + movements + unique_items snapshot changes (must prevent resell)
+
+6) For ONE ERP return sample (if exists):
+   show return row + JE + movements + unique_items snapshot changes
+
+E) GAP LIST (P0/P1/P2)
+List miswires like:
+- returns writing into wrong legacy tables
+- missing snapshot update on return (items still sellable)
+- JE missing or unlinked
+- movements missing or wrong table
+- UI mixing sources
+
+IMPORTANT RULES:
+- Do NOT propose fixes yet.
+- Do NOT modify code.
+- Do NOT "start building".
+- End with "STOP".

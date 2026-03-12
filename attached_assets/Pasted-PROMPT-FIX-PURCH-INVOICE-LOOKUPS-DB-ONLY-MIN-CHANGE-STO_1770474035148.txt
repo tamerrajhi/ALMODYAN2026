@@ -1,0 +1,77 @@
+PROMPT — FIX-PURCH-INVOICE-LOOKUPS | DB ONLY | MIN CHANGE | STOP
+
+ROLE: Database Engineer
+MODE: DB ONLY (SQL FUNCTIONS ONLY)
+STRICT: CREATE OR REPLACE FUNCTION فقط. لا تغيّر جداول ولا routes ولا UI.
+
+0) حدد اسم عمود كود الفرع (Evidence)
+
+نفّذ:
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='branches'
+ORDER BY ordinal_position;
+
+
+اختَر العمود الذي يمثل كود الفرع فعلاً (مثلاً: code أو branch_code أو branch_no… حسب الموجود).
+سمّه في التنفيذ: <BRANCH_CODE_COL>.
+
+(اختياري كإثبات سريع)
+
+SELECT id, <BRANCH_CODE_COL> AS branch_code
+FROM branches
+LIMIT 5;
+
+1) Patch داخل purchase_invoice_create_atomic (تعديل lookup فقط)
+
+داخل نفس الدالة، قبل lookup للحسابات مباشرةً، أضف:
+
+SELECT COALESCE(<BRANCH_CODE_COL>::text, '')
+INTO v_branch_code
+FROM branches
+WHERE id = v_branch_id;
+
+
+ثم استبدل السطرين:
+
+SELECT id INTO v_inventory_account_id FROM chart_of_accounts WHERE account_code IN ('1130', '1137', '1103') LIMIT 1;
+SELECT id INTO v_supplier_account_id FROM chart_of_accounts WHERE account_code IN ('2110', '21010001', '2100') LIMIT 1;
+
+
+بالآتي (Branch-first ثم fallback):
+
+-- Inventory account: branch-specific first, then global fallback
+SELECT id INTO v_inventory_account_id
+FROM chart_of_accounts
+WHERE account_code IN ((v_branch_code || '-1301'), '1301')
+ORDER BY CASE WHEN account_code = (v_branch_code || '-1301') THEN 0 ELSE 1 END
+LIMIT 1;
+
+-- Supplier AP account: branch-specific first, then global fallback
+SELECT id INTO v_supplier_account_id
+FROM chart_of_accounts
+WHERE account_code IN ((v_branch_code || '-2101'), '2101', '2100')
+ORDER BY CASE
+  WHEN account_code = (v_branch_code || '-2101') THEN 0
+  WHEN account_code = '2101' THEN 1
+  ELSE 2
+END
+LIMIT 1;
+
+
+سيب الـ IF checks زي ما هي (Inventory account not found / Supplier AP account not found).
+
+2) Evidence + STOP
+
+اطبع snippet من الدالة (الجزء المعدّل فقط) + إثبات وجود الأكواد:
+
+SELECT account_code, account_name
+FROM chart_of_accounts
+WHERE account_code IN ('1301','2101','2100')
+   OR account_code LIKE '%-1301'
+   OR account_code LIKE '%-2101'
+ORDER BY account_code;
+
+
+STOP.

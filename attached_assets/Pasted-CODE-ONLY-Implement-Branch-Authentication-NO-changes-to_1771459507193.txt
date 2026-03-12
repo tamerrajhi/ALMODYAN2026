@@ -1,0 +1,60 @@
+CODE-ONLY — Implement Branch Authentication (NO changes to atomic/RBAC)
+
+STRICT RULES:
+- Do NOT modify any existing business logic or atomic RPCs.
+- Only add new branch-auth middleware + endpoints.
+- Use bcrypt for password verify (same library already used).
+- Use SHA-256 hashing for session tokens (same style as requireSession).
+- Set HTTP-only cookie for branch session: "__branch"
+- Evidence: git diff --stat + git diff + smoke tests.
+
+NEW MIDDLEWARE:
+1) requireBranchSession(req,res,next)
+   - read cookie "__branch"
+   - hash it (sha256 hex)
+   - lookup in branch_sessions where token_hash=... AND revoked_at IS NULL AND expires_at > now()
+   - if not found => 401 {error:"Branch session required"}
+   - set (req as any).branchId = branch_id
+   - update last_seen_at = now()
+
+NEW ENDPOINTS:
+A) POST /api/branch/login   (PUBLIC)
+Body: { username, password }
+Flow:
+- find branch_accounts by username AND is_active=true
+- bcrypt.compare(password, password_hash)
+- on success:
+  - create random token (32+ bytes) and store sha256(token) in branch_sessions.token_hash
+  - expires_at = now() + interval '12 hours'
+  - set cookie "__branch" = raw token (httpOnly, sameSite=lax, secure if production)
+  - return {data:{branch_id}, error:null}
+- on failure: 401 {error:"Invalid branch credentials"}
+
+B) POST /api/branch/logout  (requireBranchSession)
+- revoke current session: set revoked_at=now()
+- clear cookie "__branch"
+- return {data:{ok:true}, error:null}
+
+C) GET /api/branch/context  (requireBranchSession)
+- return {data:{branch_id:(req as any).branchId}, error:null}
+
+NOTES:
+- Do not log passwords or tokens.
+- Keep response envelope consistent with existing {data, error} where used.
+
+SMOKE TESTS:
+1) No cookie -> GET /api/branch/context => 401
+2) Create a branch_account manually in DB for one branch (use bcrypt hash) then:
+   POST /api/branch/login => 200 + sets __branch cookie
+3) With cookie -> GET /api/branch/context => 200 includes branch_id
+4) POST /api/branch/logout => 200 and cookie cleared
+5) After logout -> GET /api/branch/context => 401
+
+FILES:
+- Implement in server/routes.ts (near auth/session helpers) OR server/branchAuth.ts + small wiring in routes.ts (prefer minimal touch).
+
+EVIDENCE:
+A) git diff --stat
+B) git diff
+C) Smoke test outputs
+STOP.

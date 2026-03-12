@@ -1,0 +1,156 @@
+✅ PROMPT — WAVE 3 FINAL EVIDENCE PACK (POST-MIGRATION) | DIFFS + CURLS + COUNTS | NO GUESSING | STOP
+
+ROLE: Full-stack Engineer (Vite/React + Express + Neon)
+MODE: Evidence-only. No speculation. No new migrations. Do NOT change files. Only collect proof of what Wave 3 already changed.
+
+GOAL:
+Produce a single, complete “Wave 3 Final Evidence Pack” proving:
+1) Exactly which frontend files were migrated (supabase.from/rpc removed).
+2) Exactly which backend endpoints were added/modified for Wave 3.
+3) Security: all Wave 3 endpoints are protected by requireSession (or explicitly justified if public).
+4) Runtime: endpoints return JSON and work with a real session cookie.
+5) Remaining Supabase usage counts after Wave 3 (production path vs dev-only health).
+
+HARD RULES:
+- NO code edits.
+- NO new endpoints.
+- NO generic claims.
+- Every statement must be backed by raw command output.
+
+SECTION A — IDENTIFY WAVE 3 CHANGES (RAW)
+A1) git diff summary since the Wave 3 start (or last commit):
+git diff --stat
+
+A2) Full list of changed files:
+git diff --name-only
+
+A3) Extract only src/ changes (frontend scope):
+git diff --name-only | rg "^src/"
+
+A4) Prove each migrated frontend file has zero supabase usage:
+For each file that Wave 3 claims migrated, run:
+rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <FILE> || true
+rg -n "from\\s*['\"]@/integrations/supabase/client['\"]" <FILE> || true
+
+SECTION B — BACKEND ENDPOINT INVENTORY + SECURITY (RAW)
+B1) List all app.get/app.post/app.put/app.delete route definitions that changed in Wave 3:
+git diff server/routes.ts
+
+B2) From the CURRENT server/routes.ts (not diff), output an endpoint list for all Wave 3 endpoints:
+rg -n "app\\.(get|post|put|delete)\\(\"/api/" server/routes.ts
+
+B3) For EACH Wave 3 endpoint, show requireSession presence on that same line/block:
+For each endpoint line number, also show 3-6 lines around it:
+sed -n '<START>,<END>p' server/routes.ts
+
+B4) Prove there are NO duplicate same-method same-path routes for all Wave 3 endpoints:
+Use a small script to detect duplicates:
+node - <<'NODE'
+const fs=require('fs');
+const s=fs.readFileSync('server/routes.ts','utf8');
+const re=/app\.(get|post|put|delete)\("([^"]+)"/g;
+const m=new Map();
+let x;
+while((x=re.exec(s))){
+  const k=x[1]+' '+x[2];
+  m.set(k,(m.get(k)||0)+1);
+}
+const dup=[...m.entries()].filter(([k,v])=>v>1);
+console.log('DUP_COUNT',dup.length);
+dup.slice(0,200).forEach(([k,v])=>console.log(v,k));
+NODE
+
+SECTION C — RUNTIME PROOF WITH REAL AUTH COOKIE (RAW)
+C1) Confirm login request format by grepping auth route:
+rg -n "app\\.post\\(\"/api/auth/login" -n server/routes.ts server/auth.ts || true
+
+C2) Obtain a session cookie via curl (show headers):
+(Use correct payload keys; do NOT guess — copy from auth route code.)
+curl -i -s -X POST "http://localhost:5000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -H "Origin: http://localhost:5000" \
+  --data '{"email_or_username":"admin@system.local","password":"<REDACTED>"}'
+
+C3) Call EACH Wave 3 endpoint twice:
+- without cookie (expect 401 if protected)
+- with cookie (expect 200 + JSON)
+Show:
+- HTTP status line
+- Content-Type header
+- first 20 lines of JSON body
+Example format:
+curl -i -s "http://localhost:5000/api/<endpoint>" | head -n 40
+curl -i -s "http://localhost:5000/api/<endpoint>" -H "Cookie: __session=<VALUE>" | head -n 40
+
+SECTION D — POST-WAVE3 SUPABASE COUNTS (MULTILINE-AWARE) (RAW)
+D1) Count files + calls for supabase.from/rpc across src/ (multiline-aware):
+node - <<'NODE'
+const fs=require('fs'), path=require('path');
+function walk(dir){
+  let out=[];
+  for(const e of fs.readdirSync(dir,{withFileTypes:true})){
+    const p=path.join(dir,e.name);
+    if(e.isDirectory()) out=out.concat(walk(p));
+    else if(p.endsWith('.ts')||p.endsWith('.tsx')) out.push(p);
+  }
+  return out;
+}
+const files=walk('src');
+const re=/supabase\s*\.\s*(from|rpc)\s*\(/g;
+let totalCalls=0;
+let per=[];
+for(const f of files){
+  const s=fs.readFileSync(f,'utf8');
+  const m=s.match(re);
+  if(m){
+    per.push([m.length,f]);
+    totalCalls+=m.length;
+  }
+}
+per.sort((a,b)=>b[0]-a[0]);
+console.log('TOTAL_FILES',per.length);
+console.log('TOTAL_CALLS',totalCalls);
+console.log('TOP20');
+per.slice(0,20).forEach(([n,f])=>console.log(String(n).padStart(3,' '),f));
+NODE
+
+D2) Separate DEV-only health folder counts:
+node - <<'NODE'
+const fs=require('fs'), path=require('path');
+function walk(dir){
+  let out=[];
+  for(const e of fs.readdirSync(dir,{withFileTypes:true})){
+    const p=path.join(dir,e.name);
+    if(e.isDirectory()) out=out.concat(walk(p));
+    else if(p.endsWith('.ts')||p.endsWith('.tsx')) out.push(p);
+  }
+  return out;
+}
+const re=/supabase\s*\.\s*(from|rpc)\s*\(/g;
+function count(dir){
+  const files=walk(dir);
+  let calls=0, touched=0;
+  for(const f of files){
+    const s=fs.readFileSync(f,'utf8');
+    const m=s.match(re);
+    if(m){ touched++; calls+=m.length; }
+  }
+  return {touched,calls};
+}
+const health=count('src/components/health');
+const all=count('src');
+console.log('HEALTH_FILES',health.touched,'HEALTH_CALLS',health.calls);
+console.log('ALL_FILES',all.touched,'ALL_CALLS',all.calls);
+console.log('PROD_PATH_FILES',all.touched-health.touched,'PROD_PATH_CALLS',all.calls-health.calls);
+NODE
+
+SECTION E — BUILD PROOF (RAW)
+npm run build
+
+OUTPUT FORMAT (STRICT):
+1) A1-A4 raw outputs
+2) B1-B4 raw outputs
+3) C1-C3 raw outputs (for each endpoint)
+4) D1-D2 raw outputs
+5) E raw output (build result)
+NO narrative. NO recommendations. STOP.

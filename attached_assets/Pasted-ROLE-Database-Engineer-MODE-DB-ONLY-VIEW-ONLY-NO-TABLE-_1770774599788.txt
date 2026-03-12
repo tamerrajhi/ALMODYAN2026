@@ -1,0 +1,79 @@
+ROLE: Database Engineer
+MODE: DB ONLY (VIEW ONLY) — NO TABLE ALTER, NO DATA UPDATE/DELETE
+TASK: Update public.v_returns_hub so it includes BOTH purchase_returns (general) and unique_purchase_returns (unique) as a single SoT for Returns Hub.
+
+STRICT RULES:
+- Only: CREATE OR REPLACE VIEW public.v_returns_hub AS ...
+- Do NOT touch any tables, constraints, functions, or app code.
+- Keep EXACT same 18 columns, names, and order currently used by the UI.
+- Provide Evidence:
+  A) new view SQL (full)
+  B) counts before/after (hub_cnt + unique_cnt + sample row)
+  C) verify the previously failing id appears in the view
+
+INPUT: We have proof current view definition is:
+SELECT ... FROM purchase_returns pr;
+
+IMPLEMENTATION:
+CREATE OR REPLACE VIEW public.v_returns_hub AS
+(
+  -- Legacy/general returns (keep as-is)
+  SELECT
+    pr.return_number,
+    CASE WHEN (pr.purchase_type = 'import') THEN 'unique' ELSE 'general' END AS return_type,
+    pr.id AS canonical_id,
+    pr.status,
+    pr.branch_id,
+    pr.supplier_id,
+    (pr.return_date)::text AS return_date,
+    pr.subtotal,
+    pr.tax_amount,
+    pr.total_amount,
+    true AS mirror_exists,
+    (pr.journal_entry_id IS NOT NULL) AS has_je,
+    pr.journal_entry_id,
+    NULL::integer AS expected_movement_count,
+    NULL::integer AS actual_movement_count,
+    NULL::boolean AS has_drift,
+    NULL::text AS drift_type,
+    (pr.created_at)::text AS created_at
+  FROM purchase_returns pr
+)
+UNION ALL
+(
+  -- New/unique returns (mirror same 18 columns 1:1)
+  SELECT
+    upr.return_number,
+    'unique'::text AS return_type,
+    upr.id AS canonical_id,
+    upr.status,
+    upr.branch_id,
+    upr.supplier_id,
+    (upr.return_date)::text AS return_date,
+    upr.subtotal,
+    upr.tax_amount,
+    upr.total_amount,
+    true AS mirror_exists,
+    (upr.journal_entry_id IS NOT NULL) AS has_je,
+    upr.journal_entry_id,
+    NULL::integer AS expected_movement_count,
+    NULL::integer AS actual_movement_count,
+    NULL::boolean AS has_drift,
+    NULL::text AS drift_type,
+    (upr.created_at)::text AS created_at
+  FROM unique_purchase_returns upr
+);
+
+EVIDENCE REQUIRED:
+1) Show updated view definition:
+SELECT definition FROM pg_views WHERE schemaname='public' AND viewname='v_returns_hub';
+
+2) Counts:
+SELECT count(*) AS hub_cnt FROM v_returns_hub;
+SELECT count(*) AS unique_cnt FROM unique_purchase_returns;
+
+3) Prove the failing return id is now discoverable:
+SELECT * FROM v_returns_hub
+WHERE canonical_id = '554a20b5-900a-425e-8cdd-aae7e4c7713f';
+
+STOP.

@@ -1,0 +1,72 @@
+✅ PROMPT — STOP-POS-SALE-RPC-CONTRACT-AUDIT | Contract + DB schema for missing POS functions | DB READ ONLY | EVIDENCE | STOP
+
+ROLE: Database Engineer / Auditor
+
+MODE: DB READ ONLY (NO CREATE/ALTER YET)
+
+GOAL
+Collect the exact contract needed to implement:
+- pos_begin_request(jsonb)
+- pos_fail_request(jsonb)
+- pos_succeed_request(jsonb)
+- complete_pos_sale_atomic(jsonb)
+
+EVIDENCE REQUIRED
+
+A) Payload contract (from code)
+1) In src/pages/POSPage.tsx: paste the exact saleCmd object structure passed to completePOSSaleAtomic.
+2) In src/lib/dataGateway.ts: paste how payload is constructed for:
+   - pos_begin_request
+   - complete_pos_sale_atomic (p_payload)
+   - pos_fail_request
+   - pos_succeed_request (if referenced)
+3) Paste the exact expected response usage in UI after checkout:
+   - which fields are read (sale_id, invoice_id, journal_entry_id, etc.)
+
+B) DB schema inspection (SQL outputs)
+Run and paste results (FULL):
+
+1) \d or information_schema for core POS tables (choose actual existing tables used by POS):
+- sales
+- sale_items (or sales_items)
+- invoices
+- invoice_items
+- unique_items
+- payments / customer_receipts (if involved)
+- journal_entries
+- journal_entry_lines
+
+Use:
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='<table>'
+ORDER BY ordinal_position;
+
+2) Confirm keys/constraints:
+SELECT conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+JOIN pg_class t ON c.conrelid=t.oid
+WHERE t.relname IN ('sales','sale_items','invoices','invoice_items','unique_items','journal_entries','journal_entry_lines')
+ORDER BY t.relname, conname;
+
+3) Find any existing atomic workflow table pattern:
+Search for tables like:
+- atomic_workflow_requests
+- pos_workflow_requests
+Run:
+SELECT table_name FROM information_schema.tables
+WHERE table_schema='public' AND table_name ILIKE '%workflow%';
+
+If found, paste schema.
+
+C) Accounting mapping needed
+Find what accounts POS sale should post to:
+- any table like branch_inventory_accounts or COA mapping
+Run:
+SELECT table_name FROM information_schema.tables
+WHERE table_schema='public' AND table_name ILIKE '%account%';
+
+If mapping table exists, paste key columns.
+
+STOP
+After delivering A+B+C evidence, STOP. Do NOT implement functions yet.

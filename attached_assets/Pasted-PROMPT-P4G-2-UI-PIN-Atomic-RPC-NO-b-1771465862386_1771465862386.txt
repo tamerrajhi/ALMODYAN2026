@@ -1,0 +1,65 @@
+PROMPT P4G-2 — UI صغير لتحسين تجربة PIN (بدون أي تغيير في منطق الأعمال أو Atomic/RPC)
+
+القاعدة: NO backend changes, NO DB changes, NO RPC payload changes.
+مسموح فقط تعديل UI/React components لتحسين الرسائل والحالات.
+
+Scope الملفات:
+1) src/components/pos/POSCashierGate.tsx
+2) src/pages/POSReturnPage.tsx (Supervisor Override Modal فقط)
+
+A) POSCashierGate.tsx — مطلوب:
+1) عند أي error من endpoints التالية:
+- GET /api/pos/session/context
+- GET /api/pos/cashiers
+- POST /api/pos/cashier/enter
+- POST /api/pos/cashier/exit
+اعرض رسائل عربية واضحة حسب status code:
+
+Mapping:
+- 400 + message includes "no pin" OR server message about PIN not set:
+  "لا يوجد PIN لهذا المستخدم. اطلب من المشرف تعيين PIN من شاشة المستخدمين."
+- 401:
+  "رمز PIN غير صحيح."
+- 403:
+  "غير مصرح لك."
+- 423:
+  "تم قفل المستخدم مؤقتًا بسبب محاولات كثيرة. حاول مرة أخرى لاحقًا."
+  وإذا السيرفر رجّع locked_until في الرسالة أو في error payload، اعرضه بصيغة وقت واضحة.
+- 500/Network:
+  "تعذر الاتصال بالخادم. حاول مرة أخرى."
+
+2) UI المطلوب:
+- رسالة error تظهر في Alert واضح فوق زر الدخول
+- زر "إعادة المحاولة" يمسح الرسالة ويعيد تحميل قائمة الكاشير (invalidate/refetch)
+- لا تستخدم localStorage
+- لا تغيّر أي signature للأندبوينتس أو شكل body
+
+3) Safety:
+- منع double submit أثناء enter (isEntering)
+- مسح PIN input بعد فشل 401 أو بعد نجاح
+
+B) POSReturnPage.tsx — Supervisor Override Modal فقط:
+1) عند الضغط على "تأكيد المرتجع" يفتح modal كما هو، لكن:
+- حسّن رسائل الخطأ بنفس mapping أعلاه لنداء:
+  POST /api/pos/override (action_key='pos_return_confirm')
+- عند 401 امسح PIN فورًا
+- عند 423 اعرض رسالة القفل بوضوح
+- عند 403 اعرض:
+  - "المشرف غير مصرح/غير مرتبط بالفرع" حسب رسالة السيرفر
+- عند Cancel: امسح supervisorUserId + pin + notes + error
+
+2) لا تغيّر منطق processReturn ولا ترتيب الاستدعاءات:
+Success flow:
+override success -> close modal -> call existing processReturn
+
+C) Evidence المطلوب في الرد:
+1) git diff --stat
+2) ذكر الأماكن المعدلة (اسم الملف + أقسام التعديل)
+3) Smoke checklist يدوي:
+- Wrong PIN cashier -> رسالة صحيحة + PIN cleared
+- Locked cashier -> رسالة صحيحة
+- No PIN -> رسالة صحيحة
+- Supervisor override wrong PIN -> رسالة صحيحة + PIN cleared
+- Cancel override -> fields cleared
+
+ممنوع إضافة أي endpoint جديد أو تعديل server.

@@ -1,0 +1,106 @@
+PROMPT — PURCH-INVOICES-UI-REGRESSION-AUDIT-V1 | NO GUESS | STRICT EVIDENCE | STOP-GATED
+
+ROLE: Senior Full-Stack Engineer
+MODE: Audit + Fix (UI + minimal wiring only)
+SCOPE:
+- Target screen: /purchasing/invoices and related invoice pages.
+- Goal: verify General Purchases invoices UI still fully works AND is NOT impacted by unique_* module changes.
+- DO NOT change any DB schema, RPC SQL, migrations, or unique_* tables.
+- Any fix must be limited to UI code (React/TS) and only if evidence shows a real break.
+RULES:
+- No guessing: every claim must be backed by code snippet or raw UI proof.
+- Evidence REQUIRED at each STOP.
+- If something is already correct → say PASS with evidence, DO NOT refactor.
+
+========================
+STOP-1 (AUDIT — MAP PAGES + DATA SOURCES)
+========================
+1) Identify exact pages for this flow (code proof):
+- Show routes from src/App.tsx for:
+  /purchasing/invoices
+  /purchasing/invoices/new
+  /purchasing/invoices/:id/view
+  /purchasing/invoices/:id
+2) For each page file, list:
+- RPC calls (dataGateway.rpc)
+- direct queries (dataGateway.queryTable / supabase.from)
+- service calls (purchasingReadService / purchasingWriteService)
+Provide grep with line numbers:
+- grep -n "rpc(" src/pages/purchasing/PurchaseInvoicesPage.tsx
+- grep -n "rpc(" src/pages/purchasing/PurchaseInvoiceFormPage.tsx
+- grep -n "rpc(" src/pages/purchasing/PurchaseInvoiceViewPage.tsx
+- grep -n "queryTable(" in same files
+- grep -n "supabase.from" in same files
+3) Confirm invoice table used فعليًا (DB proof):
+- \d+ public.invoices
+- \d+ public.purchase_invoice_lines
+- Show any views used by list page (e.g., v_purchasing_invoices_list) if referenced.
+
+STOP after raw outputs.
+
+========================
+STOP-2 (UI SMOKE — GENERAL PURCHASES MUST WORK)
+========================
+Using the app UI (logged-in session), produce RAW proofs (screenshots or console logs) that the following work:
+
+A) List page:
+- filters (branch/supplier/status/date/search) do not crash
+- opening invoice details works
+
+B) Create new general purchase invoice:
+- create draft (or posted depending on flow)
+- add 1 line item (product/service/cost) as the UI allows
+- VAT handling works (vat_rate > 0 results in tax_amount > 0)
+- submit/save success toast + invoice number visible
+Provide proof:
+- screenshot of success + created invoice number
+- (if possible) network proof: which RPC was called (name + response snippet)
+
+C) Post / Void actions (if present):
+- If UI has Post and Void buttons: attempt both on a test invoice.
+- If those actions are not on UI: show where they exist or confirm not applicable.
+
+STOP after proofs.
+
+========================
+STOP-3 (COMPATIBILITY CHECK — UNIQUE MODULE MUST NOT LEAK INTO GENERAL INVOICES UI)
+========================
+1) Code-level assertion:
+- Verify /purchasing/invoices list query does NOT accidentally include unique_purchase_invoices.
+- Verify any "type filter" uses invoices.invoice_type or purchase_type as intended.
+Provide code snippets with line numbers showing filters and columns.
+
+2) DB-level assertion (read-only queries, paste outputs):
+- Show the last 5 rows from invoices and last 5 from unique_purchase_invoices (ids + numbers) to prove they are separate.
+- Confirm general invoices list page is backed by invoices, not unique_purchase_invoices.
+
+STOP after proofs.
+
+========================
+STOP-4 (FIX ONLY IF BROKEN — MINIMAL UI PATCH)
+========================
+If any break is found in STOP-2 or mismatch in STOP-3:
+- Apply the minimal change to fix it.
+- Forbidden: refactor services, change DB, change RPC.
+- Allowed: adjust select columns, filter column names, mapping of labels, or branching logic in UI.
+
+Evidence required:
+- git diff --stat
+- git diff --
+- tsc --noEmit (exit code)
+- Repeat ONLY the failing part of STOP-2 and show it now PASS.
+
+STOP.
+
+========================
+STOP-5 (FINAL VERDICT)
+========================
+Provide a concise checklist:
+- List page: PASS/FAIL
+- Create invoice: PASS/FAIL
+- View details: PASS/FAIL
+- Post/Void actions: PASS/FAIL (or N/A with proof)
+- No leakage from unique_* tables: PASS/FAIL
+Include pointers to the evidence lines/screens.
+
+STOP.

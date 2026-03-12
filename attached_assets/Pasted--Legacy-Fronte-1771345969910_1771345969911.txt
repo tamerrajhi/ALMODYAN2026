@@ -1,0 +1,66 @@
+المطلوب: حذف نهائي للزر الأصفر "تعديل" (Legacy) من شاشة عرض فاتورة المشتريات، بكل متعلقاته من Frontend/Backend/DB.
+ممنوع تخمين. نفّذ Audit ثم Delete ثم Gates ثم Evidence.
+
+=== A) AUDIT (قبل الحذف) ===
+1) افتح: src/pages/purchasing/PurchaseInvoiceViewPage.tsx
+حدد الزر الأصفر "تعديل" (اللي يظهر معه Tooltip مثل "لا يمكن تعديل فاتورة مرحلة الحسابات").
+اطبع:
+- سطور الزر (JSX)
+- شرط الظهور/التعطيل
+- onClick handler
+- أي tooltip text
+- اسم أي state/props/query يعتمد عليها
+
+2) تتبع dependencies مباشرة:
+اعمل rg على أسماء الأشياء اللي وجدتها في (1) داخل src + server:
+rg -n "<handler>|<state>|<queryKey>|can-edit|edit_atomic|can_edit_unique_purchase_invoice|unique_purchase_invoice_edit_atomic" src server
+
+حدد قائمة دقيقة بـ:
+- أي dataGateway functions مستخدمة لهذا الزر (مثلاً checkUniqueInvoiceCanEdit)
+- أي endpoint في server/routes.ts (مثلاً /api/purchasing/unique-invoice/:id/can-edit)
+- أي RPC allowlist entries (unique_purchase_invoice_edit_atomic)
+- أي DB functions (can_edit_unique_purchase_invoice / unique_purchase_invoice_edit_atomic)
+
+=== B) DELETE (نفّذ الحذف الكامل للـLegacy فقط) ===
+Frontend:
+1) احذف الزر الأصفر "تعديل" بالكامل من PurchaseInvoiceViewPage.tsx
+2) احذف أي state/handlers/imports/queries كانت فقط لخدمته
+3) احذف checkUniqueInvoiceCanEdit (أو ما يعادلها) من src/lib/dataGateway.ts إذا أصبحت غير مستخدمة
+4) احذف editUniqueInvoiceAtomic (أو ما يعادلها) من src/domain/purchasing/purchasingWriteService.ts إذا كانت legacy/غير مستخدمة
+
+Backend:
+5) احذف endpoint الـcan-edit legacy من server/routes.ts إن كان موجوداً
+6) احذف unique_purchase_invoice_edit_atomic من RPC_ALLOWLIST إن كان موجوداً
+7) احذف أي special handling متعلق به إن وجد
+
+DB:
+8) نفّذ:
+DROP FUNCTION IF EXISTS public.can_edit_unique_purchase_invoice(uuid);
+DROP FUNCTION IF EXISTS public.unique_purchase_invoice_edit_atomic(jsonb);
+
+مهم جداً:
+- لا تلمس rebuild path نهائياً:
+  UniqueInvoiceEditDialog (مسار الـrebuild)
+  can_rebuild_unique_purchase_invoice
+  unique_purchase_invoice_rebuild_atomic
+  rebuild-gate endpoint
+- بعد الحذف يجب أن يبقى لدينا زر واحد واضح للتعديل/إعادة البناء (الشغال) بدون زر أصفر legacy.
+
+=== C) GATES (لازم 0 matches) ===
+1) بعد الحذف:
+rg -n "can_edit_unique_purchase_invoice|unique_purchase_invoice_edit_atomic|checkUniqueInvoiceCanEdit|editUniqueInvoiceAtomic|/can-edit" src server
+=> لازم 0 matches
+
+2) DB verify:
+select p.proname
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname='public'
+and p.proname in ('can_edit_unique_purchase_invoice','unique_purchase_invoice_edit_atomic');
+=> لازم 0 rows
+
+=== D) EVIDENCE REQUIRED ===
+A) git diff --stat
+B) git diff
+C) Screenshot/وصف: شريط الأزرار بعد التعديل:
+- لا يوجد زر أصفر "تعديل"
+- زر إعادة بناء الفاتورة (الشغال) موجود ويعمل

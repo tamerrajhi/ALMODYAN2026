@@ -1,0 +1,113 @@
+You are a senior full-stack engineer and DevOps assistant working inside this Replit project.
+
+GOAL
+Set up a professional “Code Review & Support” stack for this codebase that enables:
+- Export to GitHub (repo-ready)
+- Automated code quality checks (lint/format/typecheck/tests)
+- Security scanning (SAST + dependency alerts)
+- Maintainability tooling (runbook + docs) so the project is easier to support for future client requests
+
+CONSTRAINTS
+- Do NOT commit any secrets, tokens, DB URLs, API keys, service role keys, or credentials to the repository.
+- All secrets must remain in Replit Secrets and/or GitHub Actions Secrets.
+- Do not break the running app. Make changes incrementally and keep the project runnable after each step.
+- If the stack is unknown, detect it from package.json / requirements / project structure before choosing tools.
+
+STEP 0 — DISCOVERY (must do first)
+1) Detect the stack and runtime:
+   - language(s): TS/JS/Python/etc
+   - framework: React/Vite/Next/Express/FastAPI/etc
+   - test setup: jest/vitest/pytest/etc
+   - build tooling: vite/webpack/tsc/etc
+   - code style: existing eslint/prettier configs?
+2) Output a short “Tech Summary” with exact commands to run dev/build/test.
+
+STEP 1 — GIT + EXPORT READINESS
+1) Add/verify a proper .gitignore for the detected stack (node, python, env, logs, dist, .replit artifacts).
+2) Ensure the repo is clean of secrets:
+   - scan for patterns like SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, API_KEY, private keys.
+   - if found, move them to environment variables and update code to read from process.env / os.environ.
+3) Create a “EXPORT.md” with instructions:
+   - how to export to GitHub from Replit
+   - how to run the project locally after export
+   - environment variables checklist
+
+STEP 2 — CODE QUALITY (Lint / Format / Typecheck)
+Based on detected stack:
+A) If JS/TS:
+- Add ESLint (with recommended + typescript rules if TS), Prettier, and configuration.
+- Add scripts:
+  - lint
+  - format
+  - format:check
+  - typecheck (tsc --noEmit) if TS exists
+B) If Python:
+- Add Ruff + Black + MyPy (only if typing exists) and scripts:
+  - lint
+  - format
+  - typecheck (optional)
+Make sure rules are practical (not overly strict at first). Fix only high-confidence issues automatically; don’t refactor aggressively.
+
+STEP 3 — TESTS (minimum viable)
+- Detect existing tests. If none, create a minimal “smoke test” strategy:
+  - one basic unit test (or API health test) that can run in CI
+  - make sure tests are deterministic and do not require real external services
+- Add scripts:
+  - test
+  - test:ci
+
+STEP 4 — SECURITY
+1) Add a lightweight SAST:
+   - Prefer CodeQL if GitHub repo is used, otherwise add Semgrep config.
+2) Add dependency vulnerability checking:
+   - If GitHub: dependabot.yml for npm/pip
+3) Add a SECURITY.md explaining how to report vulnerabilities and how secrets are handled.
+
+STEP 5 — GITHUB ACTIONS CI
+Create .github/workflows/ci.yml that runs on push + PR:
+- install deps (npm ci / pip install)
+- lint
+- format check
+- typecheck (if applicable)
+- tests
+Cache dependencies for speed.
+If the repo is monorepo, handle paths appropriately.
+
+STEP 6 — SUPPORT DOCUMENTATION (Runbook)
+Create docs/ folder with:
+1) docs/architecture.md
+   - system overview
+   - modules/components
+   - key flows
+   - main database entities (high level)
+2) docs/runbook.md
+   - how to start/stop
+   - common errors and fixes
+   - how to add a new feature safely
+   - release checklist
+3) docs/operations.md
+   - logging
+   - env vars
+   - backups (if DB)
+   - basic security checklist
+
+STEP 7 — PR TEMPLATE + ISSUE TEMPLATES
+Add:
+- .github/pull_request_template.md with:
+  - What changed / Why / How tested / Risk / Screenshots
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+
+OUTPUT REQUIREMENTS
+When done, provide:
+1) A checklist of what you created/changed (file paths).
+2) The exact commands to run locally and in Replit:
+   - lint, format, typecheck, test, build
+3) A short “Next Steps” section:
+   - how to connect GitHub repo
+   - where to enable CodeQL/Dependabot
+   - how to use AI code review on PRs
+4) Confirm explicitly that no secrets were committed and where secrets should be stored.
+
+NOW EXECUTE
+Start with STEP 0 discovery, then implement step-by-step.

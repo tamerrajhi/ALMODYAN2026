@@ -1,0 +1,97 @@
+✅ PROMPT واحد (Gate-0 Verification + Badge) — بدون تشعب
+
+ROLE: Lead Engineer
+GOAL: إثبات قاطع إن الـ Frontend بيتعامل مع Neon عبر Express + منع لخبطة “أنا شايف بيانات قديمة” بإضافة fingerprint endpoint + UI badge.
+RULES:
+
+لا تغيّر أي منطق أعمال (business logic) ولا أي RPCs ولا أي جداول.
+
+المطلوب فقط: Endpoint صحة + Badge UI.
+
+اعمل التغييرات في ملفات محددة فقط، واطبع evidence واضح في النهاية.
+
+1) Backend — أضف Fingerprint Endpoint
+
+File: server/routes.ts
+
+تأكد إن فيه endpoint موجود: GET /api/health/db (لو موجود سيبه، لو مش موجود أضفه).
+
+أضف endpoint جديد: GET /api/health/fingerprint يعمل التالي:
+
+يرجّع: current_database(), current_schema(), server_version
+
+يتحقق من وجود:
+
+column: public.invoices.supplier_invoice_no
+
+index: public.invoices_purchase_supp_inv_uq
+
+يتحقق من وجود الدوال التالية في public (وجودها فقط):
+
+purchase_invoice_create_atomic
+
+purchase_invoice_post_atomic
+
+purchase_invoice_void_atomic
+
+purchase_invoice_supp_inv_precheck
+
+purchase_invoice_import_unique_atomic
+
+يرجّع JSON منظم:
+
+ok
+
+db, schema, server_version
+
+invariants: { invoices_supplier_invoice_no_column, invoices_purchase_supp_inv_uq_index, required_functions: { required, missing, ok } }
+
+timestamp
+
+استخدم pool.query(...) فقط. لا تستخدم Supabase في السيرفر.
+
+2) Frontend — أضف Badge يوضح الـ Backend الحالي (Neon Proof)
+
+Files to add:
+
+src/components/system/DataBackendBadge.tsx (Component جديد)
+
+Behavior:
+
+يعمل fetch("/api/health/fingerprint")
+
+يعرض Badge ثابت في الواجهة:
+
+لو ok وكل invariants true: يعرض DATA BACKEND: NEON | <db> | PG <version> بلون أخضر.
+
+لو missing functions أو invariant false: يعرض أصفر ويطبع Missing: ...
+
+لو فشل fetch: أحمر.
+
+Then wire it:
+
+ضع <DataBackendBadge /> في مكان واضح:
+
+يفضّل أعلى MainLayout في الهيدر أو أعلى المحتوى (بدون تغيير تصميم كبير).
+
+3) Evidence مطلوب في نهاية التنفيذ (لا تنفّذ أي Migration الآن)
+
+اطبع في output:
+
+رابط/نتيجة GET /api/health/fingerprint (JSON كامل)
+
+لقطة من مكان إدراج <DataBackendBadge /> (اسم الملف + سطرين قبل/بعد)
+
+grep يثبت إنك ما لمستش أي data-plane migration في الخطوة دي:
+
+git diff --stat
+
+وتأكيد: التغييرات محصورة في:
+
+server/routes.ts
+
+src/components/system/DataBackendBadge.tsx
+
+ملف واحد فقط لتضمين الـ badge (MainLayout أو ما يعادله)
+
+STOP بعد ما تخلص Gate-0. لا تبدأ أي ترحيل Supabase→Neon.

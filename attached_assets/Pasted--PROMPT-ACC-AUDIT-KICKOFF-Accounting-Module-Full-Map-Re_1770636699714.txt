@@ -1,0 +1,100 @@
+✅ PROMPT — ACC-AUDIT-KICKOFF | Accounting Module Full Map + Red Flags | READ-ONLY | EVIDENCE | STOP
+
+ROLE: Auditor
+
+MODE: READ-ONLY (NO FIXES, NO CODE CHANGES)
+
+OBJECTIVE
+Produce an Accounting Audit Pack:
+1) Surface map (UI routes/pages) for accounting.
+2) Data access map (RPC/queryTable/fetch endpoints).
+3) DB schema snapshot + constraints for accounting core tables.
+4) Consistency/reconciliation checks and counts.
+5) Prioritized To-Do list (P0/P1/P2) to harden accounting.
+
+A) UI ROUTES INVENTORY (evidence)
+Search repo for pages/routes containing keywords:
+"accounting", "journal", "trial", "ledger", "coa", "vat", "reports", "gl", "ap", "ar", "payments", "receipts"
+Output table: File | Route | Purpose | Notes
+
+B) DATA CALLS PER PAGE (evidence)
+For each accounting page from (A), list exact calls + line references:
+- dataGateway.rpc(fn)
+- dataGateway.queryTable(table, filters)
+- fetch('/api/...')
+
+C) BACKEND HANDLERS (evidence)
+From server/routes.ts list and paste the full handlers for accounting-related endpoints:
+- /api/journal-entries*
+- /api/ledger*
+- /api/reports*
+- /api/trial-balance*
+- /api/chart-of-accounts*
+- /api/payments* /api/receipts*
+- /api/invoices* (if accounting related)
+
+D) DB SCHEMA SNAPSHOT (evidence)
+Dump schema + constraints + indexes for:
+chart_of_accounts
+branch_coa_accounts
+journal_entries
+journal_entry_lines
+payments
+invoices
+sales
+sales_invoice_items
+returns
+return_items
+credit_notes
+
+Include:
+- columns (name, type, nullable)
+- PK/FK constraints
+- unique indexes
+- check constraints (status enums etc.)
+
+E) CONSISTENCY / RECONCILIATION CHECKS (paste SQL + outputs)
+E1) Posted journal entries that are imbalanced:
+SELECT count(*) AS imbalanced_posted
+FROM journal_entries je
+WHERE je.status='posted'
+  AND COALESCE(je.total_debit,0) <> COALESCE(je.total_credit,0);
+
+E2) Journal entries with missing lines:
+SELECT count(*) AS je_missing_lines
+FROM journal_entries je
+LEFT JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+WHERE je.status='posted'
+GROUP BY je.id
+HAVING count(jel.id)=0;
+
+E3) Lines referencing non-existing accounts:
+SELECT count(*) AS lines_missing_account
+FROM journal_entry_lines jel
+LEFT JOIN chart_of_accounts coa ON coa.id = jel.account_id
+WHERE coa.id IS NULL;
+
+E4) Posted invoices missing journal_entry_id:
+SELECT count(*) AS posted_invoices_missing_je
+FROM invoices
+WHERE status='posted' AND journal_entry_id IS NULL;
+
+E5) Branch COA mapping completeness:
+SELECT b.branch_code, t.template_code, count(*) AS mapped
+FROM branches b
+CROSS JOIN (SELECT DISTINCT template_code FROM branch_coa_accounts) t
+LEFT JOIN branch_coa_accounts m
+  ON m.branch_id=b.id AND m.template_code=t.template_code
+GROUP BY b.branch_code, t.template_code
+HAVING count(m.id)=0
+ORDER BY b.branch_code, t.template_code;
+
+F) RED FLAGS + PRIORITIZED TODO
+Summarize critical gaps:
+- Missing RPCs used by accounting pages
+- Any direct DB writes from UI
+- Permission/auth gaps in accounting endpoints
+- Any schema mismatches (FKs referencing legacy tables)
+Output To-Do list with P0/P1/P2.
+
+STOP after providing all evidence.

@@ -1,0 +1,61 @@
+ROLE: Full-Stack Engineer
+MODE: ATOMIC MIGRATION (TRANSFERS ONLY) — STOP AFTER DONE
+
+GOAL:
+Ensure Transfers are fully Atomic-only end-to-end:
+Create → Post → Void/Reverse
+and that transferred items become visible in target-branch queries (POS / serial transfer screens) via consistent movement records.
+
+SCOPE:
+- Transfers module only (create_transfer_v2, reverse_transfer_v2 already exist per earlier list).
+- NO other modules.
+- No direct writes.
+
+STEP 1 — VERIFY CURRENT TRANSFER FLOWS (NO GUESSING):
+1) Identify Transfer pages/components and service file(s):
+   - TransferRequestsPage / TransferDetails / any transfer forms.
+2) Confirm which RPCs are called for:
+   - create (draft)
+   - post/complete
+   - void/reverse
+3) Confirm which tables are read for:
+   - transfer headers
+   - transfer lines
+   - stock movements / item movements
+   - unique/serialized availability (the query used by POS & serial-transfer UI)
+
+STEP 2 — FIX VISIBILITY GAP (IF EXISTS):
+If imported/unique items do not appear in transfer/POS:
+- Find the root cause in read queries:
+  - missing branch filter
+  - wrong source table/view
+  - items not inserted into canonical movements table
+- Apply the minimal fix:
+  A) Prefer read-side fix (query/view) if movements already correct.
+  B) If movements are missing, fix the atomic RPC to write the canonical movement rows at Post time.
+Do NOT introduce direct writes; only update RPCs if needed.
+
+STEP 3 — GATE TESTS (MANDATORY):
+Create an evidence pack for this exact scenario:
+- Select a known imported unique item in branch A (by item_code / serial).
+- Create transfer A -> B including that item.
+- Post transfer.
+- Verify:
+  1) item is no longer available in A
+  2) item is available in B
+  3) POS/serial transfer screens in B can find it
+- Reverse/Void transfer.
+- Verify item availability returns to A.
+
+STEP 4 — EVIDENCE OUTPUT (MANDATORY):
+A) List transfer RPCs used and their exact names (create/post/reverse).
+B) Paste the key code snippets (with line numbers) where transfer UI calls these RPCs.
+C) Paste the exact SQL / RPC changes if any were needed (create OR replace function only).
+D) Provide the Gate Test evidence:
+   - item_code tested
+   - transfer_id
+   - screenshots optional, but at minimum paste:
+     SELECT queries showing availability in branch A/B before/after post and after reverse
+STOP AFTER OUTPUT.
+NO OTHER MODULES.
+NO GUESSING.

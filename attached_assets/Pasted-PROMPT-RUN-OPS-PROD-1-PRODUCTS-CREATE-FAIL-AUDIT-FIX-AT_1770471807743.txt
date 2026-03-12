@@ -1,0 +1,87 @@
+PROMPT — RUN-OPS-PROD-1 | PRODUCTS CREATE FAIL AUDIT + FIX | ATOMIC ONLY | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon)
+MODE: OPS-FIRST / BUGFIX ONLY / ATOMIC WRITES ONLY
+
+GOAL:
+Fix "Create Product" error so a product can be created successfully from /products/items.
+
+STRICT RULES:
+- Do NOT enable direct writes.
+- Do NOT refactor architecture.
+- Prefer server fixes (RPC/migration/routes) over UI changes.
+- UI change allowed ONLY if current mutation calls forbidDirectWrite or wrong endpoint.
+- MUST capture real error first (network + console). No guessing.
+
+STEP 1 — REPRODUCE + CAPTURE (NO CHANGES)
+A) Open /products/items (logged-in)
+B) Fill minimal required fields and click "إضافة"
+C) Capture:
+1) Browser Console error (full)
+2) Network failing request:
+   - URL + method
+   - status code
+   - response body (or snippet)
+   - request payload
+
+STEP 2 — TRACE WRITE PATH (NO CHANGES)
+Locate the exact file + mutation used for create:
+- likely src/pages/products/... or src/pages/inventory/... (search route component)
+- search for "createProductMutation" OR "forbidDirectWrite('insert'" OR toast "حدث خطأ"
+Paste the create mutationFn snippet.
+
+STEP 3 — CLASSIFY ROOT CAUSE (NO CHANGES)
+Choose exactly ONE root cause based on evidence:
+A) forbidDirectWrite blocks insert (same as COA)  -> needs atomic RPC
+B) RPC exists but missing from allowlist/routing -> fix routes.ts allowlist
+C) RPC called but function missing in DB         -> create migration function
+D) DB error: missing column/enum/constraint/FK   -> minimal schema/migration fix
+E) Payload mismatch (expects jsonb wrapper)       -> align client/server body shape
+
+STEP 4 — MINIMAL FIX (APPLY ONLY WHAT EVIDENCE REQUIRES)
+CASE A (forbidDirectWrite present):
+- Replace mutationFn to call dataGateway.rpc('<atomic_fn>', { p_payload: payload })
+- If atomic fn doesn't exist, create it (CASE C) and allowlist it.
+
+CASE C (function missing):
+- Create ONE migration: migrations/prod_create_product_atomic.sql
+- Create function public.create_product_atomic(p_payload jsonb) RETURNS jsonb
+  Requirements:
+  - Validate required fields (name/code/type at minimum)
+  - Enforce uniqueness (product_code or SKU if used)
+  - Handle account linking fields:
+    inventory_account_id OR inventory_account_code
+    expense/cogs_account_id OR expense_account_code
+  - Return {data, error} with Arabic message codes
+- Add function to RPC_ALLOWLIST in routes.ts if required.
+
+CASE D (schema issue):
+- Add ONLY the missing DB object (column/enum/fk) referenced in the error.
+- Must be idempotent.
+
+STEP 5 — VERIFY (MUST)
+A) Authenticated curl proof using the exact RPC endpoint used by the app:
+- First print the exact endpoint path from server/routes.ts (e.g. POST /api/rpc/<fn>)
+- Then run curl with correct body shape:
+  {"args":{"p_payload":{...}}}
+- Paste HTTP status + JSON output.
+
+B) DB proof:
+- SELECT id, product_code, product_name, is_active, inventory_account_id, expense_account_id
+  FROM products
+  ORDER BY created_at DESC NULLS LAST
+  LIMIT 3;
+
+C) UI proof:
+- Create product in UI succeeds and the new product appears in list.
+
+EVIDENCE REQUIRED (RAW):
+1) git diff --stat
+2) git diff --
+3) migration full contents (if any)
+4) console + network captured error (from Step 1)
+5) curl output
+6) DB SELECT output
+7) npx tsc --noEmit (Exit 0)
+
+STOP.

@@ -1,0 +1,131 @@
+PROMPT — ACC-COA-WRITE-2 | ENABLE CREATE ACCOUNT VIA ATOMIC RPC | MINIMAL CHANGES | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon)
+MODE: BUGFIX ONLY / ATOMIC WRITES ONLY
+
+GOAL:
+Chart of Accounts "Add Account" must work end-to-end using an atomic RPC.
+No direct inserts. No refactors. Minimal files.
+
+SCOPE (ONLY):
+- migrations/: add one SQL migration file
+- server/routes.ts: add RPC to allowlist if needed
+- src/pages/accounting/ChartOfAccountsPage.tsx: replace forbidDirectWrite with dataGateway.rpc
+
+STRICT RULES:
+- Do NOT enable direct writes.
+- Return response as { data, error }.
+- Validate inputs and enforce unique account_code.
+- Respect parent relationship if parent_id provided.
+- Arabic-friendly error messages (simple).
+- Evidence required.
+
+STEP 1 — CONFIRM TABLE SHAPE (NO CHANGES)
+Run and paste:
+- \d+ chart_of_accounts
+Also paste a sample row columns:
+- SELECT * FROM chart_of_accounts LIMIT 1;
+
+From schema, identify the columns we can safely insert:
+(minimum: account_code, account_name, account_name_en, account_type, parent_id?, description?, is_active?, is_group?)
+
+STEP 2 — CREATE MIGRATION (DB ONLY)
+Create new migration file (idempotent):
+migrations/acc_create_coa_account_atomic.sql
+
+Inside it:
+A) CREATE OR REPLACE FUNCTION public.create_chart_of_account_atomic(p_payload jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_code text := NULLIF(trim(p_payload->>'account_code'), '');
+  v_name text := NULLIF(trim(p_payload->>'account_name'), '');
+  v_name_en text := NULLIF(trim(p_payload->>'account_name_en'), '');
+  v_type text := NULLIF(trim(p_payload->>'account_type'), '');
+  v_parent uuid := NULLIF(p_payload->>'parent_id','')::uuid;
+  v_desc text := NULLIF(trim(p_payload->>'description'), '');
+  v_new_id uuid;
+BEGIN
+  IF v_code IS NULL OR v_name IS NULL OR v_type IS NULL THEN
+    RETURN jsonb_build_object('data', null, 'error', jsonb_build_object(
+      'code','VALIDATION_ERROR','message','بيانات الحساب غير مكتملة'
+    ));
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM chart_of_accounts WHERE account_code = v_code) THEN
+    RETURN jsonb_build_object('data', null, 'error', jsonb_build_object(
+      'code','DUPLICATE_CODE','message','رقم الحساب موجود بالفعل'
+    ));
+  END IF;
+
+  IF v_parent IS NOT NULL AND NOT EXISTS (SELECT 1 FROM chart_of_accounts WHERE id = v_parent) THEN
+    RETURN jsonb_build_object('data', null, 'error', jsonb_build_object(
+      'code','PARENT_NOT_FOUND','message','الحساب الأب غير موجود'
+    ));
+  END IF;
+
+  INSERT INTO chart_of_accounts (
+    id, account_code, account_name, account_name_en, account_type, parent_id, description, is_active
+  )
+  VALUES (
+    gen_random_uuid(), v_code, v_name, v_name_en, v_type, v_parent, v_desc, true
+  )
+  RETURNING id INTO v_new_id;
+
+  RETURN jsonb_build_object('data', jsonb_build_object(
+    'success', true,
+    'id', v_new_id,
+    'account_code', v_code
+  ), 'error', null);
+
+EXCEPTION WHEN others THEN
+  RETURN jsonb_build_object('data', null, 'error', jsonb_build_object(
+    'code','SERVER_ERROR','message', SQLERRM
+  ));
+END;
+$$;
+
+B) Ensure pgcrypto is available if gen_random_uuid is used; if not, use uuid_generate_v4 or existing approach used elsewhere.
+
+Apply migration and paste proof:
+- SELECT proname FROM pg_proc WHERE proname='create_chart_of_account_atomic';
+- SELECT * FROM chart_of_accounts ORDER BY created_at DESC NULLS LAST LIMIT 1; (or by account_code)
+
+STEP 3 — SERVER ALLOWLIST (IF REQUIRED)
+In server/routes.ts, ensure RPC_ALLOWLIST includes:
+'create_chart_of_account_atomic'
+
+If there's routing group logic, ensure it uses Group-3 jsonb handler (same as other jsonb RPCs).
+
+STEP 4 — UI PATCH (MINIMAL)
+In src/pages/accounting/ChartOfAccountsPage.tsx:
+A) Add:
+import * as dataGateway from '@/lib/dataGateway';
+
+B) Replace mutationFn with:
+- Build payload from formData:
+  { account_code, account_name, account_name_en, account_type, parent_id, description }
+- Call:
+  const res = await dataGateway.rpc('create_chart_of_account_atomic', { p_payload: payload });
+- If res.error => throw new Error(res.error.message || '...')
+
+Keep onSuccess/onError behavior unchanged.
+
+STEP 5 — PROOFS
+A) git diff --stat
+B) git diff --
+C) curl (AUTHENTICATED) proof:
+POST /api/rpc/create_chart_of_account_atomic
+Body: {"args":{"p_payload":{...}}}
+Show HTTP status + JSON body.
+D) DB proof:
+SELECT account_code, account_name, parent_id
+FROM chart_of_accounts
+WHERE account_code = '<the_test_code>'
+LIMIT 1;
+
+E) npx tsc --noEmit (Exit 0)
+
+STOP.

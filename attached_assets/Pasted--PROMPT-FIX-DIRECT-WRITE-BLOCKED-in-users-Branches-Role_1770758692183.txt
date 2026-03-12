@@ -1,0 +1,112 @@
+✅ PROMPT — FIX DIRECT_WRITE_BLOCKED in /users (Branches + Roles + Permissions) | ATOMIC SERVER WRITES | EVIDENCE PACK | STOP
+
+ROLE: Full-stack Engineer (Express + Neon/Postgres + React)
+
+PROBLEM:
+UsersPage shows:
+DIRECT_WRITE_BLOCKED: Use atomic RPC instead. op=insert file=UsersPage.tsx:618
+Meaning user management mutations are blocked because UI tries direct DB writes or calls forbidDirectWrite() placeholders.
+
+GOAL:
+Make ALL user-management writes work via SERVER endpoints (atomic DB ops), no direct writes from frontend.
+After fix:
+
+Assign/unassign branches for a user works
+
+Assign/unassign custom roles works
+
+(If present) assign/unassign legacy role works
+
+Save per-screen permissions works (if UI has it)
+
+Toggle user active works
+
+Update MFA settings works (if UI has it)
+And UsersPage updates immediately (refetch /api/users-with-details) without errors.
+
+HARD RULES:
+
+No guessing table/column names: verify via information_schema first.
+
+Use requireSession on every endpoint.
+
+Use transactions for multi-step writes.
+
+Enforce idempotency: repeated “add” should not duplicate rows; repeated “remove” should not error.
+
+Keep response JSON simple: { ok: true } or the updated row counts.
+
+Remove/replace forbidDirectWrite() usage in UsersPage with real fetch calls.
+
+STEP 1 — DISCOVER DB SCHEMA (RAW):
+Run SQL to confirm tables/columns exist (and show results):
+
+profiles (users)
+
+branches
+
+user_branches (or equivalent)
+
+custom_roles
+
+user_custom_roles
+
+screens
+
+role_permissions / permissions (whatever is actually used now)
+Output:
+SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN (...);
+AND for each found table:
+SELECT column_name,data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='<table>';
+
+STEP 2 — BACKEND: Implement endpoints in server/routes.ts (ALL requireSession):
+Create minimal endpoints used by UsersPage mutations:
+A) POST /api/users/:userId/branches { branch_id, enabled:boolean }
+
+enabled=true => insert link
+
+enabled=false => delete link
+B) POST /api/users/:userId/custom-roles { role_id, enabled:boolean }
+C) POST /api/users/:userId/legacy-role { role, enabled:boolean } (ONLY if legacy roles exist/used)
+D) POST /api/users/:userId/permissions { permissions: [{screen_path, can_view, can_create, can_edit, can_delete}] }
+
+Must upsert per user+screen (or whatever current schema uses)
+E) POST /api/users/:userId/active { is_active:boolean } (or deactivate/activate)
+F) POST /api/users/:userId/mfa { enabled:boolean, ... } (ONLY if schema exists; otherwise return 501 SCHEMA_NOT_READY)
+
+If any target table does NOT exist, return:
+501 { error_code: "SCHEMA_NOT_READY", error: "Table '<name>' does not exist" }
+
+STEP 3 — FRONTEND: Fix UsersPage.tsx
+
+Find every mutation that currently calls forbidDirectWrite() or tries direct insert/delete
+
+Replace with fetch('/api/users/...', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(...)})
+
+After success, invalidate/refetch:
+
+users list query (/api/users-with-details)
+
+access-context if roles/permissions changed (if needed)
+
+STEP 4 — EVIDENCE PACK (RAW):
+
+git diff --stat
+
+git diff (ONLY server/routes.ts + src/pages/UsersPage.tsx + any small shared helper)
+
+curl without auth for one endpoint => 401 proof
+
+curl with auth (create temp session token in auth_sessions if needed) and show:
+
+Add branch => 200
+
+Remove branch => 200
+
+Add custom role => 200
+
+Remove custom role => 200
+
+Browser proof: open /users, assign branch to user, no DIRECT_WRITE_BLOCKED toast, user still visible and assignment persists after refresh.
+
+STOP.

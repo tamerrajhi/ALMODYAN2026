@@ -1,0 +1,52 @@
+A0 AUDIT ONLY — DO NOT MODIFY ANY FILES
+
+Goal
+I need an evidence-based audit for “POS vs ERP separation” problem, without changing code, DB, RBAC, or routes.
+
+Hard Constraints
+- NO code edits. NO migrations. NO refactors. NO formatting.
+- Only read files + run ripgrep + report with file:line evidence.
+- If you can’t locate something, say “NOT FOUND” and show the search you used.
+
+What to Audit (3 shared pages + routing/sidebar)
+Shared pages suspected to cause coupling:
+1) SalesInvoicesPage — shared via sourceMode prop
+2) SalesReturnsListPage — shared via mode prop
+3) SalesInvoiceViewPage — shared via ?source=pos (or similar)
+
+A1) Locate layout switching / layout dependency
+For each of the 3 pages above, find and report:
+- Does it render MainLayout or POSLayout directly?
+- Does it detect POS via query params, props, pathname, module route, or context?
+- Provide exact file path + line ranges for:
+  - any layout usage
+  - any “isPos” detection logic
+  - any navigation links it emits (to= / navigate()) that go to /sales/* or /pos/*
+
+A2) App routing audit
+Open src/App.tsx and report:
+- Current routes for POS and for ERP related to invoices/returns.
+- Which routes are protected (ProtectedRoute/ModuleRoute/etc) and which are not.
+- Evidence: exact route definitions with line numbers.
+
+A3) Sidebar POS-only logic
+Find the sidebar restriction logic (POS-only allowlist).
+Report:
+- File path + line numbers where isPosMode is computed
+- Which endpoint is used for detection (must confirm exactly)
+- The allowlist array values
+- How matching is done (exact match / startsWith / regex)
+- Whether /pos/invoices and /pos/returns are currently included or still using /sales/* paths.
+
+A4) Navigation cross-contamination audit (rg evidence)
+Run these exact commands and paste results (file:line + matched text lines):
+1) rg -n "\?source=pos|mode=pos|sourceMode\s*=\s*['\"]pos['\"]" src
+2) rg -n "/sales/pos-invoices|/sales/returns\?mode=pos|/sales/invoices|/sales/returns" src
+3) rg -n "navigate\(|<Link|to=" src/pages src/components
+4) rg -n "/pos/invoices|/pos/returns|/pos/return" src
+
+A5) Output format (mandatory)
+Return ONLY:
+1) A table: Issue → Evidence (file:line) → Impact → Notes
+2) A “Change Surface Map” listing EXACT files that would need edits to fully separate POS routes under /pos/*.
+No implementation suggestions beyond listing files & why.

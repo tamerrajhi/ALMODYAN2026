@@ -1,0 +1,107 @@
+PROMPT — RUN-P1-GATE | KEEP CURRENT WORK | VERIFY NO SILENT BREAKS | CHECKPOINT | EVIDENCE | STOP
+
+ROLE: Release Engineer
+MODE: VERIFY + CHECKPOINT (NO NEW FEATURES)
+GOAL: الشغل الحالي فعلاً شغّل شاشات كتير — دلوقتي عايزين نتأكد إنه “سليم” ومش بيكسر أجزاء مهمة (Chart of Accounts / Create Branch). ممنوع توسعة جديدة.
+
+STRICT RULES
+
+ممنوع إضافة endpoints جديدة إلا لو إصلاح bug واضح يمنع صفحة من الفتح.
+
+ممنوع migrations جديدة في هذا البرومبت. (اللي اتعمل خلاص… بس لا تضيف حاجة تاني)
+
+المطلوب “فحص + إثبات + تثبيت” فقط.
+
+STEP 1 — Snapshot current state
+
+A) Show current HEAD + branch:
+
+git rev-parse --abbrev-ref HEAD
+
+git rev-parse HEAD
+
+git --no-pager log -5 --oneline
+
+B) Show what changed in DB layer recently:
+
+ls -la migrations | tail -n 40
+
+git --no-pager log --oneline -- migrations | head -n 30
+
+If there were schema changes, list the exact migration filenames created in RUN-P1.
+
+C) Show server/routes.ts scale + duplicates:
+
+wc -l server/routes.ts
+
+rg -n "app\\.(get|post|put|delete)\\(" server/routes.ts | wc -l
+
+Re-run duplicate path detection quickly (method+path) and print duplicates only.
+
+STEP 2 — Smoke test: 6 critical operational screens
+
+Must pass WITHOUT crashes:
+
+Chart of Accounts page (شجرة الحسابات تظهر)
+
+Create Branch + Branches list (إنشاء فرع بدون error)
+
+Suppliers list + Create supplier
+
+Purchasing tab landing + at least 1 child screen opens
+
+Sales invoices list
+
+Journal entries list
+
+For each screen:
+
+Provide one line: “OPEN OK” or “FAIL + error”.
+
+STEP 3 — API probes (prove data shape)
+
+Run these curls (or the actual endpoints used by the screens) and show:
+
+HTTP status
+
+content-type (must be application/json)
+
+first 400 chars of body
+
+Minimum:
+
+/api/chart-of-accounts
+
+/api/branches
+
+/api/suppliers
+
+endpoint backing ChartOfAccounts stats/entries إن وجد
+
+endpoint backing branches create (POST) إن وجد
+
+STEP 4 — “No-supabase-crash” proof
+
+For ONLY the 6 page files above:
+
+rg -n "\\bsupabase\\b" <paths>
+Must be NO MATCHES or explain exactly why safe.
+
+STEP 5 — Checkpoint commit (if working tree dirty)
+
+If there are uncommitted changes:
+
+show git status
+
+commit with message: RUN-P1 checkpoint: ops screens working
+If clean: just confirm clean.
+
+EVIDENCE REQUIRED
+
+A) outputs of Step 1 A/B/C
+B) Step 2 results (6 lines)
+C) Step 3 curl outputs
+D) Step 4 grep outputs
+E) npx tsc --noEmit exit 0
+
+STOP.

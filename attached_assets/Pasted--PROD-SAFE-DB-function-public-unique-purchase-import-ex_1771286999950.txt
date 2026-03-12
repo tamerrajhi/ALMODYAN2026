@@ -1,0 +1,68 @@
+نفّذ تعديل PROD-SAFE في DB function واحدة فقط:
+
+public.unique_purchase_import_excel_atomic(jsonb)
+
+🎯 الهدف
+1) فصل ترقيم الوثائق (UPB/UINV/JE-UIMP) عن unique_serial_seq:
+   - استخدم sequences الجديدة:
+     public.upb_doc_seq
+     public.uinv_doc_seq
+     public.je_uimp_doc_seq
+
+2) إزالة أي reference لـ:
+   - unique_serial_seq (nextval / setval / last_value / self-healing)
+   - SN- (أي REPLACE(serial_no,'SN-',...) أو regex '^SN-')
+
+3) الإبقاء على توليد سيريال القطع:
+   - v_serial := generate_serial(normalize_prefix_from_stockcode(STOCKCODE/TYPE))  (كما هو الآن)
+
+✅ التعديل المطلوب (وثائق فقط)
+ابحث داخل الدالة عن الجزء الذي يكوّن:
+- batch_no / batch_id أو UPB-...
+- invoice_number أو UINV-...
+- je_number أو JE-UIMP-...
+
+واستبدل أي استخدام لـ unique_serial_seq في توليد هذه الأرقام بـ:
+
+UPB:
+  'UPB-' || to_char(current_date,'YYYYMMDD') || '-' || lpad(nextval('public.upb_doc_seq')::text, 6, '0')
+
+UINV:
+  'UINV-' || to_char(current_date,'YYYYMMDD') || '-' || lpad(nextval('public.uinv_doc_seq')::text, 6, '0')
+
+JE-UIMP:
+  'JE-UIMP-' || to_char(current_date,'YYYYMMDD') || '-' || lpad(nextval('public.je_uimp_doc_seq')::text, 6, '0')
+
+⚠️ قواعد صارمة
+- لا تغيّر أي insert/update logic أو حسابات أو movements أو JE lines.
+- لا تغيّر payload parsing.
+- لا تغيّر retry loop للـserial ولا منطق generate_serial.
+- فقط بدّل “توليد أرقام الوثائق” + احذف self-healing blocks التي تخص unique_serial_seq / SN-.
+
+📎 Evidence REQUIRED
+A) نتيجة:
+   select pg_get_functiondef('public.unique_purchase_import_excel_atomic(jsonb)'::regprocedure);
+
+   (يكفي مقاطع: توليد UPB/UINV/JE + إزالة أي unique_serial_seq/SN-)
+
+B) Gate داخل DB بعد التعديل (لازم 0 صفوف):
+   select p.proname
+   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public'
+     and p.proname='unique_purchase_import_excel_atomic'
+     and (pg_get_functiondef(p.oid) ilike '%unique_serial_seq%'
+          or pg_get_functiondef(p.oid) ilike '%SN-%');
+
+C) Smoke Test:
+- نفّذ import صغير (صفّين) من الواجهة
+- ثم تحقق أن آخر batch/invoice/je أخذوا الصيغ الجديدة:
+
+select id, batch_id, invoice_number, created_at
+from unique_purchase_invoices
+order by created_at desc
+limit 1;
+
+select je_number, created_at
+from journal_entries
+order by created_at desc
+limit 1;

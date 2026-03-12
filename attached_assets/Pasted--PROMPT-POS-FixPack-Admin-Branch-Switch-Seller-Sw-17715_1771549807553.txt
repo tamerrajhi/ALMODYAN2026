@@ -1,0 +1,128 @@
+البرومبت الجاهز للتنفيذ (انسخه كما هو لريبلت)
+
+PROMPT — POS FixPack: Admin Branch Switch + Seller Switch + Customers + Split User Management
+
+Goal
+Apply 4 changes:
+
+Admin branch switch dropdown must list branches immediately (no branch-account login).
+
+Seller/operator switch must include “POS Admin” as an option so admin can return to admin mode.
+
+Add POS Customers page inside POS module.
+
+Split user management: ERP = “System Users”, POS Settings = “POS Users”.
+
+Constraints
+
+Do not add ERP auth dependencies to POS.
+
+Admin branch list must come from admin-only cookie/session (__pos_admin) using admin endpoints.
+
+Selling actions still require a selected “Sales Branch”, but non-selling pages (reports/settings/listing) can be global.
+
+Task A — Fix Admin Branch Dropdown (no branch login)
+
+Backend
+
+Ensure endpoint exists and is used:
+
+GET /api/pos/admin/branches (requires only __pos_admin)
+
+POST /api/pos/admin/select-branch { branch_id } (creates/updates __branch + __pos for that branch)
+
+Verify NO branch username/password is required anywhere in this flow.
+
+Frontend
+
+In POSLayout (or the admin branch selector component):
+
+Load branches from GET /api/pos/admin/branches when pos_admin === true.
+
+Dropdown should show all branches immediately.
+
+On select → call POST /api/pos/admin/select-branch then refresh context.
+
+Acceptance
+
+Admin can switch branch without seeing “اسم مستخدم الفرع / كلمة مرور الفرع”.
+
+Task B — Add “POS Admin” option in Seller/Operator Switch
+
+Backend
+
+Add endpoint to switch operator to admin explicitly:
+
+POST /api/pos/operator/switch with body { kind: "admin" } OR a dedicated route POST /api/pos/admin/assume-self
+
+It must update session context so UI reflects:
+
+cashier_kind = "admin"
+
+cashier_name = admin display_name
+
+Frontend
+
+In seller/operator dropdown:
+
+Add first option: “أدمن نقطة البيع” (value __POS_ADMIN__)
+
+Selecting it calls the endpoint and refreshes /api/pos/session/context.
+
+Acceptance
+
+After switching to a cashier, admin can pick “أدمن نقطة البيع” to return to admin mode instantly.
+
+Task C — Move Customers into POS
+
+Frontend
+
+Add route: /pos/customers
+
+Add sidebar link: “عملاء نقطة البيع”
+
+Implement a simple customers UI:
+
+Search by phone/name
+
+Create customer
+
+Select customer → returns to POS sell screen (store selected customer in POS state or context)
+
+Acceptance
+
+Customers page accessible inside POS and usable in sales flow.
+
+Task D — Split User Management (ERP vs POS)
+
+ERP
+
+Rename existing /users page title/menu label to: “إدارة مستخدمين النظام”
+
+It must not show POS cashier accounts.
+
+POS
+
+Add POS settings page: /pos/settings/users
+
+Label: “إدارة مستخدمين نقاط البيع”
+
+Shows only POS cashiers/supervisors + PIN management + branch assignment relevant to POS.
+
+Acceptance
+
+No mixing between system users and POS users.
+
+Evidence Required
+
+git diff --stat
+
+Key snippets (20–40 lines each) for:
+
+POSLayout branch dropdown data source
+
+Operator switch with admin option
+
+New /pos/customers route + sidebar link
+
+Renamed ERP users label + new POS users settings route

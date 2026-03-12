@@ -1,0 +1,96 @@
+PROMPT — EVIDENCE ONLY | ERP Sales Return (complete_erp_sales_return_atomic)
+
+ROLE: Auditor
+MODE: READ ONLY (NO CHANGES)
+
+Goal:
+Provide a complete Evidence Pack proving ERP sales returns are correctly implemented and fully separated from POS returns.
+
+Rules:
+- Do NOT change any code or DB objects.
+- Only run SELECT / pg_catalog introspection / grep/rg / git show.
+- Output must be raw and copyable.
+
+SECTION 1 — Function existence + signature
+1) Show function signature exactly:
+SELECT p.oid::regprocedure AS signature
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname='complete_erp_sales_return_atomic';
+
+2) Show the first 60 lines of the function definition:
+SELECT pg_get_functiondef(p.oid)
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname='complete_erp_sales_return_atomic';
+
+SECTION 2 — Call site proof (frontend/backend)
+3) rg proof for call site:
+rg -n "complete_erp_sales_return_atomic" src/pages/sales/SalesReturnFormPage.tsx server/routes.ts src/domain -S
+
+4) Paste the exact payload build snippet from SalesReturnFormPage (the object passed to dataGateway.rpc).
+
+SECTION 3 — Runtime DB proof (use one real ERP invoice + one returned item)
+Choose:
+- one ERP invoice id where invoice_type='sales' AND sale_id IS NULL AND status='posted'
+- one item in sales_invoice_items for that invoice
+
+Provide these queries + results:
+5) Invoice proof:
+SELECT id, invoice_number, invoice_type, sale_id, status, total_amount, tax_amount, subtotal
+FROM invoices WHERE id = '<ERP_INVOICE_ID>';
+
+6) Sales items proof:
+SELECT invoice_id, jewelry_item_id, quantity, unit_price, total_price
+FROM sales_invoice_items WHERE invoice_id = '<ERP_INVOICE_ID>';
+
+7) Return row proof (most recent):
+SELECT id, return_number, original_invoice_id, original_sale_id, status, total_amount, journal_entry_id, created_at
+FROM returns
+WHERE original_invoice_id = '<ERP_INVOICE_ID>'
+ORDER BY created_at DESC LIMIT 3;
+
+8) Return items proof:
+SELECT return_id, item_id, unit_price, total_price
+FROM return_items
+WHERE return_id = '<RETURN_ID>';
+
+9) JE header + lines proof:
+SELECT id, total_debit, total_credit, reference_type, reference_id
+FROM journal_entries WHERE id = '<JE_ID>';
+
+SELECT jel.journal_entry_id, jel.debit, jel.credit, coa.account_name, coa.account_code
+FROM journal_entry_lines jel
+LEFT JOIN chart_of_accounts coa ON coa.id = jel.account_id
+WHERE jel.journal_entry_id = '<JE_ID>'
+ORDER BY jel.created_at ASC;
+
+10) Refund payment proof:
+SELECT id, payment_number, payment_type, amount, status, reference_type, reference_id, invoice_id, created_at
+FROM payments
+WHERE reference_id IN ('<RETURN_ID>', '<ERP_INVOICE_ID>')
+ORDER BY created_at DESC LIMIT 5;
+
+SECTION 4 — Unique item snapshot proof (before/after)
+11) Show current item state:
+SELECT id, serial_no, status, sold_at, sale_id, branch_id
+FROM unique_items WHERE id = '<UNIQUE_ITEM_ID>';
+
+SECTION 5 — Guards proof
+12) POS invoice rejection proof (pick one POS invoice with sale_id IS NOT NULL) and show expected error message (from function output or logs).
+13) Double-return prevention: show evidence query that the same unique_item_id cannot be returned twice for the same invoice (either constraint, query check, or error).
+
+SECTION 6 — Evidence of no POS impact
+14) Show that POS functions still exist:
+SELECT p.oid::regprocedure AS signature
+FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname IN ('complete_pos_sale_atomic','complete_pos_piece_return_atomic');
+
+SECTION 7 — Migration documentation (if created)
+15) If a migration file was created, show:
+git status
+git log -n 3 --oneline
+git show --name-only HEAD
+and paste the migration file content.
+
+END.

@@ -1,0 +1,131 @@
+PHASE B — IMPLEMENTATION (BASED ON PROVIDED AUDIT EVIDENCE) — NO GUESSING
+
+You MUST implement exactly the changes below and nothing else.
+Do NOT refactor, do NOT change existing ERP endpoints, do NOT change auth logic, do NOT change DB schema.
+
+========================
+B0 — HARD RULES
+========================
+- Do NOT modify any existing /api/admin/* endpoints in server/routes.ts.
+- Do NOT modify requireSession or requirePosAdminToken implementation.
+- Do NOT change DB schema, tables, columns, RPC, or global middleware.
+- Backend change: ADD ONLY new endpoints under /api/pos/admin/* inside registerPosSessionRoutes(app) in server/posSession.ts.
+- Logic: COPY THE EXACT SQL + JS logic 1:1 from server/routes.ts ERP endpoints (per evidence lines below).
+- Frontend change: URLs only in src/pages/pos/POSUsersPage.tsx. No UI/logic changes.
+
+========================
+B1 — BACKEND: Add 4 POS Admin endpoints
+========================
+File: server/posSession.ts
+Location: inside export function registerPosSessionRoutes(app: Express) (evidence: starts line 133, ends line 1015).
+Add new routes BEFORE the closing brace at line ~1015.
+
+Use middleware: requirePosAdminToken (evidence: server/posSession.ts lines 59–89).
+Failure behavior MUST remain unchanged: 401 { error: "POS admin session required" } (handled by middleware).
+
+ADD THESE 4 ENDPOINTS:
+
+(1) GET /api/pos/admin/branches-with-sellers
+- Protect with requirePosAdminToken
+- Copy EXACT logic from ERP endpoint:
+  server/routes.ts lines 1128–1149 (GET /api/admin/branches-with-sellers)
+  SQL Query 1: SELECT id, name, code FROM branches ORDER BY name
+  SQL Query 2: SELECT ub.branch_id, p.id AS profile_id, p.user_id, p.full_name, p.username,
+               COALESCE(NULLIF(p.full_name,''), p.username) AS display_name, ub.is_primary
+               FROM user_branches ub
+               JOIN profiles p ON p.user_id = ub.user_id
+               WHERE p.is_active = true
+               ORDER BY COALESCE(NULLIF(p.full_name,''), p.username)
+  JS mapping: branches = branchesResult.rows.map(b => ({ ...b, sellers: sellersResult.rows.filter(s => s.branch_id === b.id) }))
+  Response on success: { data: { branches: [...] }, error: null }
+  Response on error: status 500 { data: null, error: { message: '...' } }
+- IMPORTANT: Use pool from "./db" already available (evidence A5).
+
+(2) GET /api/pos/admin/profiles-active
+- Protect with requirePosAdminToken
+- Copy EXACT logic from:
+  server/routes.ts lines 1151–1165 (GET /api/admin/profiles/active)
+  SQL: SELECT id, user_id, full_name, username, is_active,
+       COALESCE(NULLIF(full_name,''), username) AS display_name
+       FROM profiles
+       WHERE is_active = true
+       ORDER BY COALESCE(NULLIF(full_name,''), username)
+  Success response: { data: { profiles: [...] }, error: null }
+  Error: 500 { data: null, error: { message: '...' } }
+
+(3) POST /api/pos/admin/branch-sellers/assign
+- Protect with requirePosAdminToken
+- Copy EXACT logic from:
+  server/routes.ts lines 1167–1195 (POST /api/admin/branch-sellers/assign)
+  Input body: { branch_id, profile_id, is_primary? }
+  Validation: if missing branch_id or profile_id -> 400
+  SQL 1: SELECT id, user_id, full_name, username FROM profiles WHERE id = $1 AND is_active = true -> 404 if not found
+  SQL 2: INSERT INTO user_branches (id, user_id, branch_id, is_primary)
+         VALUES (gen_random_uuid(), $1, $2, $3)
+         ON CONFLICT (user_id, branch_id)
+         DO UPDATE SET is_primary = EXCLUDED.is_primary
+         RETURNING *
+  Success response: { data: { assignment, profile }, error: null }
+  Error: 500 { data: null, error: { message: '...' } }
+
+(4) POST /api/pos/admin/branch-sellers/remove
+- Protect with requirePosAdminToken
+- Copy EXACT logic from:
+  server/routes.ts lines 1197–1214 (POST /api/admin/branch-sellers/remove)
+  Input body: { branch_id, profile_id }
+  Validation: if missing -> 400
+  SQL 1: SELECT user_id FROM profiles WHERE id = $1 -> 404 if not found
+  SQL 2: DELETE FROM user_branches WHERE user_id = $1 AND branch_id = $2
+  Success response: { data: { removed: true }, error: null }
+  Error: 500 { data: null, error: { message: '...' } }
+
+CRITICAL: Do not change response shapes. Keep { data: ..., error: null } pattern exactly as ERP endpoints.
+
+========================
+B2 — FRONTEND: URL updates only
+========================
+File: src/pages/pos/POSUsersPage.tsx
+Change ONLY the endpoint URLs (keep fetch options, credentials: 'include', and logic unchanged).
+Based on evidence A4:
+
+- Line ~238:
+  '/api/admin/branches-with-sellers' -> '/api/pos/admin/branches-with-sellers'
+
+- Line ~249:
+  '/api/admin/profiles/active' -> '/api/pos/admin/profiles-active'
+
+- Line ~270:
+  '/api/admin/branch-sellers/assign' -> '/api/pos/admin/branch-sellers/assign'
+
+- Line ~291:
+  '/api/admin/branch-sellers/remove' -> '/api/pos/admin/branch-sellers/remove'
+
+No other edits in this file.
+
+========================
+B3 — VERIFICATION (must run + report)
+========================
+1) Without __pos_admin cookie:
+   - GET /api/pos/admin/branches-with-sellers => 401 { error: "POS admin session required" }
+   - GET /api/pos/admin/profiles-active => 401 ...
+   - POST /api/pos/admin/branch-sellers/assign => 401 ...
+   - POST /api/pos/admin/branch-sellers/remove => 401 ...
+
+2) With valid POS Admin session (__pos_admin cookie present and valid):
+   - GET endpoints return 200 and same payload shape as ERP endpoints.
+   - POST assign/remove return 200 and reflect changes.
+
+3) UI:
+   - Open /pos/settings/users, Sellers tab: loads branches + sellers, no 401.
+
+========================
+B4 — DELIVERABLE (respond with)
+========================
+- Files changed list
+- Minimal diff summary:
+  - “Added 4 routes to server/posSession.ts”
+  - “Updated 4 URLs in src/pages/pos/POSUsersPage.tsx”
+- Test evidence: status codes and the Sellers tab working
+- Explicit statement:
+  "No changes were made to existing /api/admin/* endpoints in server/routes.ts."
+END.

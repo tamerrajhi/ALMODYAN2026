@@ -1,0 +1,115 @@
+ROLE: Full-Stack Engineer
+MODE: ATOMIC FOUNDATION + REMOVE OLD DEDUPE (NO ENFORCEMENT YET) — STOP AFTER EVIDENCE
+
+GOAL:
+1) Remove/disable the current "business-level dedupe" mechanisms that block duplicate purchase invoices:
+   - Stop using invoice_number unique constraint as a dedupe/business blocker.
+   - Stop relying on payload_hash conflict logic as a dedupe/business blocker for purchase invoices.
+   (Keep client_request_id idempotency caching ONLY.)
+2) Add Supplier Invoice Number foundation end-to-end:
+   - Add invoices.supplier_invoice_no column
+   - Wire it through purchase invoice create/update/import flows
+   - Display it in invoice view/details
+IMPORTANT: Do NOT enforce uniqueness on SUPP INV yet in this step.
+
+HARD RULES:
+- No direct DB writes from frontend.
+- Only CREATE OR REPLACE FUNCTION / ALTER TABLE / DROP INDEX allowed.
+- Keep idempotency via client_request_id (cached success) working.
+- For payload_hash conflict (IDEMPOTENCY_CONFLICT): keep it for same client_request_id only; do NOT use it to reject normal duplicate invoices.
+- STOP after evidence.
+
+========================
+A) DB FOUNDATION
+========================
+1) Add column on invoices:
+ALTER TABLE invoices
+ADD COLUMN IF NOT EXISTS supplier_invoice_no text;
+
+2) Remove invoice_number unique constraint (it is currently invoices_invoice_number_key):
+- First confirm constraint/index name in pg indexes (already discovered).
+Then drop it:
+DROP INDEX IF EXISTS invoices_invoice_number_key;
+
+NOTE: invoice_number may still be generated, but must not be a uniqueness blocker.
+
+========================
+B) RPC UPDATES (FOUNDATION ONLY)
+========================
+Update purchase invoice RPC(s) to accept and store supplier_invoice_no.
+You MUST discover actual signatures used in code and match them.
+
+1) Locate the DB functions:
+- purchase_invoice_create_atomic
+- purchase_invoice_post_atomic
+- purchase_invoice_void_atomic
+- Any purchase invoice import function if exists
+
+2) CREATE OR REPLACE FUNCTION for purchase_invoice_create_atomic to:
+- accept a param: p_supplier_invoice_no text (or embedded inside p_payload if your design uses jsonb)
+- insert into invoices.supplier_invoice_no
+
+3) If there is an "update invoice" RPC, update it too.
+4) Do NOT add unique index in this step.
+
+========================
+C) UI WIRING (NO ENFORCEMENT)
+========================
+1) Add field mapping in the purchase invoice import screen(s):
+- src/pages/ImportPage.tsx
+- src/pages/purchasing/PurchaseInvoiceImportPage.tsx
+Extract Excel column "SUPP INV" and pass it to the create/import RPC payload as supplier_invoice_no.
+
+2) Purchase Invoice Form screen:
+- src/pages/purchasing/PurchaseInvoiceFormPage.tsx
+Add an input field labeled "رقم فاتورة المورد" bound to supplier_invoice_no
+and pass it to create/update RPC payload.
+
+3) Purchase Invoice View:
+- src/pages/purchasing/PurchaseInvoiceViewPage.tsx (and/or details)
+Display supplier_invoice_no in header/details.
+
+========================
+D) IMPORTANT: DEDUPE OLD LOGIC REMOVAL SCOPE
+========================
+1) invoice_number unique is removed (DB).
+2) pos_workflow_requests.payload_hash conflict remains only for same client_request_id mismatch.
+Do NOT add any new dedupe yet.
+
+========================
+E) EVIDENCE (MANDATORY)
+========================
+A) SQL Evidence:
+1) Paste:
+- ALTER TABLE invoices ADD COLUMN supplier_invoice_no
+- DROP INDEX invoices_invoice_number_key
+2) Paste updated RPC function signature(s) showing supplier_invoice_no included
+   AND the exact INSERT/UPDATE line writing invoices.supplier_invoice_no.
+
+B) Code Evidence (with line numbers):
+1) ImportPage.tsx / PurchaseInvoiceImportPage.tsx:
+- snippet showing SUPP INV extraction
+- snippet showing supplier_invoice_no passed into RPC payload
+2) PurchaseInvoiceFormPage.tsx:
+- snippet showing UI input binding to supplier_invoice_no
+- snippet showing RPC payload includes supplier_invoice_no
+3) PurchaseInvoiceViewPage.tsx:
+- snippet showing supplier_invoice_no displayed
+
+C) Proof checks:
+1) Show invoices table now has the column:
+SELECT column_name,data_type
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='invoices'
+AND column_name='supplier_invoice_no';
+2) Show invoice_number unique index is gone:
+SELECT i.relname AS index_name, ix.indisunique, pg_get_indexdef(ix.indexrelid) AS index_def
+FROM pg_class t
+JOIN pg_index ix ON t.oid = ix.indrelid
+JOIN pg_class i ON i.oid = ix.indexrelid
+WHERE t.relname = 'invoices'
+ORDER BY i.relname;
+
+STOP AFTER EVIDENCE.
+NO UNIQUE INDEX FOR SUPP INV YET.
+NO NEW DEDUPE IN THIS STEP.

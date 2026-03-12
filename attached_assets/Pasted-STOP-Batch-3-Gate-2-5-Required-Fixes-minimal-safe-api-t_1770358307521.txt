@@ -1,0 +1,44 @@
+STOP — لا Batch-3.
+
+Gate-2.5 Required Fixes (minimal + safe):
+هدفنا: تثبيت أمن /api/table-read + إثبات Default Supabase فعلياً.
+
+1) /api/table-read: Reject invalid order columns (NO silent ignore)
+- إذا order.column لا يطابق SAFE_COL_RE أو ليس ضمن allowlist الأعمدة المسموحة للجدول → ارجع 400
+  { data:null, error:{ message:"Invalid order column" } }
+- نفس الشيء للـ order.direction لو ليست "asc|desc" → 400
+- لا تكمل query لو invalid. ممنوع silent fallback.
+
+2) Add explicit column-allowlist per table (lightweight)
+- اعمل map بسيط TABLE_ORDERABLE_COLUMNS:
+  مثال:
+  suppliers: ["id","code","name","created_at"]
+  branches: ["id","code","name","is_active"]
+  invoices: ["id","invoice_number","invoice_date","status","supplier_id","branch_id","invoice_type"]
+- لو table غير موجود في map، امنع order تماماً (400) بدل ما نتجاهل.
+
+3) Evidence required (raw outputs فقط):
+A) git diff --stat
+B) git diff
+C) Curl tests (لازم النتائج تكون رفض صريح):
+   - orderBy injection:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" \
+     -d '{"table":"suppliers","order":{"column":"name;drop table suppliers;--","direction":"asc"},"limit":3}'
+     EXPECT: 400 + "Invalid order column"
+   - invalid direction:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" \
+     -d '{"table":"suppliers","order":{"column":"name","direction":"asc;--"},"limit":3}'
+     EXPECT: 400
+   - valid order:
+     curl -s -X POST http://localhost:5000/api/table-read -H "content-type: application/json" \
+     -d '{"table":"suppliers","order":{"column":"name","direction":"asc"},"limit":3}'
+     EXPECT: 200 + data
+D) Default Supabase proof (فعلي):
+   - من UI اضغط RESET (يمسح localStorage override)
+   - اعمل Hard reload
+   - انسخ سطر console:
+     [ACTIVE_DATA_BACKEND] supabase (... override=none)
+   - بعدها بدّل NEON وارجع انسخ سطر:
+     [ACTIVE_DATA_BACKEND] neon (reason=override, ... override=neon)
+
+STOP بعد تقديم الأدلة. ممنوع Batch-3 قبل موافقتي.

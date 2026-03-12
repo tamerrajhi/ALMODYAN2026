@@ -1,0 +1,144 @@
+PROMPT (Send to Replit) — Gate-0 Confirm + Phase-1 Inventory (NO MIGRATION YET)
+
+أنت الآن تعمل على مشروع فيه Backend (Express + Neon) و Frontend كان سابقاً يتصل بـ Supabase.
+أنا محتاج منك تنفيذ Gate-0 Verification + Phase-1 Inventory فقط بدون أي ترحيل أو تعديل business logic أو نقل ملفات الآن.
+
+الهدف
+
+أتأكد 100% أن التطبيق عندي (في المتصفح) فعلاً يقرأ البيانات من Neon وليس Supabase.
+
+أطلع “جرد واضح” لكل استخدامات Supabase المتبقية في الكود (حتى لو multi-line chains).
+
+أطلع خطة ترحيل دقيقة (ملف/ملف) بناءً على الجرد — بدون تنفيذ الترحيل الآن.
+
+Gate-0: Verification (Required)
+0.1 Backend Fingerprint Endpoint (إن لم يكن موجود)
+
+أنشئ endpoint:
+GET /api/health/fingerprint
+
+يرجع JSON فيه (على الأقل):
+
+db_name, schema_name, pg_version
+
+checks:
+
+invoices.supplier_invoice_no exists?
+
+index invoices_purchase_supp_inv_uq exists?
+
+required_functions:
+purchase_invoice_create_atomic
+purchase_invoice_post_atomic
+purchase_invoice_void_atomic
+purchase_invoice_supp_inv_precheck
+import_purchase_batch_create_atomic
+import_jewelry_sets_upsert_atomic
+
+missing_functions: [] إن وجدت
+
+ممنوع أي تغييرات في الداتا.
+
+0.2 UI Badge (Optional but preferred)
+
+ضيف Badge واضح في الـ MainLayout header يظهر:
+
+Backend: NEON / SUPABASE
+
+db_name (مثال: heliumdb)
+
+color: green/yellow/red حسب checks
+مهم: لو MainLayout لا يظهر في صفحة login، ده طبيعي.
+
+0.3 إثبات تشغيل (Evidence)
+
+أعطني نتيجة curl أو fetch للـ endpoint /api/health/fingerprint (output كامل)
+
+وأخبرني أين يظهر الـ badge في UI
+
+Phase-1: Inventory (Must be accurate)
+
+المهم: grep القديم يفشل مع multi-line chains، لازم تعمل Search صحيح.
+
+1.1 أنشئ Script واحد لجرد الاستخدامات
+
+اعمل Node script أو ripgrep commands تغطي:
+
+supabase.from( حتى لو:
+
+supabase في سطر و .from في سطر تاني
+
+supabase.rpc(
+
+supabase.functions.invoke(
+
+أي import لـ supabase client:
+
+from "@/integrations/supabase/client" أو أي path مشابه
+
+أي استخدام لـ env:
+
+VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY
+
+Output مطلوب:
+
+قائمة ملفات supabase.from usage
+
+قائمة ملفات supabase.rpc usage
+
+قائمة ملفات supabase.functions.invoke usage
+
+قائمة ملفات تستورد supabase client فقط بدون استخدام (إذا موجود)
+
+Counts إجمالية لكل فئة
+
+1.2 تصنيف الملفات (Classification)
+
+صنّف إلى:
+A) Auth-only (مسموح مؤقتاً)
+B) Data-plane (لازم يترحل لـ dataGateway/Express)
+C) Edge-functions dependent (نقرر لاحقاً: replace أو keep)
+
+وأعطني جدول مختصر:
+
+file_path
+
+category (A/B/C)
+
+usage type (from/rpc/invoke/import-only)
+
+عدد الcalls تقريبًا
+
+Phase-1 Output: Migration Plan (NO EXECUTION)
+
+بعد الـ inventory فقط، اكتب خطة ترحيل منظمة:
+
+Batch 1: shared libs/hooks التي يستخدمها الكثير
+
+Batch 2: pages critical (Import, Purchasing, Accounting, POS…)
+
+Batch 3: components dialogs/reports
+
+Edge functions: قرار منفصل
+
+كل Batch لازم يحتوي:
+
+الملفات
+
+endpoints المطلوبة في server/routes.ts
+
+functions المطلوبة في RPC allowlist
+
+gate test سريع بعد كل batch (تشغيل + شاشة/شاشتين)
+
+قيود صارمة
+
+ممنوع تبدأ ترحيل فعلي الآن.
+
+ممنوع حذف شاشات أو تعديل flows.
+
+لا تغيّر schema ولا data.
+
+فقط: Fingerprint + Badge + Inventory + Plan + Evidence.
+
+ابدأ الآن ونفّذ بالترتيب وأرسل Evidence واضح.

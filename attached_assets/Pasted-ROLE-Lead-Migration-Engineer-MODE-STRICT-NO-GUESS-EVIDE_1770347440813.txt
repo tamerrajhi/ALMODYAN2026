@@ -1,0 +1,126 @@
+ROLE: Lead Migration Engineer
+MODE: STRICT / NO-GUESS / EVIDENCE-FIRST
+TARGET: Full cutover of DATA-PLANE from Supabase Client → Express API → Neon (heliumdb)
+NON-TARGET (keep for now): Supabase Auth ONLY (AuthContext/AuthPage + client.ts)
+ABSOLUTE RULES:
+1) STOP adding new endpoints unless justified by a specific remaining Supabase call.
+2) Every step must produce evidence (commands + outputs).
+3) Must be reversible: create checkpoint before and after each phase.
+4) Do NOT “parallel migrate” more files until the gate checks pass.
+
+========================================
+PHASE 0 — HARD CHECKPOINTS (MANDATORY)
+========================================
+0.1 Create git checkpoints:
+- git status
+- git add -A
+- git commit -m "checkpoint: neon migration state before final cutover"  (if repo uses git)
+If no git: create Replit Snapshot named: checkpoint-neon-before-final-cutover
+
+0.2 Output this list in the response (exact):
+- Which DB the backend is connected to (DATABASE_URL host/dbname)
+- Which DB the frontend data calls are using (dataGateway backend mode + base URL)
+- Current value of VITE_DATA_BACKEND (or equivalent)
+
+========================================
+PHASE 1 — REMAINING SUPABASE INVENTORY (EVIDENCE ONLY)
+========================================
+Run EXACT commands and paste RAW outputs:
+
+1) Remaining supabase usage:
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supabase\.from\(" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supabase\.rpc\(" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "supabase\.functions\.invoke\(" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "VITE_SUPABASE_URL|VITE_SUPABASE_PUBLISHABLE_KEY" src
+
+2) Classify remaining files into buckets (exact):
+A) AUTH-ONLY (allowed): AuthContext/AuthPage + supabase client init
+B) EDGE FUNCTIONS (temp allowed OR port required): supabase.functions.invoke(...)
+C) DATA-PLANE (MUST MIGRATE): any from()/rpc() usage for app data
+
+Output: a table listing file path → bucket (A/B/C) → exact supabase call(s) found.
+
+GATE-1:
+- If Bucket C is empty → proceed to Phase 2.
+- If Bucket C not empty → proceed to Phase 1.1.
+
+========================================
+PHASE 1.1 — MIGRATE ONLY BUCKET-C (DATA-PLANE) FILES
+========================================
+Rules:
+- Migrate file-by-file. No bulk change.
+- For each file: replace direct supabase.from/rpc with dataGateway functions.
+- If a JOIN is needed, add ONE backend endpoint with strict parameter validation.
+- Add the new endpoint to server routes with a clear name (GET /api/.. or POST /api/rpc/..).
+- Update allowlist ONLY for needed RPCs (no mass allowlist).
+
+For EACH migrated file provide:
+- The exact diff summary (file changed + major calls replaced)
+- The new dataGateway function name(s) added
+- Any backend endpoint added (route + SQL shape + input validation)
+
+After completing ALL bucket-C files, re-run the greps in Phase 1 until Bucket C is empty.
+
+Create checkpoint:
+git commit -m "checkpoint: data-plane fully migrated off supabase"
+
+========================================
+PHASE 2 — CUTOVER SWITCH + SAFETY BACKOUT
+========================================
+2.1 Implement/confirm a single switch:
+- VITE_DATA_BACKEND="neon" must route ALL data-plane to Express/Neon.
+- Keep Supabase auth as-is.
+
+2.2 Add a kill-switch:
+- If VITE_DATA_BACKEND="supabase" it should fallback to old behavior (ONLY if required).
+- Document both values.
+
+GATE-2:
+- Start app, confirm: /api/health returns Neon identity.
+- Confirm: UI pages load without supabase data calls.
+
+========================================
+PHASE 3 — VERIFICATION / PROOF (NO GUESSING)
+========================================
+3.1 Health & Identity proof:
+- Call /api/health (or equivalent) and paste output:
+  db, schema, version, now(), current_user
+
+3.2 Functional proof (minimum smoke set):
+- /import: multi-file upload control works (multiple attribute present)
+- Preflight: duplicates within selected files are blocked (SUPP INV)
+- Preflight: duplicates already in DB are blocked (supp_inv_precheck)
+- Create: successful invoice creates:
+  - invoices row with supplier_invoice_no normalized
+  - journal_entries row with balanced debit/credit
+  - invoice status transitions working (posted/voided if tested)
+
+3.3 Evidence SQL (run on Neon):
+- SELECT COUNT(*) from invoices, journal_entries, journal_entry_lines, purchase_batches, purchase_invoice_lines, jewelry_items, item_movements;
+- Verify unique index exists:
+  SELECT indexname,indexdef FROM pg_indexes WHERE tablename='invoices' AND indexname='invoices_purchase_supp_inv_uq';
+- Verify required functions exist:
+  SELECT routine_name FROM information_schema.routines WHERE routine_schema='public'
+  AND routine_name IN ('purchase_invoice_create_atomic','purchase_invoice_post_atomic','purchase_invoice_void_atomic','purchase_invoice_supp_inv_precheck');
+
+3.4 “Zero Supabase data-plane” proof:
+Re-run the 3 greps from Phase 1 and show:
+- Only AUTH-ONLY files remain OR explicit EDGE temporary list.
+- Bucket C must be empty.
+
+========================================
+PHASE 4 — FINAL CLEANUP (ONLY AFTER ALL GATES PASS)
+========================================
+- Remove unused import routes/components already deleted (no regressions).
+- Keep Supabase client ONLY if used for auth.
+- Update replit.md:
+  - Architecture diagram: Frontend → Express → Neon
+  - Switch env var values
+  - Backout steps: set VITE_DATA_BACKEND=supabase and redeploy (if needed)
+
+FINAL OUTPUT FORMAT (MANDATORY):
+1) Gate results table (Gate-1, Gate-2, Smoke tests) PASS/FAIL
+2) Remaining Supabase files list (Auth-only + Edge-only only)
+3) List of new endpoints added (route + purpose)
+4) Any risks found + exact mitigation
+STOP after output. Do NOT start new work beyond this prompt.

@@ -1,0 +1,74 @@
+PROMPT 21 — PHASE-3A.1 (BATCH-3) | MIGRATE SIMPLE dataGateway READS TO /api/table-read (NEON MODE) | EVIDENCE | STOP
+
+ROLE: Frontend/Data Layer Engineer
+MODE: FRONTEND ONLY (dataGateway.ts ONLY)
+
+SCOPE (ONLY):
+- src/lib/dataGateway.ts
+
+GOAL:
+For NEON backend ONLY, replace Supabase .from() usage in these functions with calls to the existing Express API /api/table-read (allowlist),
+keeping Supabase behavior unchanged when backend=SUPABASE.
+
+TARGET FUNCTIONS (MUST DO ALL):
+1) fetchDashboardStats()
+2) fetchBranches()
+3) fetchCustomers()
+4) fetchSuppliers()
+5) fetchGoldPrices()
+6) fetchGoldKarats()
+
+STRICT RULES (NO EXCEPTIONS):
+- Modify ONLY the listed functions inside dataGateway.ts.
+- Do NOT touch queryTable() generic engine, purchasing embedded queries, transfers, journal entries, or any “Complex” functions.
+- For NEON backend path:
+  - Use existing api client pattern already used in dataGateway (e.g., apiClient / fetch wrapper already there).
+  - Route through /api/table-read with parameters that match existing server expectations (select/filters/order/limit/offset).
+  - Keep output shape identical to current functions.
+- For SUPABASE backend path:
+  - Keep current supabase.from() code exactly as-is.
+- No UI changes, no other file changes.
+
+IMPLEMENTATION NOTES (ALLOWED):
+- If you already have helper inside dataGateway to call /api/table-read, reuse it.
+- Otherwise add a small local helper in dataGateway.ts ONLY:
+  async function tableRead<T>(table: string, opts: { select?: string; filters?: any; orderBy?: string; ascending?: boolean; limit?: number; offset?: number; })
+  that calls GET /api/table-read?table=...&select=... etc (or POST if your server expects body).
+- Ensure orderBy columns are valid (server rejects unknown). Use the same orderBy as current supabase.order() calls:
+  - branches: name
+  - customers: name
+  - suppliers: name
+  - gold_prices: effective_date desc
+  - gold_karats: name
+- For fetchDashboardStats():
+  - Replace 5 Supabase count/sum calls with API calls:
+    - jewelry_items count
+    - sales sum (if it was sum) OR sales count (match existing)
+    - jewelry_sets count
+    - purchase_batches count
+    - customers count
+  - If server table-read cannot do aggregates, then keep the Supabase version for dashboard ONLY and report the limitation with proof.
+    (But try first: if server supports count via head/count pattern or a dedicated endpoint already exists in server, use it.)
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- (show full diffs for ONLY the changed functions; include enough context)
+C) Grep proof (these should drop inside those functions):
+   rg -n "supabase\\.from\\('branches'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('customers'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('suppliers'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('gold_prices'\\)" src/lib/dataGateway.ts
+   rg -n "supabase\\.from\\('gold_karats'\\)" src/lib/dataGateway.ts
+   (Should show only the SUPABASE branch code, not used when NEON backend active.)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+E) Runtime verification:
+   - With backend=SUPABASE: pages still load as before.
+   - With backend=NEON: verify at least:
+     1) Dashboard loads stats without errors
+     2) A page that uses branches/customers/suppliers dropdowns loads without errors
+     3) Gold prices/karats page loads without errors
+   Include 3 representative network logs or server responses (status codes) showing /api/table-read being hit.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

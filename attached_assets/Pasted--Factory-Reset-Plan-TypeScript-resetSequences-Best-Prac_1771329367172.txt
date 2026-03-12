@@ -1,0 +1,148 @@
+نفّذ إعداد "Factory Reset Plan" داخل السيرفر (TypeScript) + توليد resetSequences تلقائيًا (Best Practice) مع فلترة آمنة.
+
+🎯 المطلوب (بدون UI الآن)
+1) أنشئ ملف: server/factoryResetPlan.ts
+
+ويحتوي حرفيًا:
+
+A) truncateTables: string[]  (كما يلي بالترتيب)
+[
+  "purchase_correction_artifacts",
+  "purchase_correction_actions",
+  "purchase_correction_groups",
+  "unique_purchase_return_items",
+  "unique_purchase_invoice_items",
+  "unique_item_movements",
+  "transfer_items",
+  "transfer_request_items",
+  "return_items",
+  "sale_items",
+  "sales_invoice_items",
+  "purchase_return_items",
+  "purchase_return_lines",
+  "purchase_invoice_lines",
+  "purchase_order_items",
+  "purchase_order_receipts",
+  "purchase_requisition_lines",
+  "purchase_requisition_items",
+  "supplier_payment_allocations",
+  "import_row_errors",
+  "label_print_jobs",
+  "credit_notes",
+  "journal_entry_lines",
+  "inventory_count_readings",
+  "inventory_count_results",
+  "item_movements",
+  "cost_entries",
+  "accounting_audit_logs",
+  "accounting_health_check_results",
+  "unique_purchase_returns",
+  "unique_items",
+  "unique_purchase_invoices",
+  "unique_purchase_batches",
+  "purchase_returns",
+  "returns",
+  "sales",
+  "invoices",
+  "payments",
+  "journal_entries",
+  "transfers",
+  "transfer_requests",
+  "purchase_batches",
+  "purchase_orders",
+  "purchase_requisitions",
+  "inventory_counts",
+  "jewelry_items",
+  "jewelry_sets",
+  "gold_scrap",
+  "finished_goods_showroom",
+  "pos_workflow_requests",
+  "atomic_workflow_requests",
+  "backup_logs",
+  "accounting_health_check_runs",
+  "attachments",
+  "gold_prices",
+  "fiscal_years",
+  "products",
+  "serial_counters"
+]
+
+B) keepTables: string[] (كما يلي)
+[
+  "profiles",
+  "auth_sessions",
+  "user_roles",
+  "user_branches",
+  "user_custom_roles",
+  "custom_roles",
+  "role_permissions",
+  "role_modules",
+  "modules",
+  "screens",
+  "branches",
+  "suppliers",
+  "customers",
+  "chart_of_accounts",
+  "branch_coa_accounts",
+  "coa_account_templates",
+  "branch_accounting_config",
+  "branch_inventory_accounts",
+  "payment_account_settings",
+  "production_account_settings",
+  "accounting_config_keys",
+  "app_settings",
+  "gold_karats",
+  "cash_vaults",
+  "gold_vaults",
+  "cost_centers",
+  "departments",
+  "employees",
+  "pr_approval_thresholds",
+  "workflow_types"
+]
+
+C) اكتشاف sequences تلقائيًا (فلترة آمنة)
+- export async function discoverResetSequences(db): Promise<string[]>
+  يرجع فقط sequences في public التي اسمها ينتهي بـ '_doc_seq'
+  باستخدام query:
+
+select c.relname
+from pg_class c
+join pg_namespace n on n.oid=c.relnamespace
+where c.relkind='S'
+  and n.nspname='public'
+  and c.relname like '%\_doc\_seq' escape '\'
+order by c.relname;
+
+D) بناء SQL reset (بدون تنفيذ هنا)
+- export function buildFactoryResetSQL(seqs: string[]) => string
+  يُنتج SQL آمن:
+  BEGIN;
+  TRUNCATE TABLE <كل truncateTables> RESTART IDENTITY CASCADE;
+  TRUNCATE TABLE serial_counters;
+  INSERT INTO serial_counters(prefix,next_seq) VALUES
+    ('FSETN',1),('FSETE',1),('FSETR',1),('FSETB',1);
+
+  -- restart discovered sequences
+  لكل seq في seqs:
+    ALTER SEQUENCE public."<seq>" RESTART WITH 1;
+
+  COMMIT;
+
+مهم: لا تعمل DROP لأي شيء. ولا تنفّذ reset فعليًا في هذا البرومبت.
+
+2) اعمل Smoke output (console.log) بدون تنفيذ reset:
+- truncateTables.length
+- keepTables.length
+- discovered sequences list
+- أول 5 وأخر 5 من truncateTables للتأكيد
+
+⚠️ قواعد صارمة
+- لا تضيف جداول جديدة من تخمينك.
+- اكتشاف sequences محصور في *_doc_seq فقط.
+- لا تغيّر أي منطق تشغيل آخر.
+
+📎 Evidence
+A) git diff --stat
+B) محتوى server/factoryResetPlan.ts
+C) console output للـ discovered sequences

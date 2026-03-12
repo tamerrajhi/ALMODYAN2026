@@ -1,0 +1,97 @@
+PROMPT — ACC-BRANCH-COA-FAST-0 | BRANCH COA AUTO-PROVISION | P0 IMPLEMENTATION | ATOMIC | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon)
+MODE: OPS-FIRST / BUGFIX + MINIMAL FEATURE / ATOMIC ONLY
+
+GOAL:
+When a new branch is created, automatically provision a full Chart of Accounts for that branch (Branch COA).
+Each branch must have its own accounts, not shared.
+
+STRICT RULES:
+- Do NOT enable direct writes.
+- Keep changes minimal and reversible.
+- Must be idempotent (safe to re-run).
+- Evidence required.
+
+STEP 1 — QUICK AUDIT (NO CHANGES)
+A) Paste table shapes:
+- \d+ branches
+- \d+ chart_of_accounts
+B) Identify branch create path:
+- Which UI file creates branch
+- Which RPC/endpoint is called
+
+STEP 2 — IMPLEMENT P0 (DB + RPC + MINIMAL HOOK)
+A) Create migration: migrations/acc_branch_coa_p0.sql containing:
+
+1) Table: coa_account_templates
+Columns (minimal):
+- template_code text PRIMARY KEY      -- e.g. INVENTORY, AP_SUPPLIERS, VAT_INPUT_PUR, CASH, BANK, SALES_REV, COGS
+- account_code text NOT NULL          -- suggested base code per template (e.g. 1301)
+- name_ar text NOT NULL
+- name_en text NULL
+- account_type text NOT NULL          -- must match your enum/allowed values
+- parent_template_code text NULL      -- for tree structure
+- is_postable boolean NOT NULL default true
+- sort_order int NOT NULL default 0
+
+2) Table: branch_coa_accounts
+Columns:
+- branch_id uuid NOT NULL REFERENCES branches(id) ON DELETE CASCADE
+- template_code text NOT NULL REFERENCES coa_account_templates(template_code)
+- account_id uuid NOT NULL REFERENCES chart_of_accounts(id) ON DELETE CASCADE
+- UNIQUE(branch_id, template_code)
+
+3) Function: provision_branch_coa_atomic(p_payload jsonb) RETURNS jsonb
+Input:
+- branch_id (required)
+Behavior:
+- Validate branch exists
+- If branch already provisioned (exists rows in branch_coa_accounts for that branch) => return success {already:true}
+- For each template row (ordered by parent relationships):
+  - Create account row in chart_of_accounts
+    * account_code should be branch-specific to avoid conflicts:
+      Suggested pattern: <branch_code>-<base_code> OR numeric: <base_code><branch_suffix>
+      (Pick ONE based on existing schema constraints; must not break unique constraints.)
+  - Set parent_id by looking up parent template’s created account_id for same branch
+  - Insert mapping into branch_coa_accounts
+- Return {success:true, created_count:n}
+
+4) Seed minimal template rows required for purchasing to work at least:
+- INVENTORY (1301)
+- AP_SUPPLIERS (2101)
+- VAT_INPUT_PURCHASES (2105)
+- CASH (110101)
+- BANK (110104)
+- SALES_REVENUE (4100)
+- COGS (5100)
+- VAT_OUTPUT (2110)
+(Use Arabic names consistent with your UI)
+
+B) Hook:
+After branch creation succeeds, call provision_branch_coa_atomic.
+Prefer:
+- If branch create uses RPC: call provision inside same RPC transaction (best).
+- Else: minimal UI call right after success (acceptable).
+
+STEP 3 — VERIFICATION (MUST)
+A) Create a test branch (or pick latest branch id) and run:
+- SELECT count(*) FROM branch_coa_accounts WHERE branch_id='<id>';
+- SELECT t.template_code, a.account_code, a.account_name, a.parent_id
+  FROM branch_coa_accounts m
+  JOIN coa_account_templates t ON t.template_code=m.template_code
+  JOIN chart_of_accounts a ON a.id=m.account_id
+  WHERE m.branch_id='<id>'
+  ORDER BY t.sort_order;
+
+B) Confirm tree parent_id set for at least:
+- INVENTORY child under Inventory parent if you have hierarchy
+(or leave flat if you seeded flat templates)
+
+EVIDENCE REQUIRED:
+1) git diff --stat
+2) git diff --
+3) Full migration SQL contents
+4) DB proof queries output
+5) npx tsc --noEmit (Exit 0)
+STOP.

@@ -1,0 +1,105 @@
+PROMPT — PURCH-INVOICES-UI + JE-BALANCE AUDIT | STRICT EVIDENCE | NO GUESS | STOP
+
+ROLE: Senior Engineer
+MODE: READ + VERIFY + FIX ONLY IF PROVEN BROKEN
+
+RULES (STRICT):
+- Do NOT claim PASS without raw proofs.
+- Do NOT guess anything. If something is missing, query it.
+- Evidence must be printed exactly as requested. No summaries until evidence is printed.
+- If JE is unbalanced OR VAT line is missing when tax_amount > 0: fix the RPC and show before/after proofs.
+- DB-only fix for RPC (no UI refactor unless required by evidence).
+- Use parameterized SQL / safe query patterns.
+
+========================
+STOP-0 (SETUP: GET LAST GENERAL PURCHASE INVOICE + JE_ID)
+========================
+1) Identify the latest GENERAL purchase invoice created via invoices table (invoice_type='purchase') and get its journal_entry_id:
+Run and paste raw output:
+
+SELECT i.id, i.invoice_number, i.invoice_type, i.status, i.subtotal, i.tax_amount, i.total_amount, i.journal_entry_id, i.created_at
+FROM invoices i
+WHERE i.invoice_type = 'purchase'
+ORDER BY i.created_at DESC
+LIMIT 1;
+
+2) If journal_entry_id is NULL, create ONE general purchase invoice via RPC (purchase_invoice_create_atomic) and paste raw JSON response including journalEntryId.
+
+STOP after printing raw outputs.
+
+========================
+STOP-1 (EVIDENCE ONLY — NO CHANGES)
+========================
+A) Code evidence (raw):
+- git diff --stat
+- git diff --
+
+B) Runtime evidence (raw):
+- npx tsc --noEmit
+- print EXIT CODE
+
+C) API evidence (raw):
+1) curl GET /api/purchasing/invoices-list?invoice_type=purchase
+   - print first 3 rows (invoice_number, status, supplier_name, branch_name, total_amount)
+2) curl GET same endpoint with date_from/date_to (use today’s date in server timezone)
+   - print count only
+3) curl GET same endpoint with purchase_type param IF supported
+   - print count only
+   - if not supported, print "purchase_type param NOT SUPPORTED" with evidence (route handler / query parsing)
+
+D) DB evidence for the last GENERAL purchase invoice JE:
+Using the JE_ID from STOP-0 (journal_entry_id), run and paste:
+
+D1) Header vs lines count:
+SELECT je.entry_number, je.total_debit, je.total_credit, COUNT(jel.id) AS lines
+FROM journal_entries je
+JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+WHERE je.id = '<JE_ID>'
+GROUP BY 1,2,3;
+
+D2) Line sums (must match header totals):
+SELECT
+  SUM(jel.debit_amount)  AS sum_debit,
+  SUM(jel.credit_amount) AS sum_credit
+FROM journal_entry_lines jel
+WHERE jel.journal_entry_id = '<JE_ID>';
+
+D3) Lines by account:
+SELECT coa.account_code, jel.debit_amount, jel.credit_amount
+FROM journal_entry_lines jel
+JOIN chart_of_accounts coa ON coa.id = jel.account_id
+WHERE jel.journal_entry_id = '<JE_ID>'
+ORDER BY coa.account_code;
+
+STOP after printing ALL raw outputs above.
+
+========================
+STOP-2 (FIX ONLY IF UNBALANCED — DB ONLY)
+========================
+Condition to enter STOP-2:
+- If (sum_debit != sum_credit) OR (tax_amount > 0 AND there is NO debit line to VAT input account 2105 / <BR>-2105)
+
+If condition is met:
+1) Patch the RPC purchase_invoice_create_atomic to:
+   - Debit inventory at subtotal (1301 / <BR>-1301)
+   - Debit VAT input at tax_amount (2105 / <BR>-2105) ONLY when tax_amount > 0
+   - Credit supplier AP at total_amount (2101 / <BR>-2101)
+   - Update journal_entries totals to match actual lines (sum debit/credit)
+   - Use ROUND( , 2) for monetary values
+
+2) Retro-fix existing affected JEs created by purchase_invoice_create_atomic where:
+   - header totals claim balance but line sums are unbalanced
+   - add missing VAT debit line with correct amount/account
+   - update je.total_debit/total_credit to match sums
+
+3) Create ONE migration file:
+migrations/purchase_invoice_rpc_vat_fix.sql
+
+Evidence required (raw):
+- cat migrations/purchase_invoice_rpc_vat_fix.sql
+- psql apply output (or migration runner output)
+- Re-run STOP-1 D1/D2/D3 for:
+  a) The same JE_ID (after retro-fix)
+  b) A NEW general invoice created after the fix (show its JE_ID and proofs)
+
+STOP.

@@ -1,0 +1,67 @@
+نريد POS كـ App منفصل تماماً داخل نفس المشروع، لا يظهر في ERP نهائياً.
+الدخول للـPOS فقط من AuthPage الخارجي (شاشة الدخول الرئيسية).
+داخل POS:
+- الكاشير/المشرف يرى فقط 3 شاشات:
+  1) نقطة بيع -> /pos
+  2) فواتير مبيعات POS -> /pos/invoices
+  3) مرتجعات مبيعات POS -> /pos/returns
+- الأدمن داخل POS يرى أيضاً:
+  - تقارير POS -> /pos/reports
+  - إعدادات نقطة البيع -> /pos/settings
+لكن ERP sidebar/ERP routes لا تحتوي أي شيء له علاقة بـPOS إطلاقاً.
+
+غير قابل للتفاوض:
+- POS يستخدم POSLayout فقط (بدون MainLayout/ERP Header/ERP Sidebar).
+- POS permissions مستقلة عن ERP screen permissions.
+- Flow: AuthPage -> اختيار فرع + Branch credentials -> ثم داخل POS اختيار البائع + PIN.
+- المشرف فقط له صلاحية المرتجع (Supervisor override).
+
+المطلوب تنفيذياً:
+
+(1) Routing (تحويل المسارات لتصبح كلها تحت /pos/*)
+- أنشئ routes جديدة:
+  /pos                (POSPage)
+  /pos/invoices        (POS invoices list/page الحالية)
+  /pos/returns         (POS returns list/page الحالية)
+  /pos/reports         (placeholder الآن أو ربط تقارير POS لو موجودة) [Admin فقط]
+  /pos/settings        (placeholder الآن أو ربط إعدادات POS لو موجودة) [Admin فقط]
+
+- اترك ERP routes القديمة كما هي، لكن:
+  - احذف/ألغِ أي وضع POS على /sales/pos-invoices أو /sales/returns?mode=pos (اعمل redirect 301/302 داخلياً إن لزم):
+    /sales/pos-invoices -> redirect to /pos/invoices
+    /sales/returns?mode=pos -> redirect to /pos/returns
+  الهدف: لا يوجد أي POS path متداخل مع ERP paths.
+
+(2) POSLayout (App shell مستقل)
+- POSLayout sidebar:
+  - للكاشير/المشرف: يعرض 3 روابط فقط (/pos, /pos/invoices, /pos/returns)
+  - للأدمن: يعرض + (/pos/reports, /pos/settings)
+- لا تستخدم Sidebar.tsx الخاصة بالـERP ولا useScreenPermissions.
+- اعرض اسم الفرع "Name + Code" في هيدر POS.
+- لا تعرض بيانات ERP user مثل Admin name من auth/me في الهيدر.
+
+(3) POS Permissions داخل POS app
+- حدّد isPosAdmin داخل POS (إذا عندك isAdmin من ERP profile استخدمه مؤقتاً، أو role خاص داخل POS إن موجود).
+- الكاشير: بيع + فواتير POS فقط
+- المشرف: نفس الكاشير + صلاحية عمل مرتجع (Supervisor override بالفعل موجود)
+- الأدمن: كل POS بما فيه reports/settings
+
+(4) AuthPage (الدخول من الخارج فقط)
+- أضف زر واضح "دخول نقطة البيع" في AuthPage يفتح /pos
+- لا تضف POS في ERP sidebar أو أي قائمة داخل ERP.
+
+(5) إزالة POS من ERP بالكامل
+- احذف أي عناصر POS من allMenuSections أو أي menu config للـERP.
+- احذف أي منطق POS داخل MainLayout (فلترة/inPosArea/…).
+
+Evidence إلزامي (بدون شروحات):
+A) git diff --stat
+B) Screenshots:
+  1) AuthPage يظهر زر "دخول نقطة البيع"
+  2) /pos يظهر POSLayout و 3 روابط فقط (بحساب كاشير/مشرف)
+  3) /pos يظهر +reports/settings (بحساب Admin)
+  4) أي صفحة ERP sidebar لا تحتوي POS إطلاقاً
+C) grep:
+  rg -n "/sales/pos-invoices|mode=pos" src
+  المطلوب: لا يوجد استعمال في UI (إلا redirect واحد إن نفّذته في router/server)
+ارجع بالـEvidence فقط.

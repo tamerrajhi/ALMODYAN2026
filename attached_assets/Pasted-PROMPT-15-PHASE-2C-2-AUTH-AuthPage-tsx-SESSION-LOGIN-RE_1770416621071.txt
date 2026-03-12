@@ -1,0 +1,55 @@
+PROMPT 15 — PHASE-2C.2 AUTH | AuthPage.tsx SESSION LOGIN + REMOVE supabase.auth.getUser() | EVIDENCE | STOP
+
+ROLE: Frontend Engineer
+MODE: FRONTEND ONLY (NO SERVER CHANGES)
+
+SCOPE (ONLY):
+- src/pages/AuthPage.tsx
+
+GOAL:
+Remove ALL supabase.auth.getUser() calls from AuthPage.tsx.
+AuthPage must support both auth backends:
+- VITE_AUTH_BACKEND=supabase (default): keep existing Supabase login/signup flow working.
+- VITE_AUTH_BACKEND=session: use /api/auth/login + cookie, then rely on AuthContext to load user via /api/auth/me.
+
+STRICT RULES (NO EXCEPTIONS):
+- Do NOT modify AuthContext.tsx in this prompt.
+- Do NOT change UI copy/messages unless absolutely necessary.
+- Do NOT change routing logic except where required after successful login.
+- For session-mode:
+  - POST /api/auth/login using fetch with credentials:'include'
+  - On success: navigate to the app (same as current behavior after login)
+  - Do NOT call supabase.auth.* in session-mode.
+- For supabase-mode:
+  - You may keep supabase.auth.signInWithPassword/signUp, etc.
+  - But MUST NOT call supabase.auth.getUser() anymore (remove verification step).
+  - If verification was used only to confirm login, replace it by trusting the auth call result OR by relying on AuthContext state.
+
+IMPLEMENTATION HINT (ALLOWED):
+- Detect backend the same way as AuthContext:
+  const AUTH_BACKEND = import.meta.env.VITE_AUTH_BACKEND ?? "supabase";
+  const isSessionMode = AUTH_BACKEND === "session";
+
+- For session login:
+  const res = await fetch('/api/auth/login', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email_or_username, password }) })
+  handle res.ok / errors similarly to current patterns.
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) git diff --stat
+B) git diff -- (full file diff)
+C) Grep proof:
+   - rg -n "supabase\\.auth\\.getUser\\(" -S src/pages/AuthPage.tsx   --> must be NO MATCHES
+   - rg -n "/api/auth/login" -S src/pages/AuthPage.tsx               --> must be present (for session mode)
+D) Typecheck:
+   npx tsc --noEmit (Exit 0)
+E) Runtime verification (text only):
+   1) supabase mode (VITE_AUTH_BACKEND unset or supabase):
+      - login works as before
+   2) session mode (VITE_AUTH_BACKEND=session, server SESSION_AUTH_ENABLED=true):
+      - login works (cookie set)
+      - refresh keeps session (AuthContext /api/auth/me)
+      - logout works from UI (already in AuthContext)
+Mention any console errors.
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

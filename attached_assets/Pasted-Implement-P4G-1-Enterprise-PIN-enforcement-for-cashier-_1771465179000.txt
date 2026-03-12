@@ -1,0 +1,87 @@
+Implement P4G-1: Enterprise PIN enforcement for cashier/supervisor roles.
+Constraints:
+- Minimal blast radius
+- Keep existing response shapes as much as possible
+- No changes to POS atomic RPC payloads
+- No legacy, no new endpoints unless absolutely required
+- Add evidence (diff + smoke tests)
+
+GOAL:
+If a user is assigned role_key in:
+- branch_seller_pos_only
+- branch_supervisor_pos_plus_unique_returns
+Then user must have an active PIN (user_pins.is_active = true).
+Enforce in BOTH:
+A) UI (UsersPage) to prevent mistakes
+B) Backend to prevent API bypass
+
+========================
+PHASE 1 — Backend minimal extension
+========================
+1) Extend GET /api/users-with-details to include active PIN users list.
+- In the existing Promise.all in routes.ts (users-with-details handler), add:
+  SELECT user_id FROM user_pins WHERE is_active = true
+- Add it to the returned payload as `userPins` (array of {user_id}).
+- Do NOT change existing keys; only add this extra key.
+
+2) Add a small helper in server/routes.ts near requireAdminRole:
+- async function assertPinRequiredForRoleKeys(userId: string, roleKeys: string[]): throws error if pin missing when roleKeys include seller/supervisor
+Rules:
+- If roleKeys contains seller/supervisor -> require active pin exists for userId.
+- Otherwise do nothing.
+
+3) Enforce on admin mutations:
+- POST /api/users/:userId/custom-roles  (role assignment enable=true)
+  - If enabling a role whose custom_roles.role_key is seller/supervisor -> check PIN exists
+  - If missing -> 409 with JSON:
+    { data: null, error: { message: "يجب تعيين PIN لهذا المستخدم قبل منحه صلاحية بائع/مشرف" } }
+- POST /api/users/:userId/active  (activating user)
+  - If setting active=true AND user currently has seller/supervisor role -> require PIN
+  - If missing -> same 409 message
+
+Notes:
+- Admin bypass is NOT allowed here; even admin should set PIN before enabling cashier/supervisor roles for others.
+- Do not affect reset-password / set-pin endpoints.
+
+========================
+PHASE 2 — Frontend UI Guard (UsersPage)
+========================
+4) In UsersPage mapper for users-with-details, add:
+- has_pin: boolean computed by checking userPins list (user_id match).
+Do not break existing mapping.
+
+5) UI behavior:
+A) Role assignment UI:
+- When admin tries to enable seller/supervisor role for a user with has_pin=false:
+  - Block the action (do not call mutation)
+  - Show a toast/error inline: "لا يمكن تعيين دور بائع/مشرف بدون PIN. عيّن PIN أولاً."
+  - Provide a CTA: open the existing "تعيين PIN" dialog for the same user.
+
+B) Activation toggle:
+- If toggling user active=true while user has seller/supervisor role and has_pin=false:
+  - Block + show same message + CTA to set PIN.
+
+6) Visual hint:
+- In users table row, show a small badge/indicator for PIN status:
+  - "PIN ✅" when has_pin=true
+  - "PIN ❌" when false
+Admin only.
+
+========================
+PHASE 3 — Evidence & Tests
+========================
+7) Provide evidence:
+- git diff --stat
+- show the exact lines changed for:
+  - users-with-details payload includes userPins
+  - server-side 409 guards added to the two endpoints
+  - UsersPage blocks + CTA
+
+8) Smoke tests (use admin session):
+- Case 1: user بدون PIN -> محاولة تعيين branch_seller_pos_only -> 409
+- Case 2: نفس user -> set-pin -> success -> تعيين role -> 200
+- Case 3: user لديه role seller/supervisor لكن بلا PIN -> تفعيل user -> 409
+- Case 4: بعد PIN -> تفعيل -> 200
+
+DO NOT implement anything else.
+STOP after completion.

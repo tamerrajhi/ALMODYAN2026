@@ -1,0 +1,102 @@
+PROMPT — P4G-3C (Enterprise PIN Policy Hardening: Create/Bulk UX Unification)
+SCOPE: Minimal, no business logic changes outside PIN policy. No DB schema changes. No new endpoints.
+RULES:
+- Prompt-by-prompt only.
+- No guessing: show BEFORE/AFTER evidence for each changed behavior.
+- Keep existing responses structure {data, error} where applicable.
+
+GOAL
+Unify PIN enforcement so that Admin "create user" and "bulk create users" do NOT return confusing 409 after a profile is created.
+Instead:
+- The user(s) can be created successfully,
+- BUT POS roles (branch_seller_pos_only / branch_supervisor_pos_plus_unique_returns / admin bypass) must NOT be assigned unless a PIN exists,
+- The API response must clearly report role assignment skipped due to missing PIN.
+
+DEFINITION
+POS_ROLE_KEYS = [
+  'branch_seller_pos_only',
+  'branch_supervisor_pos_plus_unique_returns'
+]
+
+EXISTING POLICY (already implemented):
+- /api/users/:userId/custom-roles enable=true => blocks (409) if POS role + no PIN
+- /api/users/:userId/active activate => blocks (409) if user has POS roles + no PIN
+- POS cashier enter / supervisor override already require PIN verification
+
+THIS TASK
+A) Audit proof (no edits first)
+1) rg evidence:
+   - rg "INSERT INTO user_custom_roles|user_custom_roles" server
+   - Confirm only these endpoints assign roles:
+     a) POST /api/users/:userId/custom-roles
+     b) POST /api/admin/users/create
+     c) POST /api/admin/users/bulk-create-role-users
+   - Output lines+file evidence.
+
+2) Identify current behavior:
+   - POST /api/admin/users/create:
+     - If request includes a POS role assignment without PIN, currently returns 409 after profile insert OR some inconsistent behavior.
+   - POST /api/admin/users/bulk-create-role-users:
+     - Should skip POS role assignment with pinSkipped count (already added) but confirm response clarity.
+
+B) Implementation (minimal edits)
+1) Create a shared helper in server/routes.ts near other helpers:
+   - async function hasActivePin(userId: string): Promise<boolean>
+     SELECT 1 FROM user_pins WHERE user_id=$1 AND is_active=true LIMIT 1
+
+2) Modify POST /api/admin/users/create:
+   - Keep creating the profile exactly as before (no changes to hashing/password/session).
+   - If request tries to assign any POS role (role_key in POS_ROLE_KEYS):
+     - Before inserting into user_custom_roles, check hasActivePin(newUserId)
+     - If no PIN:
+         - DO NOT insert POS role(s)
+         - Return 200 with:
+           {
+             data: {
+               ok: true,
+               user_id: <created_user_id>,
+               role_assigned: false,
+               role_skipped_reason: "PIN_REQUIRED",
+               message_ar: "تم إنشاء المستخدم. لا يمكن إسناد دور نقطة البيع قبل تعيين PIN (4 أرقام)."
+             },
+             error: null
+           }
+     - If PIN exists: proceed to assign role(s) as normal (role_assigned=true, role_skipped_reason=null)
+   - IMPORTANT: Do NOT change request payload shape. Only adjust role assignment step & response.
+   - DO NOT change any other role types if present (non-POS roles can still be assigned as before).
+
+3) Modify POST /api/admin/users/bulk-create-role-users:
+   - Ensure it uses the same logic:
+     - For any created user where requested role_key is in POS_ROLE_KEYS:
+       - If no PIN exists (it won’t for newly created users): skip inserting POS roles.
+   - Response MUST include:
+     - created_count
+     - role_assigned_count
+     - role_skipped_count
+     - pin_required_skipped_count
+     - (keep existing pinSkipped if already present, but standardize names if needed WITHOUT breaking any existing frontend usage; if frontend depends on pinSkipped keep it and also add the new standardized fields).
+
+C) Evidence (must provide)
+1) git diff --stat and exact diff snippets for only the lines changed.
+2) BEFORE/AFTER behavioral proof (curl style; you can create an admin session in DB if needed like prior tests):
+   - Test 1: Admin create user with seller role in payload:
+     Expected: 200, user created, role_assigned=false, role_skipped_reason=PIN_REQUIRED
+   - Test 2: After setting PIN via /api/admin/users/set-pin then assigning role via /api/users/:userId/custom-roles:
+     Expected: role assign succeeds (200)
+   - Test 3: Bulk create users with requested seller role:
+     Expected: created_count>0, role_skipped_count==created_count, pin_required_skipped_count==created_count
+3) rg proof after change:
+   - rg "INSERT INTO user_custom_roles" server => only 3 endpoints still (no accidental new insertion sites)
+
+D) Non-goals (explicit)
+- Do NOT add any new DB tables/columns.
+- Do NOT add OTP or change password rules.
+- Do NOT change atomic RPC flows.
+- Do NOT change Branch login or POS session logic.
+- Do NOT introduce legacy user_roles anywhere.
+
+DELIVERABLE
+Return final summary in Arabic:
+- What changed (Create/Bulk now role-skips instead of 409)
+- Why (Enterprise UX + no half-fail)
+- Evidence references (diff stat + test matrix results)

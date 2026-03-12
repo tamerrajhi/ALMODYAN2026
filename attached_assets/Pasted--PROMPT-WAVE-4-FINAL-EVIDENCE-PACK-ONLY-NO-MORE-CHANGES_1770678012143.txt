@@ -1,0 +1,79 @@
+✅ PROMPT — WAVE 4 FINAL EVIDENCE PACK ONLY | NO MORE CHANGES | STOP
+
+ROLE: Auditor / Build Verifier
+MODE: Evidence-only. Do NOT modify any files. Do NOT add endpoints. Do NOT refactor. Output evidence and STOP.
+
+TASK:
+Produce the COMPLETE final evidence pack for Wave 4, showing that:
+- The 8 Wave 4 frontend files have ZERO supabase.from / supabase.rpc usage and ZERO supabase imports (where applicable).
+- All new/used Wave 4 backend endpoints are protected with requireSession.
+- Endpoints behave correctly:
+  - 401 without cookie
+  - 200 with cookie (or 501 SCHEMA_NOT_READY with JSON error_code)
+- No duplicate same-method same-path routes exist.
+- Build passes.
+- Updated production-path supabase counts are reported.
+
+OUTPUT (STRICT ORDER):
+
+1) WAVE 4 SCOPE (list the exact 8 frontend files migrated + list the backend endpoints added/used)
+
+2) DIFF EVIDENCE:
+- git diff --stat
+- git diff (ONLY for files touched in Wave 4: server/routes.ts + the 8 frontend files + any lib file touched)
+
+3) SUPABASE ELIMINATION PROOF (per-file):
+For each of the 8 files run and paste raw output:
+- rg -n "supabase\\s*\\.\\s*(from|rpc)\\s*\\(" <FILE> || true
+- rg -n "from\\s*['\\\"]@/integrations/supabase/client['\\\"]" <FILE> || true
+
+4) ENDPOINT SECURITY PROOF:
+For each Wave 4 endpoint, paste the exact route definition line(s) showing requireSession on the same line.
+
+5) RUNTIME/API PROOF:
+A) Unauthenticated (no cookie):
+curl -i http://localhost:5000<ENDPOINT>  (show status + content-type)
+B) Authenticated (with cookie):
+- Obtain cookie using the official login route (email_or_username) OR reuse a valid existing session cookie already available in the environment.
+- Then for each endpoint:
+  curl -i --cookie "__session=<TOKEN>" http://localhost:5000<ENDPOINT>
+  Show status + content-type + first 20 lines of JSON
+Expected:
+- 200 JSON for ready tables
+- OR 501 with JSON: {error_code:"SCHEMA_NOT_READY", ...}
+- AND 0 occurrences of HTML responses for API routes
+
+6) DUPLICATE ROUTE GATE (RAW):
+Run and paste output:
+node - <<'NODE'
+const fs=require('fs');
+const s=fs.readFileSync('server/routes.ts','utf8');
+const re=/app\\.(get|post|put|delete)\\("([^"]+)"/g;
+const m=new Map(); let x;
+while((x=re.exec(s))){ const k=x[1]+' '+x[2]; m.set(k,(m.get(k)||0)+1); }
+const dup=[...m.entries()].filter(([k,v])=>v>1);
+console.log('DUP_COUNT',dup.length);
+dup.forEach(([k,v])=>console.log(v,k));
+NODE
+
+7) POST-WAVE4 COUNTS (RAW) — PROD PATH ONLY (exclude src/components/health):
+Run and paste raw output:
+node - <<'NODE'
+const fs=require('fs'), path=require('path');
+function walk(dir){ let out=[]; for(const e of fs.readdirSync(dir,{withFileTypes:true})){ const p=path.join(dir,e.name);
+  if(e.isDirectory()) out=out.concat(walk(p));
+  else if(p.endsWith('.ts')||p.endsWith('.tsx')) out.push(p); } return out; }
+const re=/supabase\\s*\\.\\s*(from|rpc)\\s*\\(/g;
+const files=walk('src').filter(f=>!f.includes('src/components/health/'));
+let per=[]; let total=0;
+for(const f of files){ const s=fs.readFileSync(f,'utf8'); const m=s.match(re); if(m){ per.push([m.length,f]); total+=m.length; } }
+per.sort((a,b)=>b[0]-a[0]);
+console.log('PROD_FILES',per.length);
+console.log('PROD_CALLS',total);
+console.log('TOP20'); per.slice(0,20).forEach(([n,f])=>console.log(String(n).padStart(3,' '),f));
+NODE
+
+8) BUILD PROOF (RAW):
+npm run build
+
+STOP after printing the evidence pack. No narrative. No recommendations. STOP.

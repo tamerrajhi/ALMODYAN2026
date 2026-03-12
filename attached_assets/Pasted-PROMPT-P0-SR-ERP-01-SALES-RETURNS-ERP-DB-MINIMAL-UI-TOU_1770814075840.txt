@@ -1,0 +1,75 @@
+PROMPT — P0-SR-ERP-01 | SALES RETURNS ERP | DB + MINIMAL UI TOUCH | EVIDENCE | STOP
+
+ROLE: Full-stack engineer (DB-first)
+MODE: Audit first, then implement. No guessing.
+
+GOAL:
+Make ERP Sales Return work as a separate path from POS:
+- ERP return must select from ERP invoices only: invoices.invoice_type='sales' AND sale_id IS NULL
+- ERP return must NOT touch POS sale flows
+
+CONSTRAINTS:
+1) MUST start with discovery:
+   - Read frontend caller: src/pages/sales/SalesReturnFormPage.tsx
+   - Capture the EXACT RPC name + payload shape it sends today
+   - Confirm server proxy allowlist includes the RPC name (routes.ts)
+   - Confirm function missing in DB (pg_proc)
+
+2) Implementation strategy:
+   - Create the missing DB function: public.complete_erp_sales_return_atomic(jsonb) OR (jsonb) signature matching the caller payload exactly.
+   - Must be ATOMIC (single transaction inside function).
+   - Must write to existing "returns" tables used by POS returns (returns + return_items) BUT with ERP linkage:
+       returns.original_invoice_id = ERP invoice id
+       returns.original_sale_id = NULL
+       returns.return_type must indicate sales return (match existing convention in POS function)
+   - Must update inventory snapshot correctly:
+       For each returned unique item: set sold_at=NULL, sale_id=NULL, status='in_stock'
+       (Do NOT introduce new columns/tables in this prompt)
+   - Must create balanced Journal Entry (JE) with the SAME accounting logic as POS return, but reference_type/reference_id should be consistent and documented.
+   - Must create refund payment record (same as POS return) linked to the return and/or invoice (match existing schema usage).
+   - MUST validate:
+       a) invoice exists and is sales invoice
+       b) invoice.sale_id IS NULL (ERP only)
+       c) invoice.status = 'posted' (reject draft)
+       d) items are actually sold / eligible to return (prevent double return)
+       e) returned item belongs to the invoice (sales_invoice_items contains the jewelry_item_id)
+
+3) Minimal UI touch allowed ONLY IF required to match payload:
+   - If SalesReturnFormPage payload does NOT match new function signature, update only that file to match.
+   - Prefer matching DB signature to existing UI payload to avoid breaking changes.
+
+DELIVERABLES:
+A) Evidence Pack — Discovery
+   1) Show the exact call site line(s) in SalesReturnFormPage.tsx where dataGateway.rpc('complete_erp_sales_return_atomic', payload) is invoked
+   2) Print the payload keys you found (list them explicitly)
+   3) SQL proof: function missing BEFORE:
+      SELECT proname, oidvectortypes(proargtypes) FROM pg_proc WHERE proname='complete_erp_sales_return_atomic';
+
+B) Implementation Evidence
+   1) Provide the full SQL function body (CREATE OR REPLACE FUNCTION ...) as code in output
+   2) SQL proof: function exists AFTER (same pg_proc query)
+   3) SQL proof: successful dry-run by calling the function with a REAL invoice id + 1 real item id from that invoice (use a safe test invoice)
+      - show returned JSON / returned ids
+
+C) Runtime/DB Proof Queries (AFTER call)
+   1) returns row created with:
+      original_invoice_id = <invoice_id>
+      original_sale_id IS NULL
+   2) return_items count = N
+   3) journal_entries + journal_entry_lines exist and balanced:
+      total_debit == total_credit
+   4) payments refund row exists (if your POS return creates one, mirror it)
+   5) unique_items snapshot updated:
+      sold_at IS NULL AND status='in_stock' AND sale_id IS NULL for returned items
+
+D) Git Evidence
+   - git diff --stat
+   - git diff
+   (Only DB migration file + maybe SalesReturnFormPage.tsx if needed)
+
+SAFETY:
+- Do NOT modify any POS sale/return functions.
+- Do NOT change schema/tables besides adding this function (no ALTER TABLE).
+- If any required supporting function (JE number generator, payment number generator) is missing, STOP and report it with evidence.
+
+STOP

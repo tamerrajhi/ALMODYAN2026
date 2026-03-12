@@ -1,0 +1,112 @@
+PROMPT — PURCH-IMPORT-UNIQUE-AUDIT-0 | /import | DEPENDENCY MAP + GATE TEST PLAN | NO CHANGES | STOP
+
+ROLE: Senior Full-Stack Engineer
+MODE: AUDIT ONLY (NO CODE CHANGES)
+TARGET: Route /import titled "استيراد قطع من إكسل" (Unique/Serial Jewelry Items Import).
+
+1) Identify the exact entry files
+
+Show the router mapping for /import (React Router / route config).
+
+Provide file paths for:
+
+Page component for /import
+
+Upload/parse components
+
+The “review grid” component showing imported unique items
+
+Supplier picker + Branch selector components
+
+Any hooks/services used (import service, purchasingWriteService, inventory services)
+
+2) List every API call + RPC used by /import
+
+For each call, provide:
+
+Endpoint path (e.g., /api/table-read, /api/rpc/<fn>)
+
+Exact RPC function name(s)
+
+Request body shape exactly as sent by client
+
+Response shape expected by UI
+
+3) Unique-item DB read/write map (tables/views)
+
+Create a dependency list specific to unique/serial items:
+
+Tables read by the screen (branches, suppliers, jewelry catalog refs, purity tables, etc.)
+
+Tables written during the import flow (unique items + invoice + movements + accounting)
+For each written table: show:
+
+PK, required columns assumed by code
+
+Unique constraints used to prevent duplicates (serial/barcode/internal code)
+
+Any “status”/“stage” enums used
+
+4) Transactional pipeline mapping (End-to-End)
+
+Map the exact pipeline triggered by the final action button:
+A) Excel upload → parse → validation rules for unique items
+B) Create import batch / staging (which RPC + which table)
+C) Create purchase invoice draft (which RPC)
+D) Insert unique items (which table/RPC)
+E) Post invoice (which RPC)
+F) Inventory movements for unique items (which table/RPC; expected movement type + references)
+G) Journal Entry creation (which table/RPC; which accounts are debited/credited)
+H) Visibility downstream:
+
+Where does the created invoice appear (Purchasing invoices list + details page)?
+
+Where do unique items appear (Inventory transfer by serial, POS/sales selectors)?
+
+What exact query/page reads them in Sales?
+
+5) Accounting prerequisites (must be explicit)
+
+From server/routes.ts and all involved SQL functions:
+
+List exact account lookups used in this flow:
+
+Branch inventory account (expect <BR>-1301 then fallback 1301)
+
+Supplier AP (expect <BR>-2101 then fallback 2101/2100)
+
+VAT input (e.g., <BR>-2105 or 2105) if applied
+
+Confirm whether the import flow relies on:
+
+payment_account_settings
+
+branch_coa_accounts / templates
+
+app_settings (vat_rate, currency)
+Provide exact code snippets where these are looked up.
+
+6) Detect duplicate screens / old import pages
+
+Search for any other route/component implementing:
+
+“Import unique items from Excel”
+
+“Import purchases from Excel”
+Return a list of:
+
+Route(s)
+
+File(s)
+
+2-line differences vs /import
+Mark which ones are “safe candidates” for deletion but do not delete.
+
+OUTPUT FORMAT (STRICT)
+
+Bullet lists + file snippets only.
+
+No fixes, no migrations, no refactors.
+STOP.
+
+بعد ما يطلع الأوديت، ابعته هنا وأنا هحوّله فورًا إلى:

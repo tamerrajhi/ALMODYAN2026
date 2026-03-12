@@ -1,0 +1,45 @@
+MODE: AUDIT-ONLY (READ-ONLY). No code changes. No schema changes. No DB writes.
+
+GOAL
+I want a POS Admin Dashboard (/pos/pos-dashboard) where I can enable/disable widgets from a tab inside POS Settings (like "Users"). Before implementing anything, produce an Evidence Pack that answers: where and how to store dashboard widget visibility settings safely, and where to wire it in frontend/backend.
+
+SCOPE
+- Only POS Admin controls these settings.
+- Must not affect ERP auth or endpoints.
+- Must not change sales/inventory logic.
+
+TASKS (Evidence required for each)
+A) STORAGE AUDIT (DB + code)
+1) Search the DB schema for existing settings-like storage:
+   - tables/columns named settings, preferences, config, ui_settings, app_settings, user_settings, pos_settings, etc.
+   - also inspect pos_admin_accounts for any json/jsonb columns.
+2) Output evidence from DB:
+   - For any candidate table: columns + PK + FKs (from pg_catalog / information_schema).
+3) Output evidence from code:
+   - Find any existing endpoints that read/write settings (search keywords above).
+   - Provide file path + snippet.
+
+B) AUTH BOUNDARY AUDIT
+1) Prove how requirePosAdminToken works and where it is used.
+2) Identify the correct place to add:
+   - GET /api/pos/admin/settings/dashboard
+   - PUT /api/pos/admin/settings/dashboard
+   (Only as a plan, do not implement)
+3) Confirm cashier cannot access.
+
+C) FRONTEND WIRING AUDIT
+1) Locate:
+   - where /pos/pos-dashboard route is registered
+   - where /pos/settings tabs are defined and how to add a new tab
+   - where sidebar items are built for POS Admin, and how to make dashboard first item
+2) Provide file paths + short snippets (10-30 lines) for each.
+
+D) MIGRATION MECHANISM AUDIT
+1) Identify the official migration mechanism in this repo (Drizzle vs Supabase migrations vs SQL).
+2) Provide evidence: config files / scripts / folder structure.
+
+OUTPUT FORMAT (STRICT)
+1) Findings: bullets with file paths + line snippets
+2) Options for storage ranked by risk (reuse existing > add new), each with pros/cons based on evidence
+3) Recommended approach (single choice) and why it is lowest-risk
+4) Implementation Plan (high-level steps) WITHOUT writing any code

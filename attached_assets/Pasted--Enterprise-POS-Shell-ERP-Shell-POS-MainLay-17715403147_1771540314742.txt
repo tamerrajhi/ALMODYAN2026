@@ -1,0 +1,51 @@
+نفّذ الآن الحل الجذري Enterprise: فصل POS Shell عن ERP Shell.
+حاليًا صفحات POS تلف نفسها بـ <MainLayout> من داخل الصفحة، لذا ترقيعات sidebar غير كافية. المطلوب POSLayout مستقل.
+
+المطلوب:
+
+(1) أنشئ ملف جديد:
+src/components/pos/POSLayout.tsx
+Shell خفيف مستقل:
+- Header POS بسيط (اسم النظام + اسم الفرع "Name + Code")
+- Sidebar ثابت 3 روابط فقط:
+  1) /pos
+  2) /sales/pos-invoices
+  3) /sales/returns?mode=pos
+- Content container يعرض children
+- لا تستخدم auth/me ولا تعرض Admin/مستخدم
+- لا تستورد Sidebar.tsx الخاصة بالـERP ولا MainLayout
+- اسم الفرع:
+  - استخدم نفس منطق BranchLoginGate الموجود (يمرر branchName) أو POS context الموجود.
+  - لو branchName null، اعرض "اختر الفرع" فقط (بدون UUID).
+- مهم لتفادي التعطيل:
+  - لا تحاول تمرير props مثل title/breadcrumbs من MainLayout إلى POSLayout؛ POSLayout يكون بسيط.
+  - إذا صفحات POS كانت تعتمد على أي provider موجود داخل MainLayout (مثل Toast/Dialogs)، انقل نفس الـprovider إلى POSLayout أو اعتمد على global provider الموجود في App root، لكن بدون إدخال Header/Sidebar الخاصين بالـERP.
+
+(2) استبدل MainLayout بـ POSLayout في صفحات POS:
+A) src/pages/POSPage.tsx
+- أي wrapper <MainLayout ...> استبدله بـ <POSLayout> فقط
+- تأكد BranchLoginGate مازال يعمل ويمرر branchId + branchName
+
+B) src/pages/POSReturnPage.tsx
+- نفس الشي: POSLayout بدل MainLayout
+
+(3) الصفحات المشتركة:
+A) SalesReturnsListPage.tsx:
+- إذا query mode=pos => لف الصفحة بـ POSLayout
+- غير ذلك => MainLayout كما هو
+
+B) SalesInvoicesPage.tsx:
+- إذا sourceMode="pos" أو route هو /sales/pos-invoices => استخدم POSLayout
+- غير ذلك => MainLayout كما هو
+
+(4) تنظيف ERP layout:
+src/components/layout/MainLayout.tsx
+- احذف أي منطق خاص بـ POS (inPosArea / qp / isPosAllowedHref / فلترة POS)
+- MainLayout يعرض sidebar كامل حسب صلاحيات ERP فقط.
+
+(5) Evidence إلزامي:
+- git diff --stat + قائمة الملفات المعدّلة
+- Screenshot /pos: لا يظهر Admin/مستخدم في الأعلى + sidebar فيه 3 روابط فقط
+- Screenshot /sales/pos-invoices و /sales/returns?mode=pos: نفس POS shell
+- Screenshot ERP صفحة مشتريات: sidebar ERP كامل (حسب الصلاحيات) ولا يوجد فلترة POS
+ارجع بالـEvidence فقط.

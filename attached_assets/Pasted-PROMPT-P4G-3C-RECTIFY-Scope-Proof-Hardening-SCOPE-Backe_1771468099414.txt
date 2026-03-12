@@ -1,0 +1,52 @@
+PROMPT — P4G-3C-RECTIFY (Scope + Proof Hardening)
+SCOPE:
+- Backend only. NO frontend changes.
+- NO DB schema changes.
+- Keep existing endpoints & payload shapes.
+- Objective: make evidence/proof match the agreed prompt.
+
+A) ROLLBACK FRONTEND
+1) Revert any changes done to:
+   - src/pages/UsersPage.tsx
+   Confirm diff shows ZERO changes in src/ for this task.
+
+Evidence:
+- git diff --stat must show only server/routes.ts changed.
+
+B) REDUCE INSERT SITES BACK TO 3 (rg-proof compliance)
+Goal: `rg "INSERT INTO user_custom_roles" server/routes.ts` must point to exactly 3 endpoints only:
+- POST /api/admin/users/create
+- POST /api/admin/users/bulk-create-role-users
+- POST /api/users/:userId/custom-roles
+
+Implementation:
+1) Create a small local helper inside server/routes.ts (near hasActivePin/assertPinForPosRoles):
+   async function insertUserCustomRole(userId: string, roleId: string) { ... }
+   - This helper contains the single SQL text "INSERT INTO user_custom_roles ...".
+2) Refactor create-user to call insertUserCustomRole in both POS and non-POS paths (no duplicate SQL text).
+3) Refactor bulk-create to call insertUserCustomRole (no duplicate SQL text).
+4) /custom-roles endpoint remains using its own insert (or also uses helper) BUT ensure rg still shows exactly 3 occurrences total.
+
+Evidence:
+- BEFORE rg count
+- AFTER rg count = 3
+
+C) T3 TEST WITHOUT DESTROYING REAL ROLE DATA
+Do NOT delete existing user roles for testing.
+
+Instead:
+1) Create a TEMP POS role (data only) with role_key='temp_pos_seller_test' and is_active=true, is_admin=false.
+2) Run bulk-create-role-users to attempt creation for this role.
+   Expected: created_count increments, pinSkipped increments, pin_required_skipped_count increments.
+3) Clean up:
+   - Remove the temp role and any created users from the temp run.
+   - Confirm no changes in existing real POS roles.
+
+Evidence:
+- SQL evidence showing temp role exists then removed.
+- bulk-create response showing pinSkipped > 0.
+
+D) DELIVERABLE
+Return a concise Arabic summary with:
+- What changed (frontend rollback + rg-proof 3 inserts + safe T3 test)
+- Evidence (diff stat + test matrix)

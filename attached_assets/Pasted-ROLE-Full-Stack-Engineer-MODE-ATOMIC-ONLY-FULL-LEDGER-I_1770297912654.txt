@@ -1,0 +1,156 @@
+ROLE: Full-Stack Engineer
+MODE: ATOMIC-ONLY + FULL LEDGER (IMPORT SCREEN FIX) — ONE SHOT — STOP AFTER EVIDENCE
+
+CONTEXT
+We deleted the old purchase-import screen; the changes were applied there and got removed. The active screen is now:
+Route: /import
+File: src/pages/ImportPage.tsx
+We need to re-apply all functionality to THIS file/screen only, but in a strict Atomic-only way (NO direct supabase.from(...).insert/update/upsert/delete anywhere).
+
+GOAL (MUST)
+1) /import must support MULTI-INVOICE import (multi-file selection: multiple Excel invoices in one operation).
+2) Deduplication key MUST be SUPP INV only (supplier invoice number), NOT model. MODEL duplicates MUST be allowed.
+3) The system must preflight-validate:
+   A) No duplicates among selected files (SUPP INV duplicated across selected files => reject BEFORE any create).
+   B) No duplicates against DB (existing non-voided purchase invoice with same supplier_id + normalized SUPP INV => reject BEFORE any create).
+4) After approval/create, each file becomes a Purchase Invoice in DB via atomic RPC(s), with:
+   - Invoice header row written
+   - Invoice lines written
+   - Inventory items created/linked properly (unique items)
+   - Accounting JE created and posted, balanced and non-zero
+   - Movement ledger written (item_movements) for purchase/import (purchase_in) with unit_cost
+5) ABSOLUTE RULE: NO direct writes from frontend anywhere.
+6) ABSOLUTE RULE: If ANY file fails validation OR DB precheck => ZERO invoices created (fail-fast preflight).
+7) Provide COMPLETE EVIDENCE output at the end (SQL + TSX snippets + grep empty).
+
+SCOPE LIMIT
+- Only touch src/pages/ImportPage.tsx and DB functions needed for it.
+- Do NOT reintroduce any deleted screens/routes.
+- Do NOT modify unrelated modules.
+
+========================================
+DB WORK (MUST CREATE/UPDATE THESE)
+========================================
+
+A) Supplier invoice number storage + uniqueness
+1) Ensure invoices has supplier_invoice_no column (text).
+2) Ensure unique enforcement for purchase invoices:
+   Create unique index (case-insensitive + trimmed) on (supplier_id, supplier_invoice_no) for invoice_type='purchase' and status<>'voided' and non-empty.
+   Example (must match exactly in effect):
+   CREATE UNIQUE INDEX IF NOT EXISTS invoices_purchase_supp_inv_uq
+   ON public.invoices (supplier_id, upper(trim(supplier_invoice_no)))
+   WHERE invoice_type='purchase'
+     AND supplier_invoice_no IS NOT NULL
+     AND trim(supplier_invoice_no) <> ''
+     AND status <> 'voided';
+
+B) Preflight RPC (DB check)
+Create:
+purchase_invoice_supp_inv_precheck(p_supplier_id uuid, p_supp_invs text[])
+returns jsonb:
+{ success: true, exists: text[] }
+- exists contains the normalized (upper(trim)) values that already exist in invoices for same supplier, invoice_type='purchase', status<>'voided'.
+- Normalize inside the function as well.
+
+C) Eliminate any remaining helper-table direct writes by moving them to RPCs (NO frontend inserts)
+If ImportPage currently does supabase.from('purchase_batches').insert or supabase.from('jewelry_sets').insert (or any helper tables), replace them with atomic RPCs.
+
+Create atomic RPCs:
+1) import_purchase_batch_create_atomic(p_client_request_id uuid, p_payload jsonb) returns jsonb
+- Use atomic_workflow_requests idempotency with workflow_type='import_purchase_batch_create'
+- Insert into purchase_batches inside RPC and return {success, batch_id}
+- Write audit_logs entity_type='purchase_batch'
+
+2) import_jewelry_sets_upsert_atomic(p_client_request_id uuid, p_payload jsonb) returns jsonb
+- Use atomic_workflow_requests idempotency with workflow_type='import_jewelry_sets_upsert'
+- Insert/upsert jewelry_sets (whatever current schema uses) inside RPC and return {success, inserted_count, updated_count}
+- Write audit_logs entity_type='jewelry_sets'
+
+D) Purchase Invoice create RPC MUST support supplier_invoice_no and produce full accounting + movements
+We already have purchase_invoice_create_atomic / post / void in DB. Ensure create handles:
+- REQUIRED: supplier_invoice_no
+- Normalize: upper(trim)
+- Duplicate check against invoices (same supplier_id + normalized SUPP INV + not voided) returning error_code SUPP_INV_DUPLICATE + Arabic message
+- Create invoice header + lines
+- Create JE + lines + post it (or ensure post is done)
+- Create/attach inventory items (unique) and ensure they appear in POS by: branch_id set, sale_status='available', sold_at NULL.
+- Insert movement ledger entries into item_movements for each imported item:
+  movement_type: 'purchase_in' (or 'import_purchase_in' but must be consistent)
+  reference_type: 'purchase_invoice'
+  reference_id: invoice_id
+  from_branch_id: NULL
+  to_branch_id: branch_id
+  unit_cost: per item
+  notes: include SUPP INV or invoice number
+
+If the existing create RPC doesn’t currently insert item_movements for purchase, ADD IT.
+
+========================================
+UI WORK (ImportPage.tsx ONLY)
+========================================
+
+1) Multi-file selection
+- Update the file input to support multiple selection (multiple attribute).
+- Keep UI simple: user selects supplier + branch once, then chooses multiple files.
+
+2) SUPP INV extraction (per file)
+- From the Excel content, extract SUPP INV from EXACT column header "SUPP INV".
+- Normalize in UI: normalizedSuppInv = String(value).trim().toUpperCase()
+
+Per-file rule:
+- Each file must have EXACTLY one unique SUPP INV across its rows.
+- If 0 => error "الملف X لا يحتوي على SUPP INV"
+- If >1 => error "الملف X يحتوي على أكثر من SUPP INV: [...]"
+
+3) Cross-file duplicate gate (BEFORE any DB call)
+- Build map suppInv -> [fileNames]
+- If any suppInv appears in >1 file => reject and show list; STOP with zero creates.
+
+4) DB preflight gate (BEFORE any create)
+- Call purchase_invoice_supp_inv_precheck with supplier_id + array of ALL normalized supp invs.
+- If exists not empty => reject with Arabic message and STOP with zero creates.
+
+5) Create loop (ONLY after gates pass)
+For each validated file:
+- Build the atomic command payload for purchase_invoice_create_atomic including:
+  supplier_id, branch_id, invoice_date/due_date if needed, supplier_invoice_no = fileSuppInv
+  lines/items built from the file rows
+- Generate client_request_id = crypto.randomUUID() per file create (idempotency).
+- Call supabase.rpc('purchase_invoice_create_atomic', { p_payload: <jsonb> }) (or whichever signature exists).
+- If any create fails => stop remaining files and show error; do NOT attempt partial rollback (but report created count).
+
+6) Absolutely no direct writes
+- Replace ANY supabase.from(...).insert/update/upsert/delete in ImportPage.tsx with RPC calls.
+- Keep reads and rpc only.
+
+========================================
+VERIFICATION OUTPUT (MANDATORY — PRINT EXACTLY)
+========================================
+
+A) Paste FULL SQL definitions (exact CREATE OR REPLACE) for:
+- purchase_invoice_supp_inv_precheck
+- import_purchase_batch_create_atomic
+- import_jewelry_sets_upsert_atomic
+- Any updated purchase_invoice_create_atomic sections (full function if you changed it)
+
+B) Paste ImportPage.tsx snippets WITH LINE NUMBERS showing:
+- multi-file input (multiple attribute)
+- SUPP INV extraction
+- cross-file duplicate check
+- DB precheck call
+- create loop calling purchase_invoice_create_atomic
+- replacements of any former helper-table inserts with supabase.rpc(...)
+
+C) Run and paste (MUST BE EMPTY):
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+
+D) Provide a DB gate-test script (SQL) that proves:
+- Duplicate within selection is blocked (UI logic explanation OK)
+- DB precheck returns existing supp invs
+- Create produces:
+  1) invoices row with supplier_invoice_no normalized
+  2) journal_entries linked and balanced (total_debit = total_credit > 0)
+  3) item_movements rows created with movement_type='purchase_in' for the invoice
+  4) jewelry_items created/updated with branch_id and sale_status='available' and sold_at IS NULL
+
+STOP AFTER EVIDENCE. NO OTHER MODULES. NO GUESSING.

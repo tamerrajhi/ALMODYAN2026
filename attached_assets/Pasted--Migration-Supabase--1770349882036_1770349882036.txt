@@ -1,0 +1,155 @@
+أريد منك تنفيذ Migration كاملة وصحيحة لإزالة الاعتماد على Supabase تدريجيًا وبطريقة آمنة، بحيث يصبح النظام بالكامل يعمل على Neon/Express فقط (Data + Auth)، مع الحفاظ على atomic RPCs وعدم كسر أي شيء. لا تبدأ التنفيذ قبل عمل Verification واضح بالأدلة.
+
+0) قبل أي تغيير — Verification + أسئلة إلزامية (بدون تخمين)
+
+اعمل Scan على المشروع وأخرج Evidence واضح:
+
+هل يوجد VITE_DATA_BACKEND؟ وأين مُعرّف؟ وما قيمته الحالية؟
+
+هل يوجد VITE_SUPABASE_URL و VITE_SUPABASE_PUBLISHABLE_KEY؟ وأين تُستخدم الآن؟
+
+اعمل grep شامل (يدعم multi-line) وأعطني Counts + قائمة الملفات التي تحتوي:
+
+supabase.from(
+
+supabase.rpc(
+
+supabase.functions.invoke(
+
+supabase.auth
+
+أعطني قائمة الـ endpoints الموجودة حاليًا في server/routes.ts + وجود POST /api/rpc/:fnName و allowlist.
+
+تأكيد Neon readiness من داخل السيرفر (وليس كلام فقط):
+
+نفّذ من السيرفر (pool.query) checks للـ invariants التالية وارجع JSON نتيجة:
+
+invoices.supplier_invoice_no column موجود
+
+unique index invoices_purchase_supp_inv_uq موجود
+
+وجود الدوال:
+purchase_invoice_create_atomic, purchase_invoice_post_atomic, purchase_invoice_void_atomic, purchase_invoice_supp_inv_precheck, import_purchase_batch_create_atomic, import_jewelry_sets_upsert_atomic
+
+اعمل endpoint: GET /api/health/fingerprint يعيد هذا JSON.
+
+بعد ما تعرض نتائج Verification دي، اسألني سؤال واحد فقط:
+“هل أفعّل النقل على staging flag الآن؟”
+ثم توقف (STOP) — لا تُنفّذ أي تعديل قبل موافقتي.
+
+1) تنفيذ النقل — هدف نهائي (Zero Supabase)
+
+بعد الموافقة:
+هدفنا النهائي:
+
+لا يوجد أي استخدام لـ supabase.from() أو supabase.rpc() أو Supabase DB نهائيًا.
+
+نقل الـ Auth بالكامل إلى Express/Neon (جلسات/توكن) بحيث لا نحتاج supabase.auth في الـ frontend.
+
+Edge Functions (supabase.functions.invoke) تظل مؤقتًا فقط لو كانت خاصة ZATCA/صور… لكن يتم عمل “Wrapper” لها داخل السيرفر لتقليل لمس Supabase من الواجهة.
+
+2) تصميم Auth الجديد (B) — بدون كسر UI
+
+نفّذ Auth على Express/Neon كالتالي:
+
+DB Tables (إذا غير موجودة) + سيكيور:
+
+auth_users (id uuid, email, username, password_hash, is_active, created_at…)
+
+auth_sessions (id, user_id, token_hash, expires_at, created_at, revoked_at…)
+
+فهارس مناسبة + unique على email و username
+
+Endpoints:
+
+POST /api/auth/register (email + username + password)
+
+POST /api/auth/login (يدعم login بـ email أو username)
+
+POST /api/auth/logout
+
+GET /api/auth/me
+
+استخدم HttpOnly cookie session أو Bearer token (اختر واحد ووضّح السبب).
+
+لازم يكون فيه middleware requireAuth لحماية كل /api/** الحساسة.
+
+Frontend:
+
+استبدل AuthContext/AuthPage بالكامل ليستخدموا endpoints الجديدة.
+
+احذف أي dependency على supabase.auth من الـ UI.
+
+خلي تجربة الدخول والخروج stable + refresh page لا يضيع session.
+
+مهم: لا تغيّر منطق الصلاحيات/roles—بس غيّر مصدر الـ auth.
+
+3) Data-plane Migration (Neon/Express) — قاعدة صارمة
+
+أي supabase.rpc() في الـ frontend تتحول إلى:
+
+dataGateway.rpc(fnName, payload) → POST /api/rpc/:fnName
+
+أي supabase.from().select() تتحول إلى:
+
+dataGateway.queryTable(...) أو endpoints مخصصة في السيرفر حسب التعقيد.
+
+ممنوع direct writes نهائيًا من الـ frontend:
+
+كل writes لازم RPC atomic فقط.
+
+نفّذ Migration بالـ Batches (بالترتيب):
+
+Batch 1: shared libs + hooks
+
+Batch 2: domain services
+
+Batch 3: critical pages (Dashboard, Import, POS, JournalEntries, Purchasing hub)
+
+Batch 4: reports
+
+Batch 5/6: باقي components/pages
+
+بعد كل Batch:
+
+اعمل rg/grep evidence أن عدد supabase.from و supabase.rpc قلّ فعلاً.
+
+شغّل smoke tests (load pages الأساسية) واطبع النتائج.
+
+4) Edge Functions (مؤقتًا) — تقليل المخاطر
+
+لو فيه supabase.functions.invoke:
+
+لا تلمسها الآن إلا بعمل wrapper:
+
+frontend ينادي /api/edge/<name>
+
+السيرفر هو اللي ينادي Supabase Edge مؤقتًا
+
+الهدف: منع الـ frontend من الاتصال بـ Supabase مباشرة.
+
+5) Clean-up النهائي (بعد اكتمال النقل)
+
+إزالة src/integrations/supabase/client.ts لو لم يعد له استخدام.
+
+إزالة VITE_SUPABASE_* من الـ frontend environment.
+
+إبقاء أي Secrets لازمة للسيرفر فقط لو edge wrapper يحتاجها.
+
+اعمل تقرير “Final Residuals”:
+
+أي ملف لسه فيه supabase import ولماذا.
+
+6) إثباتات إلزامية قبل إعلان “Complete”
+
+GET /api/health/fingerprint = OK + كل invariants true
+
+rg "supabase\.from|supabase\.rpc|supabase\.auth" في src/ = صفر (أو يوضح المتبقي للـ edge wrapper فقط في السيرفر)
+
+تشغيل: Import multi-invoice + precheck + create + post + JE balanced
+
+تشغيل: POS sale + JE + movements
+
+تشغيل: JournalEntries page + drilldowns
+
+ابدأ الآن بـ Phase 0 Verification فقط واطبع النتائج بالأدلة ثم توقف لطلب موافقتي.

@@ -1,0 +1,63 @@
+PROMPT — PURCH-SUPP-INV-PRECHECK-AUDIT | MULTI-FILE UPLOAD | RAW PROOFS ONLY | STOP
+
+ROLE: Senior Full-Stack Engineer (DB + Server + UI)
+MODE: AUDIT / VERIFICATION ONLY (NO CODE CHANGES)
+
+Goal:
+Explain EXACTLY how the system prevents duplicate SUPP INV when uploading MULTIPLE Excel files together, and whether uniqueness is:
+A) global on SUPP INV only
+B) per supplier (supplier_id + SUPP INV)
+C) per branch
+D) not enforced at DB level (UI-only)
+
+OUTPUT MUST BE: FILE SNIPPETS + RAW COMMAND OUTPUTS ONLY (NO NARRATIVE).
+
+1) UI FLOW (MULTI-FILE)
+- Identify the exact file(s) handling multi-file upload on /import (or the relevant import screen).
+- Paste the code snippet that:
+  a) extracts SUPP INV per file/sheet
+  b) aggregates SUPP INV list across files
+  c) calls the precheck RPC (or endpoint)
+- Show how the UI handles duplicates:
+  - duplicates across the selected files themselves
+  - duplicates vs existing DB invoices
+
+2) SERVER / RPC ROUTING
+- Paste the server route that handles RPC calls for the precheck (endpoint + handler).
+- Paste the RPC_ALLOWLIST entry for this precheck if applicable.
+- Show the exact request body shape expected (args/p_payload etc.).
+
+3) DATABASE PRECHECK IMPLEMENTATION (SHOW FUNCTION BODY)
+- Locate and paste FULL SQL definition for:
+  purchase_invoice_supp_inv_precheck
+  (or whatever function name is actually used)
+Use:
+  \df+ purchase_invoice_supp_inv_precheck
+  SELECT pg_get_functiondef(p.oid) ...
+- The function MUST show the WHERE clause:
+  Does it check ONLY supplier_invoice_no?
+  Or supplier_id + supplier_invoice_no?
+  Or branch_id + supplier_invoice_no?
+
+4) DB-LEVEL UNIQUENESS (CRITICAL)
+Provide RAW outputs for:
+- \d+ public.invoices
+- List all unique constraints / indexes related to supplier invoice number:
+  SELECT indexname, indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='invoices';
+  SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='public.invoices'::regclass;
+
+If supplier invoice is stored in another table, do the same for that table.
+
+5) MULTI-FILE ATOMICITY / RACE CONDITIONS
+Answer with proof:
+- If two users upload the same SUPP INV at the same time, what prevents duplicates?
+  a) DB unique index (preferred)
+  b) atomic_workflow_requests idempotency
+  c) UI-only (unsafe)
+Show evidence in code/SQL.
+
+6) EXPECTED BEHAVIOR CONFIRMATION
+Return one line (RAW) stating which uniqueness policy is currently implemented:
+GLOBAL_SUPP_INV / PER_SUPPLIER_SUPP_INV / PER_BRANCH_SUPP_INV / NONE
+
+STOP

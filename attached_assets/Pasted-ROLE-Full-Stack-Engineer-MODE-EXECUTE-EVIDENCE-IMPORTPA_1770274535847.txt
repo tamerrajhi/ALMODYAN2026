@@ -1,0 +1,143 @@
+ROLE: Full-Stack Engineer
+MODE: EXECUTE + EVIDENCE (IMPORTPAGE WRITES ONLY) — STOP AFTER DONE
+
+OBJECTIVE:
+Eliminate the last remaining direct DB writes in the frontend (Atomic-Only enforcement).
+Specifically remove these in src/pages/ImportPage.tsx:
+- supabase.from('backup_logs').insert(...)
+- supabase.from('import_row_errors').insert(...)
+
+Replace them with Atomic RPCs (supabase.rpc), with idempotency via atomic_workflow_requests and audit_logs insertion.
+
+CONSTRAINTS (HARD):
+- NO direct writes from UI anywhere (no .insert/.update/.upsert/.delete).
+- NO schema redesign. Only add minimal RPC functions needed.
+- Reuse atomic_workflow_requests (client_request_id is TEXT) exactly as existing.
+- Do NOT create new “request ledger” tables.
+- Do NOT touch other modules.
+- If table schema mismatch is found, adapt the RPC to match the actual table shape (do not guess; inspect columns first).
+
+STEPS:
+
+1) Inspect schema first (NO GUESSING):
+   - Check columns for backup_logs and import_row_errors:
+     SELECT column_name, data_type
+     FROM information_schema.columns
+     WHERE table_name IN ('backup_logs','import_row_errors')
+     ORDER BY table_name, ordinal_position;
+
+2) Create RPC #1 (DB):
+   Create or replace function import_backup_log_create_atomic(
+     p_client_request_id uuid,
+     p_payload jsonb
+   ) returns void
+   language plpgsql
+   security definer
+   as $$
+   DECLARE
+     v_request_id_text text := p_client_request_id::text;
+     v_existing jsonb;
+   BEGIN
+     SELECT result_payload INTO v_existing
+     FROM atomic_workflow_requests
+     WHERE client_request_id = v_request_id_text
+       AND workflow_type = 'import_backup_log_create'
+       AND status = 'completed';
+
+     IF v_existing IS NOT NULL THEN
+       RETURN;
+     END IF;
+
+     INSERT INTO atomic_workflow_requests(client_request_id, workflow_type, status, request_payload)
+     VALUES (v_request_id_text, 'import_backup_log_create', 'pending', jsonb_build_object('payload', p_payload))
+     ON CONFLICT (client_request_id, workflow_type) DO NOTHING;
+
+     -- Insert into backup_logs using the real column names discovered in step 1:
+     -- Prefer: (payload jsonb) if exists; else map to closest columns safely.
+
+     -- Mark completed:
+     UPDATE atomic_workflow_requests
+     SET status='completed', completed_at=now(), result_payload=jsonb_build_object('ok',true)
+     WHERE client_request_id=v_request_id_text AND workflow_type='import_backup_log_create';
+
+     -- Audit
+     INSERT INTO audit_logs(action_type, entity_type, entity_id, entity_code, description)
+     VALUES ('create','import_backup_log', NULL, NULL, 'Create import backup log');
+
+   END;
+   $$;
+
+   NOTES:
+   - If backup_logs has required NOT NULL columns, fill them deterministically (e.g. created_at=now()).
+   - Do not insert NULL into required columns.
+
+3) Create RPC #2 (DB):
+   Create or replace function import_row_errors_create_atomic(
+     p_client_request_id uuid,
+     p_batch_id text,
+     p_errors jsonb
+   ) returns void
+   language plpgsql
+   security definer
+   as $$
+   DECLARE
+     v_request_id_text text := p_client_request_id::text;
+     v_existing jsonb;
+     v_err jsonb;
+   BEGIN
+     SELECT result_payload INTO v_existing
+     FROM atomic_workflow_requests
+     WHERE client_request_id = v_request_id_text
+       AND workflow_type = 'import_row_errors_create'
+       AND status = 'completed';
+
+     IF v_existing IS NOT NULL THEN
+       RETURN;
+     END IF;
+
+     INSERT INTO atomic_workflow_requests(client_request_id, workflow_type, status, request_payload)
+     VALUES (v_request_id_text, 'import_row_errors_create', 'pending', jsonb_build_object('batch_id', p_batch_id, 'errors', p_errors))
+     ON CONFLICT (client_request_id, workflow_type) DO NOTHING;
+
+     -- Insert into import_row_errors:
+     -- If table is row-based: loop over jsonb array p_errors and insert one row per error.
+     -- If table stores jsonb: insert p_errors as a single jsonb column.
+     -- Use the real columns discovered in step 1.
+
+     UPDATE atomic_workflow_requests
+     SET status='completed', completed_at=now(), result_payload=jsonb_build_object('ok',true)
+     WHERE client_request_id=v_request_id_text AND workflow_type='import_row_errors_create';
+
+     INSERT INTO audit_logs(action_type, entity_type, entity_id, entity_code, description)
+     VALUES ('create','import_row_errors', NULL, NULL, 'Create import row errors batch='||coalesce(p_batch_id,''));
+
+   END;
+   $$;
+
+4) Update UI (ImportPage.tsx):
+   - Replace backup_logs insert with:
+     const clientRequestId = crypto.randomUUID();
+     await supabase.rpc('import_backup_log_create_atomic', {
+       p_client_request_id: clientRequestId,
+       p_payload: <same data previously inserted>
+     });
+
+   - Replace import_row_errors insert with:
+     const clientRequestId2 = crypto.randomUUID();
+     await supabase.rpc('import_row_errors_create_atomic', {
+       p_client_request_id: clientRequestId2,
+       p_batch_id: <batch identifier currently available in code>,
+       p_errors: <the errorLogs object/array currently inserted>
+     });
+
+   - Keep existing logic unchanged. Only swap write calls.
+
+5) EVIDENCE OUTPUT (MANDATORY — paste exact outputs):
+   A) Paste the EXACT SQL definitions created for the two functions (full text).
+   B) Paste ImportPage.tsx snippets with LINE NUMBERS showing the two replacements.
+   C) Run and paste this grep output (must be EMPTY):
+      grep -RIn --exclude-dir=node_modules --exclude-dir=dist "\.from\([^)]*\)\.(insert|update|upsert|delete)\(" src
+
+STOP AFTER COMPLETING A/B/C.
+DO NOT CONTINUE TO OTHER MODULES.
+DO NOT ASK QUESTIONS.

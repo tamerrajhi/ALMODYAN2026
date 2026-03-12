@@ -1,0 +1,61 @@
+هدف: إصلاح حقل "الرصيد المتبقي" في صفحة فواتير المشتريات (PurchaseInvoices list) لأنه يظهر 0 خطأ.
+
+ممنوع تخمين. لازم audit يحدد مصدر الرقم بالضبط (DB vs DTO vs UI calc).
+
+=== A) AUDIT (قبل أي تعديل) ===
+1) حدّد الملف المسؤول عن جدول قائمة فواتير المشتريات (الصورة الثانية):
+- غالباً: src/pages/purchasing/PurchaseInvoicesPage.tsx أو ما يشابه
+- اطبع: أين يتم تعريف عمود "الرصيد المتبقي" بالضبط (cell renderer / accessor)
+
+2) Trace مصدر البيانات:
+- ما هو endpoint الذي يغذي قائمة الفواتير؟
+- افتح server/routes.ts عند endpoint list purchases (فيه query params filters)
+- اطبع الـ SELECT المستخدم + الأعمدة التي تُرجع remaining/paid/total
+
+3) تحقق من DB مباشرة على نفس الفاتورة الظاهرة UINV-20260217-000001:
+- اعثر على invoice id من DB عبر invoice_number
+- ثم نفّذ:
+SELECT
+  id,
+  total_amount,
+  paid_amount,
+  remaining_amount,
+  status
+FROM unique_purchase_invoices
+WHERE invoice_number = 'UINV-20260217-000001'
+LIMIT 1;
+
+ولو القائمة لا تعتمد على unique_purchase_invoices (قد تعتمد على invoices table):
+افعل نفس الفحص على جدول invoices أيضاً.
+
+4) حدد سبب الصفر:
+- هل remaining_amount في DB = 0 فعلاً؟ (يبقى مشكلة حساب/تحديث أثناء create/rebuild)
+- أم DB صحيح لكن API لا يرجعه/يرجعه باسم مختلف؟
+- أم UI يقرأ field غلط أو يحسبه غلط (مثلاً total - paid بينما paid null)
+
+=== B) FIX (تعديل محدود حسب السبب) ===
+حالات الإصلاح المسموحة في هذا البرومبت:
+
+Case 1) DB صحيح لكن API لا يرجع remaining_amount:
+- عدّل query في endpoint list ليشمل remaining_amount (أو يحسبه: total_amount - paid_amount)
+- تأكد النوع numeric ويُرجع في DTO
+
+Case 2) API يرجع القيمة لكن UI يعرض 0:
+- عدّل UI فقط ليقرأ الحقل الصحيح
+- أو أصلح mapping (camelCase vs snake_case)
+
+Case 3) DB نفسه غلط (remaining_amount=0) بينما total_amount>0:
+- لا تغيّر منطق مالي عشوائي.
+- ابحث أين يتم تحديث remaining_amount (RPC create/import/rebuild)
+- ثم أضف إصلاح واحد واضح: remaining_amount := GREATEST(total_amount - paid_amount, 0)
+  في نفس مكان حساب الفاتورة (create/import/rebuild)
+- ثم أعد اختبار نفس الفاتورة الجديدة بعد استيراد/إنشاء
+
+ممنوع عمل تغييرات واسعة أو لمس unrelated.
+
+=== C) EVIDENCE REQUIRED ===
+A) قبل/بعد: قيمة DB للفاتورة (SELECT)
+B) قبل/بعد: payload من endpoint list (اطبع مثال row)
+C) git diff --stat
+D) git diff
+E) لقطة من قائمة الفواتير بعد الإصلاح يظهر "الرصيد المتبقي" صحيح (ليس 0)

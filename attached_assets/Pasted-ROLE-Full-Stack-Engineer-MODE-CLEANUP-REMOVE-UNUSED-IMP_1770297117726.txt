@@ -1,0 +1,55 @@
+ROLE: Full-Stack Engineer
+MODE: CLEANUP — REMOVE UNUSED IMPORT SCREEN (SAFE DELETE) — STOP AFTER EVIDENCE
+
+GOAL:
+We will keep ONLY the old import screen:
+- /import -> ImportPage.tsx (this is the real import UI users use)
+We will REMOVE the unused purchase import screen:
+- /purchasing/invoices/import -> PurchaseInvoiceImportPage.tsx
+Because it is not wired in navigation and causes confusion.
+
+SCOPE:
+- Delete unused route + lazy import + page file (if no references)
+- Remove any navigation links (if any exist)
+- Must NOT break build
+- No other modules touched
+
+STEPS:
+
+1) PROVE it's unused (hard evidence)
+Run:
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "/purchasing/invoices/import" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "PurchaseInvoiceImportPage" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "from \\\"\\.\\/pages\\/purchasing\\/PurchaseInvoiceImportPage\\\"" src
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "href: '/purchasing/invoices/import'|to=\\\"/purchasing/invoices/import\\\"" src
+
+2) Remove the route + lazy import from src/App.tsx
+- Delete:
+  <Route path="/purchasing/invoices/import" ... PurchaseInvoiceImportPage ... />
+- Delete the lazy import line:
+  const PurchaseInvoiceImportPage = lazy(() => import("./pages/purchasing/PurchaseInvoiceImportPage"));
+
+3) Remove any navigation link to that route (if exists)
+- If grep finds any link, remove it (and keep /import links intact).
+
+4) Delete the file ONLY if truly unused:
+- Remove file:
+  src/pages/purchasing/PurchaseInvoiceImportPage.tsx
+- Also remove any barrel exports referencing it (if any).
+
+5) Build verification
+Run:
+npm test (if exists) OR npm run build
+and ensure success.
+
+6) Post-cleanup proof (mandatory)
+Run:
+grep -RIn --exclude-dir=node_modules --exclude-dir=dist "/purchasing/invoices/import|PurchaseInvoiceImportPage" src
+
+EVIDENCE OUTPUT (MANDATORY):
+A) Before/After: App.tsx route snippet removed (with line numbers)
+B) grep outputs from step (1) showing it was unused (or where it was referenced and how removed)
+C) Confirmation of deleted file path
+D) Build output summary (success)
+E) Final grep (step 6) must be EMPTY
+STOP AFTER EVIDENCE

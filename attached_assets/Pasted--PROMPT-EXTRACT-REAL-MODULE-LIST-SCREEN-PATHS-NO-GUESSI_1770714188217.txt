@@ -1,0 +1,70 @@
+✅ PROMPT — EXTRACT REAL MODULE LIST + SCREEN PATHS (NO GUESSING) | RAW EVIDENCE | STOP
+
+ROLE: Full-stack Engineer (React/Vite + Express)
+MODE: Read-only audit. NO code changes.
+
+GOAL:
+Return the real module list (8–12) used by the app (sidebar/routes) and the real screen paths used for permissions.
+NO guessing. Derive from source.
+
+OUTPUT MUST INCLUDE:
+1) modules_final: string[] (deduped, stable)
+2) screens_final: string[] (route paths / screen paths)
+3) Evidence pack (raw commands output)
+
+STEPS (RUN EXACTLY):
+
+A) FIND ROUTE SOURCES (RAW)
+1) rg -n "createBrowserRouter|createRoutesFromElements|<Route|Routes\\b|route\\s*:" src --glob='*.tsx' --glob='*.ts' || true
+2) rg -n "sidebar|navItems|menuItems|modules\\b|moduleId|module_key|screen_path|screenPath|permission" src --glob='*.tsx' --glob='*.ts' || true
+
+B) LOCATE THE SIDEBAR / NAV CONFIG (RAW)
+Try these likely files (open the ones that exist):
+1) ls -la src/components/layout || true
+2) ls -la src/components || true
+3) ls -la src/core || true
+4) rg -n "MainLayout|Sidebar|Navigation|navItems|menuItems" src --glob='*.tsx' --glob='*.ts' || true
+
+C) EXTRACT MODULE IDS (NO GUESSING)
+From the located sidebar/nav config, collect module identifiers:
+- moduleId / moduleKey / module / id / key fields that represent top-level modules.
+- If the sidebar is grouped by sections, treat each top-level group as a module only if it is used in access checks.
+
+D) EXTRACT SCREEN PATHS (NO GUESSING)
+Collect all real route paths:
+1) rg -n "<Route[^>]*path=|path:\\s*['\"`]/" src --glob='*.tsx' --glob='*.ts' || true
+
+Also collect screen permission identifiers if different from routes:
+2) rg -n "screen_path|screenPath|SCREEN_|canViewScreen\\(|useScreenPermissions" src --glob='*.tsx' --glob='*.ts' || true
+
+E) BUILD FINAL LISTS
+- modules_final:
+  - Deduplicate.
+  - Only include modules that appear in either:
+    (1) sidebar/nav config OR
+    (2) ModuleContext / module access checks OR
+    (3) module-aware routing wrapper usage.
+- screens_final:
+  - Deduplicate.
+  - Only include paths that start with "/".
+  - Exclude wildcard routes like "*" or "/*".
+
+F) OUTPUT FORMAT (STRICT)
+Return exactly:
+
+modules_final:
+- <module1>
+- <module2>
+...
+
+screens_final:
+- </path1>
+- </path2>
+...
+
+evidence:
+- command: <cmd>
+  output: |
+    <raw output>
+
+STOP AFTER OUTPUT. NO RECOMMENDATIONS.

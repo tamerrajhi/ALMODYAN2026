@@ -1,0 +1,51 @@
+PROMPT — RUN-OPS-0 | OPS-FIRST PRODUCTION READINESS AUDIT (P0) | BUGFIX ONLY | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Neon + Express)
+MODE: OPS-FIRST / BUGFIX ONLY
+GOAL: Make the core operational screens WORK NOW with minimal changes.
+
+PRIORITY SCREENS (must open + load data without console/server errors):
+1) Purchasing tab: all pages under it (list + details + create where applicable)
+2) Sales tab: all pages under it
+3) Accounting tab: Chart of Accounts + Journal Entries + Payments + Ledger + Reports (the pages that exist in sidebar)
+4) Master data: Create Branch + Create Supplier (must create successfully)
+
+STRICT RULES:
+- Do NOT refactor. Do NOT rewrite architecture.
+- Fix only what is broken (schema mismatches, wrong column names, missing endpoints, RPC allowlist/routing, response shape mismatches).
+- Prefer server fixes (server/routes.ts + SQL migrations) over UI changes.
+- UI/TSX changes allowed ONLY if the screen cannot function otherwise (e.g., dead code calling forbidDirectWrite with no RPC).
+- Every change must be justified by a failing error you captured.
+- Keep responses and field aliases matching what the UI expects (branch_name/full_name/supplier_name etc.), but do NOT leak sensitive fields (password_hash etc.).
+- No background tasks, no "future plan" — fix incrementally.
+
+STEP 1 — ROUTE MAP (NO CHANGES)
+- Print a table: Sidebar route → component file path (for all pages under Purchasing/Sales/Accounting + Branches/Suppliers create)
+- For each page, list its data dependencies: which API endpoints/RPCs it calls.
+
+STEP 2 — SMOKE TEST (READ-ONLY)
+For EACH priority screen:
+A) Open it in the browser (logged-in)
+B) Capture console errors + network failing requests (HTTP status + URL + response snippet)
+C) For each failing request, run curl to reproduce.
+
+STEP 3 — FIX LOOP (MINIMAL)
+Apply only the minimal fix needed per failure:
+- If missing/incorrect endpoint → patch server/routes.ts
+- If SQL uses non-existing columns → fix SQL with correct columns + aliases
+- If required columns/tables missing → create idempotent SQL migration file
+- If RPC blocked by allowlist/signature mismatch → fix allowlist + jsonb overload wrappers or routing
+- If UI dead code prevents create/update → minimal UI patch to call RPC (explain why unavoidable)
+
+EVIDENCE REQUIRED (RAW, SEPARATE) FOR EACH FIX BATCH:
+A) git diff --stat
+B) git diff -- (full)
+C) Migration apply proof (if any): \dt / \d+ / SELECT count(*)
+D) curl proofs for fixed endpoints (status + body)
+E) npx tsc --noEmit (Exit 0)
+F) Re-test the exact screen that was broken: confirm no console/network errors
+
+STOP AFTER:
+- All priority screens open successfully and load (even if empty arrays).
+- Create Branch + Create Supplier succeed end-to-end.
+WAIT FOR MY NEXT PROMPT.

@@ -1,0 +1,157 @@
+ROLE: Full-Stack Engineer
+MODE: ATOMIC DEDUPE ENFORCEMENT (SUPP INV ONLY — PURCHASE INVOICES ONLY) — STOP AFTER EVIDENCE
+
+CONTEXT (DO NOT CHANGE):
+We have TWO purchase-invoice creation paths that must behave identically:
+1) PurchaseInvoiceImportPage.tsx  → Excel import for UNIQUE pieces (creates a Purchase Invoice)
+2) PurchaseInvoiceFormPage.tsx    → General purchase invoice form (creates a Purchase Invoice)
+
+RULE (THE ONLY BUSINESS DEDUPE RULE):
+Deduplication must be based ONLY on Supplier Invoice Number (SUPP INV) per Supplier:
+UNIQUE KEY = (supplier_id, normalized_supplier_invoice_no)
+- normalized_supplier_invoice_no = upper(trim(supplier_invoice_no))
+- MODEL is allowed to repeat (NO checks on MODEL anywhere)
+- Reject if SUPP INV is duplicated inside the same upload/import operation
+- Reject if SUPP INV already exists in the system for the same supplier (for purchase invoices)
+- Empty/NULL SUPP INV is NOT allowed (required)
+
+SCOPE LIMIT (TO PREVENT SYSTEM CONFUSION):
+- Apply this rule ONLY to invoices where invoice_type = 'purchase' (purchase invoices).
+- Do NOT affect sales, returns, transfers, journal entries, or other modules.
+- Keep atomic/idempotency caching by client_request_id as-is.
+- Do NOT reintroduce invoice_number uniqueness as dedupe. invoice_number may still be generated but NOT a uniqueness blocker.
+
+HARD RULES:
+- NO direct DB writes from frontend (no supabase.from().insert/update/delete/upsert).
+- Only atomic RPC writes.
+- If any DB change is required: use ALTER TABLE / CREATE INDEX / CREATE OR REPLACE FUNCTION only.
+- STOP after Evidence section.
+
+========================
+A) DB — ENFORCE DEDUPE AT THE SOURCE OF TRUTH
+========================
+
+A1) Create a UNIQUE expression index for purchase invoices ONLY (ignoring voided):
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_purchase_supp_inv_uq
+ON public.invoices (supplier_id, upper(trim(supplier_invoice_no)))
+WHERE invoice_type = 'purchase'
+  AND supplier_invoice_no IS NOT NULL
+  AND trim(supplier_invoice_no) <> ''
+  AND status <> 'voided';
+
+A2) Update purchase_invoice_create_atomic to be authoritative:
+Inside the function, BEFORE inserting into invoices:
+1) Extract and normalize:
+   v_supplier_invoice_no := upper(trim(p_payload->'invoice'->>'supplier_invoice_no'));
+
+2) Required validation:
+   IF v_supplier_invoice_no IS NULL OR v_supplier_invoice_no = '' THEN
+     RETURN jsonb_build_object(
+       'success', false,
+       'error_code', 'SUPP_INV_REQUIRED',
+       'message_ar', 'مرفوض: رقم فاتورة المورد (SUPP INV) مطلوب'
+     );
+   END IF;
+
+3) Existence check (reject if already exists for same supplier, purchase invoices, non-voided):
+   SELECT id INTO v_existing_invoice_id
+   FROM public.invoices
+   WHERE invoice_type = 'purchase'
+     AND supplier_id = v_supplier_id
+     AND upper(trim(supplier_invoice_no)) = v_supplier_invoice_no
+     AND status <> 'voided'
+   LIMIT 1;
+
+   IF v_existing_invoice_id IS NOT NULL THEN
+     RETURN jsonb_build_object(
+       'success', false,
+       'error_code', 'SUPP_INV_DUPLICATE',
+       'message_ar', 'مرفوض: رقم فاتورة المورد (SUPP INV) مكرر لنفس المورد — موجود بالفعل في النظام'
+     );
+   END IF;
+
+4) Proceed with invoice creation normally, storing supplier_invoice_no using the normalized value.
+
+IMPORTANT:
+- Keep client_request_id idempotency caching exactly as it is (same request returns cached success).
+- payload_hash conflict logic must remain ONLY to protect misuse of SAME client_request_id with different payload.
+  It MUST NOT be used as business dedupe for normal requests.
+
+A3) Ensure invoice insert stores the normalized SUPP INV:
+INSERT INTO public.invoices (..., supplier_invoice_no, ...)
+VALUES (..., v_supplier_invoice_no, ...);
+
+========================
+B) UI — PREVENT “IN-FILE” DUPLICATES BEFORE HITTING RPC
+========================
+
+B1) PurchaseInvoiceImportPage.tsx (Excel import / unique pieces):
+Add a pre-submit validation step BEFORE calling the create/import RPC:
+- Normalize formData.supplier_invoice_no => norm = upper(trim(value))
+- If empty => block submit and show Arabic error:
+  'مرفوض: رقم فاتورة المورد (SUPP INV) مطلوب'
+- If this import operation creates multiple invoices in one run:
+  collect all SUPP INV values being used in that run (normalized)
+  if duplicates exist => block submit and show Arabic error:
+  'مرفوض: يوجد تكرار في رقم فاتورة المورد (SUPP INV) داخل عملية الرفع الحالية'
+- Do NOT check MODEL at all.
+
+NOTE:
+If your import path creates a SINGLE invoice per upload, still enforce "required" and rely on DB for system-wide dedupe.
+
+B2) PurchaseInvoiceFormPage.tsx (General purchase invoice):
+Before save:
+- Normalize supplier_invoice_no => norm = upper(trim(value))
+- If empty => block and show Arabic error:
+  'مرفوض: رقم فاتورة المورد (SUPP INV) مطلوب'
+- Send supplier_invoice_no = norm in the RPC payload.
+
+B3) Error handling from RPC in BOTH pages:
+If RPC returns:
+- error_code='SUPP_INV_REQUIRED' => show message_ar
+- error_code='SUPP_INV_DUPLICATE' => show message_ar
+Else show generic Arabic error.
+
+========================
+C) EVIDENCE (MANDATORY — PASTE EXACTLY)
+========================
+
+C1) SQL Evidence:
+1) Paste the exact CREATE UNIQUE INDEX statement used.
+2) Paste the updated CREATE OR REPLACE FUNCTION purchase_invoice_create_atomic showing:
+   - normalization line
+   - required validation
+   - existence check query
+   - returned JSON with error_code + message_ar
+   - supplier_invoice_no stored normalized
+
+C2) Code Evidence (with LINE NUMBERS):
+1) PurchaseInvoiceImportPage.tsx:
+   - snippet showing normalization + required check
+   - snippet showing “in-run duplicate” check (if applicable)
+   - snippet showing RPC call still sends supplier_invoice_no
+2) PurchaseInvoiceFormPage.tsx:
+   - snippet showing normalization + required check
+   - snippet showing RPC payload supplier_invoice_no
+3) (optional) shared helper normalizeSupplierInvoiceNo if you created one
+
+C3) Verification SQL:
+1) Prove index exists:
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public' AND tablename='invoices'
+ORDER BY indexname;
+
+2) Prove duplicate is rejected (same supplier):
+- Call purchase_invoice_create_atomic with supplier_invoice_no='ABC123' (supplier_id same)
+- Call again with supplier_invoice_no=' abc123 ' (same supplier) — MUST FAIL with SUPP_INV_DUPLICATE
+Paste both SQL calls + outputs.
+
+3) Prove void allows reuse:
+- Void the first invoice with purchase_invoice_void_atomic
+- Call create again with same supplier_invoice_no — MUST SUCCEED
+Paste outputs.
+
+STOP AFTER EVIDENCE.
+NO OTHER MODULES.
+NO EXTRA REFACTOR.

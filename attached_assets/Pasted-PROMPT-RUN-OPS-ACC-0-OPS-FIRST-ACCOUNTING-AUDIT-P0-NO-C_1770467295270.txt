@@ -1,0 +1,67 @@
+PROMPT — RUN-OPS-ACC-0 | OPS-FIRST ACCOUNTING AUDIT (P0) | NO CHANGES STEP-1 | BUGFIX ONLY STEP-3 | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Express + Neon/Postgres)
+MODE: OPS-FIRST / AUDIT-FIRST
+
+GOAL:
+Make Accounting tab fully operational (P0):
+- Chart of Accounts loads
+- Journal Entries list + details + lines load
+- Ledger loads
+- Trial Balance / Reports pages load
+- No console/server errors, all API responses JSON
+- Fix only what is broken (allowlist, missing routes, schema/column mismatches, response shape).
+
+PRIORITY PAGES (from sidebar):
+1) /accounting/chart-of-accounts (or existing route)
+2) /accounting/journal-entries (+ details route)
+3) /accounting/ledger (+ ledger-lines)
+4) /accounting/reports pages that exist in sidebar (trial balance etc.)
+5) Any payments screen that sits under accounting (if in sidebar)
+
+STRICT RULES:
+- Do NOT refactor.
+- Prefer server fixes (routes.ts + SQL migrations) over UI changes.
+- UI changes only if the screen cannot function otherwise.
+- No new “system redesign”. Configuration/data OK if needed.
+- Evidence required for every fix batch.
+
+STEP 1 — ROUTE MAP + DEPENDENCIES (NO CHANGES)
+A) Print a table: Sidebar Route → Component file path (Accounting pages only)
+B) For each page list dependencies:
+- API endpoints called
+- RPCs called
+- Tables/views used via /api/table-read
+
+STEP 2 — SMOKE TEST (READ-ONLY)
+For EACH priority page:
+A) Open in browser (logged-in)
+B) Capture console errors + failing network requests:
+- URL + status + response snippet
+C) Reproduce each failing request via curl (AUTHENTICATED)
+
+STEP 3 — FIX LOOP (MINIMAL)
+For each failure, apply minimal fix:
+- If HTML fallback → register missing route OR fix client to use existing endpoint
+- If table-read blocked → add table to TABLE_READ_ALLOWLIST + orderable columns
+- If SQL references missing columns → fix SQL with aliases (do NOT rename schema unless required)
+- If required table/column missing → create idempotent SQL migration
+- If response shape mismatch → adjust server response to match UI
+
+STEP 4 — ACCOUNTING INTEGRITY CHECK (READ-ONLY)
+Provide proofs:
+- chart_of_accounts exists + sample rows
+- journal_entries + journal_entry_lines load
+- Ledger endpoint works with a real account_id (pick one from chart_of_accounts)
+
+EVIDENCE REQUIRED (RAW, SEPARATE) PER FIX BATCH:
+A) git diff --stat
+B) git diff --
+C) Migration proof (if any): \d+ / SELECT count(*) / sample rows
+D) curl proofs (status + body) for each fixed endpoint
+E) npx tsc --noEmit (Exit 0)
+F) Re-test the exact broken page: confirm no console/network errors
+
+STOP AFTER:
+- All Accounting P0 pages open + load (even empty arrays) with no errors.
+WAIT FOR MY NEXT PROMPT.

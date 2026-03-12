@@ -1,0 +1,50 @@
+PROMPT 4 — CLEANUP-IMPORTS (BATCH 1/4) | REMOVE UNUSED SUPABASE IMPORTS SAFELY | EVIDENCE | STOP
+
+ROLE: Refactor Engineer
+MODE: SAFE CLEANUP ONLY (NO LOGIC CHANGES)
+
+GOAL:
+Remove stale/unused Supabase imports from files that no longer reference supabase.*.
+Do this in a SMALL BATCH to reduce risk.
+
+STRICT RULES (NO EXCEPTIONS):
+- Do NOT touch any file that still uses:
+  supabase.auth.* OR supabase.functions.invoke OR supabase.storage.* (if any).
+- Do NOT change runtime logic, UI, state, messages, routing.
+- Allowed changes ONLY:
+  - remove unused import of supabase client
+  - remove now-unused named imports
+  - adjust formatting ONLY if required by TypeScript after removing unused imports
+- Do NOT modify server code, dataGateway.ts, routes, allowlist.
+- Do NOT auto-format the whole file.
+
+BATCH LIMIT:
+- Modify at most 40 files in this prompt.
+- If there are more, stop at 40 and report remaining count.
+
+PROCESS (DO IN ORDER):
+1) Produce candidate list (files importing supabase client):
+   rg -n "from\\s+['\\\"]@/integrations/supabase/client['\\\"]" -S src > /tmp/supa_imports.txt
+2) For the FIRST ~40 files from that list:
+   - open file
+   - if it contains ANY "supabase\\." usage, SKIP it (do not modify)
+   - else: remove the supabase import line entirely
+3) After edits, verify:
+   - No accidental removal in auth files (we don't touch those anyway)
+   - Build still typechecks
+
+EVIDENCE REQUIRED (RAW, SEPARATE):
+A) Count before:
+   - wc -l /tmp/supa_imports.txt
+B) Show the exact list of files you modified (paths only, one per line).
+C) Safety proof on modified files only:
+   - For EACH modified file, show that it has NO supabase usage:
+     (You may use one command that checks all modified paths at once)
+     rg -n "supabase\\." <modified_paths...>   --> must be NO MATCHES
+D) git diff --stat
+E) git diff --   (OK to truncate if huge, but must include at least 5 representative files + confirm the diff is ONLY import removals)
+F) Typecheck:
+   - tsc -p .  (Exit 0) OR npm run typecheck (Exit 0)
+
+STOP.
+WAIT FOR MY NEXT PROMPT.

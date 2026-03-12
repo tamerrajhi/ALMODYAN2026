@@ -1,0 +1,82 @@
+FRONTEND-ONLY — Supervisor Approval Modal on POS Return Confirm (Confirm-only)
+
+STRICT RULES:
+- Modify ONLY src/** files.
+- Do NOT modify backend or DB.
+- Do NOT change atomic RPC payloads.
+- The override happens ONLY when user clicks Confirm (no earlier prompts).
+- Use POST /api/pos/override with action_key='pos_return_confirm'.
+- PIN is exactly 4 digits.
+- Evidence: git diff --stat + git diff + manual test notes.
+
+TARGET:
+src/pages/POSReturnPage.tsx
+
+GOAL UX (Option A):
+- Seller can access /pos/return and prepare the return normally.
+- On clicking Confirm/Submit:
+  1) Open modal "Supervisor Approval"
+  2) Supervisor selects supervisor user from list + enters PIN
+  3) Approve calls /api/pos/override
+  4) If approve succeeds -> close modal -> continue existing return execution flow (complete_pos_piece_return_atomic) exactly as-is
+  5) If approve fails -> stay in modal + show error
+
+IMPLEMENTATION DETAILS:
+1) Find the exact function/handler that triggers the final return execution (the call to dataGateway.rpc('complete_pos_piece_return_atomic', ...)).
+   - Wrap it so it does not execute until override approved.
+   - Do NOT change its payload.
+
+2) State additions in POSReturnPage.tsx:
+- showOverrideDialog:boolean
+- overrideSupervisorId:string
+- overridePin:string
+- overrideNotes:string (default 'POS Return override')
+- overrideError:string|null
+- isApproving:boolean
+- approvedOverrideId:string|null (optional, can store for debug but no need to display)
+
+3) Load supervisor list:
+- Create a useQuery(['pos-cashiers']) calling GET /api/pos/cashiers (same endpoint used by cashier gate).
+- Filter to supervisor/admin only:
+  is_supervisor === true OR role_key === 'system_admin' OR is_admin true (depending on returned fields)
+- Use a simple <Select> to choose supervisor.
+
+4) Modal UI:
+- Title: "موافقة المشرف"
+- Supervisor select
+- PIN input (type password, numeric UI, maxLength=4)
+- Notes (optional textarea)
+- Buttons:
+  - Cancel (closes, clears pin+error)
+  - Approve (disabled until supervisor selected + pin matches /^\d{4}$/)
+
+5) Approve handler:
+- POST /api/pos/override
+  body: { action_key:'pos_return_confirm', supervisor_user_id: overrideSupervisorId, pin: overridePin, notes: overrideNotes }
+- Handle responses:
+  - 200 -> close modal, clear fields, then call the original confirm/execute function
+  - 401 -> "PIN غير صحيح"
+  - 403 -> show server message
+  - 423 -> show lockout message
+  - 400 -> validation message
+
+6) Edge cases:
+- Prevent double-click: isApproving flag
+- If supervisors list fails to load: show error in modal and disable approve
+- Ensure modal only opens when the return is otherwise valid (i.e., you already have selected sale/items); if current code has validation before calling RPC, keep that validation and only open modal after it passes.
+
+MANUAL TESTS:
+A) Seller with __branch + __pos:
+- Open /pos/return -> prepare return -> click Confirm -> modal appears
+- Wrong PIN -> error shown; no RPC executed
+- Correct PIN -> modal closes; return executes (same behavior as before)
+B) Supervisor PIN lockout:
+- 5 wrong attempts -> 423 message appears on next attempts
+C) Cancel:
+- closes modal; no side effects; can reopen and fields are reset
+
+EVIDENCE:
+A) git diff --stat
+B) git diff
+C) Manual test notes (3 bullets max)
+STOP.

@@ -1,0 +1,53 @@
+PROMPT — UNIQUE-IMPORT NUMERIC-COMMA TOLERANCE | DB ONLY | STRICT EVIDENCE | STOP
+
+ROLE: Senior Database Engineer
+MODE: DB ONLY (SQL functions/migrations only)
+
+GOAL:
+Make unique_purchase_import_excel_atomic accept numeric strings containing commas/spaces (e.g. "26,391", " 9,780 ", "1 234", "1,234.50").
+This must work WITHOUT requiring UI cleaning.
+
+SCOPE:
+- Modify ONLY DB: create a migration file and update the function(s).
+- Do NOT change UI.
+- Do NOT guess columns: locate exactly where numeric casts happen inside unique_purchase_import_excel_atomic and patch those expressions.
+
+REQUIREMENTS:
+1) Add a helper SQL function in public schema:
+   public.parse_numeric_text(p_text text) RETURNS numeric
+   - Behavior:
+     - If p_text is NULL -> return 0
+     - Trim p_text
+     - Convert empty string to NULL -> return 0
+     - Remove commas "," and spaces " " (and non-breaking space if present)
+     - Allow decimals "." 
+     - Cast safely to numeric
+     - If cast fails -> return 0 AND include a warning in the RPC result warnings[] (only if warnings array already exists; if not, just return 0 without warnings)
+
+   Suggested implementation:
+   cleaned := regexp_replace(trim(p_text), '[,\s\u00A0]', '', 'g');
+   return COALESCE(NULLIF(cleaned,'')::numeric, 0);
+
+2) Patch unique_purchase_import_excel_atomic:
+   Replace ALL patterns like:
+     COALESCE(NULLIF(v_row->'raw_row_json'->>'COST', '')::numeric, 0)
+   With:
+     public.parse_numeric_text(v_row->'raw_row_json'->>'COST')
+   Do the same for:
+   - COST
+   - TAG PRICE
+   - MINIMUM PRICE
+   - G / D / B weights (if numeric)
+   - Any other numeric fields sourced from raw_row_json that can contain commas/spaces
+
+3) Evidence required (raw):
+A) cat migrations/<name>.sql
+B) psql apply output
+C) \df+ public.parse_numeric_text
+D) Show function snippet before/after (grep the numeric cast lines) OR show \df+ for unique_purchase_import_excel_atomic
+E) Smoke DB proof (no UI):
+   - Call unique_purchase_import_excel_atomic with a minimal payload (1 file, 1 row) where COST="26,391" and TAG PRICE="79,172"
+   - Then SELECT the created unique_item cost and invoice subtotal to prove they are numeric 26391 and subtotal=26391 (or includes that row cost)
+   - Paste raw SQL outputs.
+
+STOP after printing raw outputs.

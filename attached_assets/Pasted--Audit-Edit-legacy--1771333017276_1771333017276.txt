@@ -1,0 +1,98 @@
+عايز Audit شامل لمسار "تعديل" القديم (الزر الأصفر Edit legacy) في نظام المشتريات/الفواتير، بهدف حذفه بالكامل بدون تخريب.
+
+ممنوع أي حذف في هذا البرومبت — Audit فقط.
+
+========================================
+A) تحديد كل أماكن الواجهة التي تُظهر الزر
+========================================
+1) ابحث عن الزر/النص/الأيقونة:
+rg -n --hidden --glob "!**/dist/**" "تعديل|Edit\b|Legacy|old edit|invoice_edit|unique_purchase_invoice_edit_atomic|can_edit_unique_purchase_invoice" src
+
+2) من النتائج:
+- اذكر الملف/المكوّن المسؤول عن زر "تعديل" الأصفر بالضبط
+- اذكر الـonClick handler أو navigation target (route/path) إن وجد
+
+3) اعمل Trace للـroute:
+- إذا الزر يعمل navigate لصفحة/دايلوج/مودال: افتح الملف وحدد الـcomponent target
+
+========================================
+B) تحديد كل RPC/Service مرتبط بالمسار القديم
+========================================
+1) ابحث عن استدعاءات RPC المحتملة:
+rg -n "unique_purchase_invoice_edit_atomic|can_edit_unique_purchase_invoice|purchase_correction|correction_center|invoice_edit" src server
+
+2) اعمل قائمة بكل:
+- الدوال في src/lib/dataGateway.ts أو domain service التي تستدعي RPC legacy
+- الصفحات/المكوّنات التي تستدعي تلك الدوال
+
+========================================
+C) Backend: routes.ts allowlist / special handlers
+========================================
+1) ابحث في server/routes.ts عن:
+- RPC_ALLOWLIST entries
+- special handler branches
+- existence checks / fingerprints
+
+نفّذ:
+rg -n "unique_purchase_invoice_edit_atomic|can_edit_unique_purchase_invoice" server/routes.ts
+
+واكتب أين يظهر كل اسم (السطر + القسم).
+
+========================================
+D) DB: حصر الدوال الموجودة فعلاً المتعلقة بالمسار legacy
+========================================
+نفّذ الاستعلامات (SQL) التالية واطبع النتائج:
+
+1) تأكيد وجود الدوال:
+select p.proname, pg_get_function_identity_arguments(p.oid) as args
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname='public'
+and p.proname in (
+  'unique_purchase_invoice_edit_atomic',
+  'can_edit_unique_purchase_invoice'
+)
+order by p.proname;
+
+2) البحث عن أي دوال أخرى مرتبطة بكلمة edit/correction center:
+select p.proname
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname='public'
+and (
+  p.proname ilike '%edit%'
+  or p.proname ilike '%correction%'
+  or p.proname ilike '%correc%'
+)
+order by p.proname;
+
+========================================
+E) Migrations: أين تم تعريف الدوال legacy
+========================================
+ابحث في migrations عن تعريف الدوال أو ذكرها:
+rg -n "create function public\.unique_purchase_invoice_edit_atomic|unique_purchase_invoice_edit_atomic|can_edit_unique_purchase_invoice" migrations supabase/migrations
+
+اكتب اسم الملف/السطر.
+
+========================================
+F) إخراج Audit نهائي (قائمة حذف دقيقة)
+========================================
+اكتب لي Output نهائي بالشكل التالي (بدقة):
+
+1) Frontend Delete List:
+- File:line — what to delete (component/button/route/dialog/service fn)
+
+2) Backend Delete List:
+- server/routes.ts entries to delete (allowlist, handlers, checks)
+
+3) DB Delete List:
+- functions to drop (exact signatures)
+- any dependent helper functions (إن وجدت)
+
+4) Gate Queries to re-run after deletion:
+- rg patterns + SQL check to prove 0 references
+
+========================================
+📎 Evidence REQUIRED
+========================================
+- Paste نتائج rg الرئيسية (مختصرة لكن تشمل paths)
+- Paste نتائج SQL (الاستعلامات في القسم D)
+- Paste قائمة الحذف النهائية (F)

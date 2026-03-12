@@ -1,0 +1,207 @@
+PROMPT — Unique Purchase Invoice Rebuild + Gate UX (Atomic & Safe)
+🎯 الهدف
+
+السماح بتعديل فاتورة مشتريات تحتوي قطع فريدة حتى لو كانت مترحلة، عبر:
+
+إعادة بناء downstream data بدل منع التعديل.
+
+حذف نتائج الفاتورة القديمة فقط عند الحفظ.
+
+إعادة إنشاء movements + قيود محاسبية.
+
+إضافة زر فحص قبل الحفظ (Read-only).
+
+كل العمليات عبر RPC ذرية فقط.
+
+🚫 ممنوع أي تعديل مباشر على DB من الواجهة.
+
+P0 — Discovery (بدون تعديل)
+
+تحقق من:
+
+وجود الجداول:
+
+unique_purchase_invoices
+
+unique_purchase_invoice_items
+
+unique_items
+
+unique_item_movements
+
+journal_entries
+
+تحقق أن:
+unique_item_movements يحتوي:
+
+reference_type
+
+reference_id
+
+ويحتوي قيمة:
+reference_type = 'unique_purchase_invoice'
+
+لا تغيّر شيئًا في هذه المرحلة.
+
+P1 — DB Layer (Core Rebuild RPC)
+إنشاء RPC جديدة
+
+أنشئ:
+
+unique_purchase_invoice_rebuild_atomic(args jsonb)
+
+المدخلات:
+{
+  invoice_id,
+  header_updates?,
+  items_update?,
+  items_add?,
+  items_delete?,
+  updated_by
+}
+
+داخل Transaction واحدة:
+STEP 1 — حذف نتائج الفاتورة فقط
+
+احذف:
+
+movements المرتبطة بالفاتورة:
+
+DELETE FROM unique_item_movements
+WHERE reference_type='unique_purchase_invoice'
+AND reference_id = invoice_id;
+
+
+القيود المحاسبية المرتبطة:
+احذف journal_entry المرتبط بالفاتورة.
+
+🚫 لا تحذف الفاتورة نفسها.
+
+STEP 2 — تعديل الفاتورة والقطع
+
+نفّذ:
+
+تعديل header
+
+تحديث items_update
+
+حذف items_delete
+
+إدخال items_add
+
+تحديث unique_items عند الحاجة
+
+STEP 3 — إعادة البناء
+
+أعد:
+
+إنشاء movements purchase_in لكل قطعة
+
+إعادة حساب stock
+
+إعادة إنشاء journal entry
+
+تحديث invoice totals
+
+STEP 4 — return payload
+{
+ success: true,
+ rebuilt_movements: X,
+ rebuilt_items: Y
+}
+
+أضف RPC إلى allowlist
+
+داخل server/routes.ts.
+
+P2 — Backend Gate Endpoint (Read-only)
+Endpoint
+GET /api/purchasing/unique-invoices/:id/rebuild-gate
+
+
+يستدعي:
+
+can_rebuild_unique_purchase_invoice(id)
+
+
+ويرجع:
+
+{
+  passed,
+  blockers[]
+}
+
+
+🚫 لا DELETE ولا UPDATE هنا.
+
+P3 — Frontend UX
+داخل UniqueInvoiceEditDialog
+
+أضف زر:
+
+🔍 فحص قابلية إعادة البناء
+
+عند الضغط:
+
+استدعاء endpoint
+
+عرض النتائج:
+
+إذا passed:
+✔ يمكن إعادة البناء
+
+إذا failed:
+اعرض blockers:
+
+قطع مباعة
+
+تحويلات
+
+مرتجعات
+
+حركات أخرى
+
+عند الضغط Save
+
+بدل edit RPC:
+
+استدعِ:
+
+unique_purchase_invoice_rebuild_atomic
+
+
+ولا تحذف شيئًا قبل الحفظ.
+
+P4 — Evidence Queries (مطلوب)
+
+قبل الحفظ:
+
+SELECT count(*) FROM unique_item_movements
+WHERE reference_type='unique_purchase_invoice'
+AND reference_id = :id;
+
+
+بعد الحفظ:
+يجب إعادة إنشاء نفس العدد لكن بالقيم الجديدة.
+
+Safety Rules
+
+🚫 لا supabase.from()
+🚫 لا pool.query() من UI
+🚫 لا fetch write مباشرة
+✅ كل writes عبر RPC فقط
+
+Expected Result
+
+بعد التنفيذ:
+
+• المستخدم يضغط تعديل
+• يعدل القطع بحرية
+• عند الحفظ:
+
+النظام يمسح نتائج الفاتورة
+
+يعيد بناءها
+
+المخزون والمحاسبة يتحدثان
+• لا يحصل drift مرة أخرى

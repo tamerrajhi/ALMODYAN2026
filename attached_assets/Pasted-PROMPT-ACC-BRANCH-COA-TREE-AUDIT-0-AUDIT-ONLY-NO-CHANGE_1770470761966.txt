@@ -1,0 +1,58 @@
+PROMPT — ACC-BRANCH-COA-TREE-AUDIT-0 | AUDIT ONLY | NO CHANGES | EVIDENCE | STOP
+
+ROLE: Senior Full-Stack Engineer (Replit + Neon)
+MODE: AUDIT ONLY (NO CODE/DB CHANGES)
+
+GOAL:
+Determine the exact Chart-of-Accounts tree rules for Branch COA, and produce a precise parent-child mapping plan for BR01 accounts WITHOUT GUESSING.
+
+TASKS (EVIDENCE REQUIRED):
+1) READ SCHEMA
+- \d+ chart_of_accounts
+- \d+ branches
+- Identify columns used for tree building: parent_id, is_postable/is_group/is_header, branch_id, account_code, account_type, level, etc.
+Paste outputs.
+
+2) READ UI TREE LOGIC
+Open and paste the relevant snippets (only the sections needed):
+- src/pages/accounting/ChartOfAccountsPage.tsx (or wherever the tree is built)
+- any selector/service used to fetch COA (queryTable call) and any tree builder utility
+Answer explicitly:
+- Is the tree grouped by parent_id only?
+- Does the UI expect headers/non-postable accounts?
+- Does it filter by branch_id? or uses code prefix BR01-?
+Paste the exact code snippet lines.
+
+3) CURRENT BR01 ACCOUNTS SNAPSHOT (DB)
+Run and paste outputs:
+- SELECT id, account_code, name_ar, account_type, parent_id, branch_id
+  FROM chart_of_accounts
+  WHERE account_code LIKE 'BR01-%'
+  ORDER BY account_code;
+
+- Also show potential “root/header” accounts for BR01 if they exist:
+  SELECT id, account_code, name_ar, account_type, parent_id, branch_id
+  FROM chart_of_accounts
+  WHERE account_code LIKE 'BR01-%' AND parent_id IS NULL
+  ORDER BY account_code;
+
+4) GLOBAL ROOTS SNAPSHOT (DB)
+Run and paste outputs:
+- SELECT id, account_code, name_ar, account_type, parent_id, branch_id
+  FROM chart_of_accounts
+  WHERE parent_id IS NULL
+  ORDER BY account_code
+  LIMIT 50;
+
+5) ANSWER THESE QUESTIONS (NO GUESSING):
+A) Do we want branch-specific headers (e.g., BR01-1000) OR global headers (e.g., 1000) with branch_id?
+B) Does chart_of_accounts enforce unique(account_code) globally or per branch?
+C) Which “root/header” account codes already exist in DB and should be used as parents?
+
+6) OUTPUT REQUIRED (PLAN ONLY, NO IMPLEMENTATION):
+Produce a BR01 mapping table with ZERO assumptions:
+Child account_code -> Intended parent account_code (must be existing OR explicitly marked "needs to be created")
+Include at least the accounts shown in the screenshot:
+BR01-110101, BR01-110104, BR01-1301, BR01-2101, BR01-2105, BR01-2110, BR01-4100, BR01-5100
+
+STOP after providing raw outputs + the mapping table.
