@@ -1,0 +1,145 @@
+Audit / Architecture Decision Report
+
+Context
+لدينا نظام قائم حاليًا فيه موديول مجوهرات. نريد إضافة نشاط جديد داخل نفس النظام عبارة عن فروع لبيع الذهب. المطلوب ليس تنفيذ الآن، بل Audit + Architecture Decision Report احترافي يحدد أفضل تصميم معماري وتشغيلي لإضافة Gold Branches بشكل Enterprise-grade داخل نفس النظام، بدون كسر الموجود، وبدون التأثير السلبي على الأداء أو إدخال تشعب سيئ في الكود.
+
+المطلوب من هذا التقرير
+أريدك تعمل تحليل معماري وتشغيلي واضح وتحسم القرار التالي:
+هل الأفضل:
+
+1. Gold module منفصل بالكامل عن الموديول الحالي
+2. أو نفس موديول المجوهرات الحالي مع دعم نوع جديد اسمه ذهب
+3. أو نفس النظام لكن Gold Domain مستقل داخله مع shared core
+
+المطلوب أن يكون الحكم نهائيًا ومعللًا باحتراف، مع مراعاة:
+
+* maintainability
+* scalability
+* performance
+* clean architecture
+* separation of concerns
+* auditability
+* backend authority
+* future expansion
+* enterprise-grade structure
+
+مهم جدًا
+أنا لا أريد إجابة سطحية. أريد Audit حقيقي على مستوى architecture decision.
+حلل الموضوع باعتبار أن الذهب ليس مجرد صنف عادي، بل قد يختلف عن المجوهرات في:
+
+* inventory model
+* pricing model
+* accounting treatment
+* transaction workflows
+* returns / exchange / buyback
+* weight / karat / making charges
+* branch capability differences
+* reporting requirements
+
+حلل المشروع وكأنه Replit full-stack system قائم بالفعل، ويجب أن نضيف فيه Gold domain بطريقة نظيفة ومحترفة.
+
+Required Output Structure
+أخرج التقرير بهذه البنية بالضبط:
+
+1. Executive Decision
+
+* القرار النهائي الموصى به
+* لماذا هذا هو القرار الصحيح
+* لماذا البدائل الأخرى أضعف
+
+2. Architectural Options Compared
+   قارن بوضوح بين:
+
+* Separate standalone gold system
+* Reuse current jewelry module with branching logic
+* Shared core + separate gold domain
+  واذكر pros / cons / risks / long-term cost / effect on performance / effect on maintainability
+
+3. Domain Analysis
+   اشرح لماذا الذهب يُعتبر operationally مختلفًا عن المجوهرات
+   وحلل الفروق المحتملة في:
+
+* stock model
+* pricing engine
+* branch workflows
+* accounting events
+* valuation model
+* sales / purchase / exchange / returns
+* reporting
+
+4. Recommended Target Architecture
+   صمّم الشكل المعماري المقترح باحتراف، موضحًا:
+
+* shared core responsibilities
+* jewelry domain responsibilities
+* gold domain responsibilities
+* boundaries بين الدومينات
+* ما الذي يجب أن يبقى مشتركًا
+* ما الذي يجب أن يبقى منفصلًا
+
+5. Backend Design Recommendation
+   اقترح شكل backend احترافي:
+
+* services boundaries
+* routes / API namespaces
+* validation boundaries
+* atomic transaction rules
+* server-authoritative calculations
+* what must never be calculated in frontend
+
+6. Data Model Recommendation
+   بدون تنفيذ SQL، اقترح القرار الصحيح على مستوى data model:
+
+* هل نستخدم جداول مشتركة + domain tables
+* هل نستخدم model موحد أم منفصل
+* كيف نتجنب giant table مليان nulls
+* كيف نحافظ على performance وقابلية التوسع
+
+7. Performance Impact Assessment
+   حلل كيف نضيف Gold domain بدون ما نضرب performance
+   واذكر بوضوح:
+
+* ما الذي قد يسبب degradation لو صُمم غلط
+* ما الذي يحافظ على الأداء لو صُمم صح
+* query isolation
+* domain-specific fetching
+* avoiding over-fetching
+* avoiding cross-domain conditional spaghetti
+
+8. Enterprise Risks If Implemented Wrong
+   اذكر المخاطر لو:
+
+* تم دمج الذهب مباشرة داخل منطق المجوهرات
+* أو تم عمل نظام منفصل بالكامل
+* أو تم عمل shared tables بشكل عشوائي
+
+9. Final Architecture Decision
+   صياغة نهائية واضحة جدًا يمكن اعتمادها كقرار معماري رسمي
+
+10. Next Step Recommendation
+    اذكر ما هي الخطوة التالية الصحيحة بعد هذا التقرير
+    بحيث لا نبدأ coding قبل حسم discovery/design points اللازمة
+
+Important Constraints
+
+* لا تنفذ أي كود
+* لا تقترح حلول سطحية
+* لا تفترض أن الذهب مجرد item type فقط
+* لا تقل “depends” بدون ترجيح واضح
+* لا تترك القرار مفتوحًا
+* احسم القرار بشكل مهني
+* ركّز على clean architecture داخل نفس النظام
+* اكتب التقرير كأنه موجه لفريق هندسي محترف سيبني على Replit
+
+Decision Bias
+رجّح الحل الذي يجعل النظام:
+
+* أقرب لبرامج enterprise
+* أقل تشعبًا
+* أوضح في الصيانة
+* أفضل في الأداء على المدى المتوسط والطويل
+* أسهل في الـ auditing
+* وأقل احتمالًا لكسر موديول المجوهرات الحالي
+
+Deliverable Style
+أريد التقرير واضح، منظم، حاسم، ومهني. لا أريد إطالة إنشائية، لكن أريد عمق هندسي حقيقي وقرار معماري يمكن اعتماده رسميًا.
