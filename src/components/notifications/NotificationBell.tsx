@@ -44,7 +44,6 @@ export default function NotificationBell() {
       return (await res.json()) as Notification[];
     },
     enabled: !!user?.id,
-    refetchInterval: 30000
   });
 
   const unreadCount = notifications.filter(n => !n.is_read).length;

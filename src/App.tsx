@@ -160,7 +160,14 @@ const DepartmentsPage = lazy(() => import("./pages/settings/DepartmentsPage"));
 const ZatcaSettingsPage = lazy(() => import("./pages/settings/ZatcaSettingsPage"));
 const ZatcaLogsPage = lazy(() => import("./pages/settings/ZatcaLogsPage"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const PosReturnsRedirect = () => {
   const [searchParams] = useSearchParams();

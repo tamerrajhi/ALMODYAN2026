@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 interface FingerprintData {
   ok: boolean;
@@ -21,45 +21,38 @@ interface FingerprintData {
 type BadgeStatus = 'loading' | 'ok' | 'warning' | 'error' | 'hidden';
 
 export default function DataBackendBadge() {
-  const [status, setStatus] = useState<BadgeStatus>('loading');
-  const [fingerprint, setFingerprint] = useState<FingerprintData | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string>('');
-
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchFingerprint() {
-      try {
-        const resp = await fetch('/api/health/fingerprint');
-        if (resp.status === 401 || resp.status === 403) {
-          if (!cancelled) setStatus('hidden');
-          return;
-        }
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data: FingerprintData = await resp.json();
-        if (cancelled) return;
-        setFingerprint(data);
-        if (data.ok) {
-          setStatus('ok');
-        } else {
-          setStatus('warning');
-          const missing = data.invariants?.required_functions?.missing || [];
-          if (missing.length > 0) {
-            setErrorMsg(`Missing: ${missing.join(', ')}`);
-          } else {
-            setErrorMsg('Some invariants failed');
-          }
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setStatus('error');
-        setErrorMsg(err instanceof Error ? err.message : 'Fetch failed');
+  const { data: fingerprint, isLoading, isError, error } = useQuery<FingerprintData>({
+    queryKey: ['health-fingerprint'],
+    queryFn: async () => {
+      const resp = await fetch('/api/health/fingerprint');
+      if (resp.status === 401 || resp.status === 403) {
+        throw Object.assign(new Error('unauthorized'), { status: resp.status });
       }
-    }
-    fetchFingerprint();
-    return () => { cancelled = true; };
-  }, []);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json() as Promise<FingerprintData>;
+    },
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
-  if (status === 'hidden') return null;
+  const errStatus = isError ? (error as (Error & { status?: number }))?.status : undefined;
+  if (errStatus === 401 || errStatus === 403) return null;
+
+  const status: BadgeStatus = (() => {
+    if (isLoading) return 'loading';
+    if (isError) return 'error';
+    if (!fingerprint) return 'loading';
+    if (fingerprint.ok) return 'ok';
+    return 'warning';
+  })();
+
+  const errorMsg = (() => {
+    if (!fingerprint || fingerprint.ok) return '';
+    const missing = fingerprint.invariants?.required_functions?.missing || [];
+    if (missing.length > 0) return `Missing: ${missing.join(', ')}`;
+    return 'Some invariants failed';
+  })();
 
   const colors: Record<BadgeStatus, string> = {
     loading: 'bg-muted text-muted-foreground',
