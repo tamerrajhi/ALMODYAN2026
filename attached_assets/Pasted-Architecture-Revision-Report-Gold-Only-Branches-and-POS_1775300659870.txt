@@ -1,0 +1,228 @@
+Architecture Revision Report — Gold-Only Branches and POS Isolation
+
+Context
+لدينا نظام ERP قائم داخل Replit، وفيه Jewelry domain يعمل بالفعل. تم الوصول سابقًا إلى اتجاه عام صحيح:
+Shared Core + Separate Gold Domain inside the same system
+
+لكن هناك clarifications نهائية يجب أن يُبنى عليها القرار المعماري الآن، وهي ليست optional:
+
+Confirmed Business Facts
+
+1. الفروع الجديدة المقصودة هي **Gold-only branches**
+
+   * لا تبيع مجوهرات
+   * لا تعمل كـ hybrid branches
+   * لا يوجد mixing بين jewelry inventory و gold inventory داخل نفس branch operationally
+
+2. نقاط البيع الخاصة بهذه الفروع هي **Gold-only POS**
+
+   * لا يجب أن ترث POS المجوهرات الحالي كما هو
+   * لا يجب أن تتعامل مع jewelry workflows أو jewelry assumptions
+
+3. نظام الفواتير الخاص بالذهب **مختلف**
+
+   * invoice structure / invoice lines / pricing breakdown مختلفة عن المجوهرات
+   * لا يصح اعتبار gold invoice مجرد نسخة من current jewelry invoice
+
+4. نظام الباركود الخاص بالذهب **مختلف**
+
+   * barcode rules / item identity / scan workflow مختلفة
+   * لا يجب فرض jewelry barcode model على gold pieces
+
+5. التسعير في قطع الذهب المصنّعة يتكون من أكثر من عنصر
+
+   * gold value component
+   * stone value component when applicable
+   * potentially making/workmanship component
+   * مع بقاء authority بالكامل في backend
+   * والأسعار الأساسية للذهب تتحدث تلقائيًا، مع إمكانية manual override من مستخدم مخول
+
+المطلوب الآن
+لا تنفذ أي كود.
+لا تنشئ جداول.
+لا تعدل schema.
+لا تبني routes.
+لا تبدأ implementation.
+
+أريد فقط Architecture Revision Report حاسم ونهائي، يراجع القرار السابق في ضوء هذه الحقائق المؤكدة، ويحسم كيف يجب أن يُبنى Gold Domain داخل نفس النظام مع **عزل تشغيلي كامل عن Jewelry operational workflows** مع بقاء shared core فقط.
+
+Goal
+إصدار قرار معماري نهائي قابل للاعتماد، يحدد بوضوح:
+
+* ما الذي يجب أن يبقى shared
+* ما الذي يجب أن يكون isolated بالكامل للذهب
+* هل يجب أن يكون للذهب POS مستقل منطقيًا داخل نفس النظام
+* هل يجب أن يكون للذهب invoice model مستقل
+* هل يجب أن يكون للذهب barcode model مستقل
+* كيف نبني pricing model لقطعة الذهب المصنّعة التي قد تحتوي أحجارًا
+
+Required Scope
+أريد التقرير أن يحسم فقط هذه النقاط الستة، ولا يخرج عنها:
+
+1. Branch Isolation Decision
+   احسم القرار النهائي:
+
+* هل branch_type = gold-only يكفي في Phase 1
+* وهل يجب اعتبار hybrid scenario خارج النطاق تمامًا الآن
+* وما هو القرار المعماري الصحيح لتمثيل ذلك بدون over-engineering
+
+المطلوب:
+قرار واضح هل نبني على Gold-only branch isolation بشكل صريح ورسمي الآن أم لا.
+
+2. POS Isolation Decision
+   احسم هل Gold branches يجب أن يكون لها:
+
+* POS مستقل منطقيًا داخل نفس النظام
+  أم
+* reuse محدود من POS الحالي
+  أم
+* مجرد configuration mode
+
+مهم جدًا:
+حلل الأمر بناءً على أن:
+
+* gold POS لا يبيع مجوهرات
+* invoice behavior مختلف
+* barcode behavior مختلف
+* pricing behavior مختلف
+
+وأريد recommendation نهائية واضحة جدًا:
+هل Gold POS يجب أن يكون isolated workflow/module داخل نفس التطبيق أم لا؟
+
+3. Invoice Model Decision
+   احسم هل نظام فواتير الذهب يجب أن يكون:
+
+* reuse لنفس invoice structure الحالية مع تعديلات
+  أو
+* gold-specific invoice model داخل نفس النظام
+
+حلل من زاوية:
+
+* line item composition
+* pricing breakdown
+* tax behavior
+* auditability
+* future reporting
+* maintainability
+* avoiding contamination of jewelry invoice logic
+
+ويجب أن تحسم قرارًا نهائيًا، لا إجابة رمادية.
+
+4. Barcode / Item Identity Decision
+   احسم هل الذهب يحتاج:
+
+* barcode model مستقل
+* item identity model مستقل
+* scan workflow مستقل
+  أم لا
+
+مع الأخذ في الاعتبار:
+
+* القطع ذهب فقط
+* الفروع Gold-only
+* barcode rules مختلفة عن jewelry
+* POS scanning logic likely different
+
+أريد قرارًا واضحًا يحدد:
+هل يجب فصل barcode/item identity architecture للذهب عن المجوهرات أم لا؟
+
+5. Pricing Composition Decision
+   احسم الشكل الصحيح لتسعير القطعة الذهبية المصنّعة في هذا السياق:
+
+* gold price component
+* stone price component
+* making/workmanship component عند الحاجة
+* optional overrides
+* server authority only
+
+المطلوب:
+قرار واضح عن pricing architecture لمرحلة Phase 1:
+
+* هل السعر النهائي يُخزن كقيمة واحدة فقط
+* أم يجب حفظ pricing components بشكل منفصل
+* ما هو source of truth
+* كيف ترتبط المعاملة بمصدر السعر
+* كيف نتجنب frontend-calculated totals
+* كيف نتعامل مع automatic gold rate + manual override
+* كيف نضمن auditability عندما تحتوي القطعة على أحجار
+
+6. Final Domain Boundary Revision
+   في ضوء كل ما سبق، أريد Final Revised Boundary Decision يحسم:
+
+* ما الذي يبقى Shared Core فقط
+* ما الذي يصبح Gold-only isolated operationally
+* ما الذي يجب منعه تمامًا من reuse العشوائي من Jewelry domain
+
+Critical Instructions
+
+* لا كود
+* لا SQL
+* لا migrations
+* لا implementation
+* لا تقل "depends" بدون ترجيح واضح
+* لا تفترض hybrid branches في Phase 1
+* لا تقترح forcing reuse إذا كانت facts الحالية تنفي ذلك
+* اعتبر أن الهدف هو enterprise-grade isolation داخل نفس النظام
+* اعتبر أن Gold POS / Gold invoices / Gold barcode / Gold pricing قد تختلف جوهريًا عن Jewelry
+* ركز على minimal risk to current jewelry workflows
+* التقرير يجب أن يكون حاسمًا وقابلًا للاعتماد رسميًا
+
+Required Output Structure
+أخرج التقرير بهذه البنية بالضبط:
+
+1. Executive Summary
+
+* ملخص تنفيذي قصير
+* القرارات الستة النهائية الموصى بها
+
+2. Decision 1 — Gold-Only Branch Isolation
+
+* recommended model
+* why
+* why hybrid is out of scope now
+
+3. Decision 2 — Gold POS Isolation
+
+* options considered
+* recommended model
+* why
+
+4. Decision 3 — Gold Invoice Model
+
+* options considered
+* recommended model
+* why
+
+5. Decision 4 — Gold Barcode and Item Identity
+
+* options considered
+* recommended model
+* why
+
+6. Decision 5 — Gold Pricing Composition
+
+* recommended pricing architecture
+* required pricing components
+* source of truth
+* authority model
+* auditability model
+
+7. Decision 6 — Final Revised Domain Boundary
+
+* what remains shared
+* what becomes isolated
+* what must not be reused carelessly
+
+8. Implementation Guardrails
+   ضع guardrails قصيرة جدًا لا يجب خرقها لاحقًا أثناء التنفيذ
+
+9. Final Readiness Verdict
+
+* هل أصبح القرار جاهزًا للانتقال إلى technical design
+* وما الذي يظل business-confirmation detail فقط وليس blocker
+
+Tone
+أريد التقرير حاسم، هندسي، ومهني.
+لا أريد كلامًا عامًا.
+لا أريد إعادة شرح ما هو واضح.
+أريد قرارات واضحة تبني Gold-only domain داخل نفس Replit monolith بدون كسر Jewelry system الحالي.
