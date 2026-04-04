@@ -1,0 +1,141 @@
+Audit First — Gold Excel Purchase Import Technical Design Report Only
+
+Context
+تم اعتماد القرار المعماري التالي:
+
+* لا يتم تعديل ImportPage الحالية الخاصة بالمجوهرات
+* لا يتم reuse لمسار استيراد المجوهرات الحالي
+* سيتم بناء GoldImportPage مستقلة بالكامل
+* وسيكون لها Gold purchase import pipeline مستقل بالكامل
+
+المطلوب الآن
+لا تنفذ أي كود.
+لا تنشئ جداول.
+لا تعدل schema.
+لا تضف routes.
+لا تبني UI.
+لا تعمل migrations.
+لا تبدأ implementation.
+
+أريد فقط Technical Design Audit Report دقيق جدًا يحدد كيف يجب تصميم Gold Excel Purchase Import flow داخل النظام الحالي، بدون المساس بمسار المجوهرات.
+
+Goal
+تحديد التصميم الفني الصحيح فقط لمسار:
+Gold Excel → Parse → Validate → Preview → Confirm Import → Gold Purchase Invoice Creation → Gold Inventory Save → Accounting Entry
+
+مع مراعاة الحقائق المؤكدة:
+
+* الفروع Gold-only
+* POS Gold-only
+* invoice model مختلف
+* barcode/item identity مختلف
+* السعر النهائي ليس من ملف الإكسيل بل من server pricing model
+* القطعة قد تحتوي gold component + stone component + making/workmanship component
+
+Required Questions to Answer
+أجب فقط على هذه الأسئلة، بالدليل من البنية الحالية والقرارات المعتمدة:
+
+1. Gold Import Screen Scope
+   ما الذي يجب أن تحتويه GoldImportPage بالضبط في Phase 1؟
+
+* upload
+* template selection
+* preview
+* validation summary
+* supplier selection
+* branch selection
+* confirm import
+* result screen
+* error reporting
+
+وما الذي لا يجب أن يدخل فيها الآن حتى لا ينفجر scope؟
+
+2. Gold Excel Input Contract
+   ما هو الحد الأدنى العملي للحقول التي يجب أن يتوقعها ملف Excel لرفع قطع الذهب في Phase 1؟
+   أريد recommendation واضحة للحقول المطلوبة / الاختيارية فقط على مستوى التصميم، بدون SQL وبدون تنفيذ.
+
+يجب أن تراعي أن التسعير النهائي في البيع لاحقًا يعتمد على:
+
+* gold weight
+* karat
+* stone value
+* making/workmanship
+  لكن import purchase flow ليس شرطًا أن يطلب كل شيء إذا لم يكن لازمًا.
+
+3. Gold Piece Identity Design for Import
+   ما هو الحد الأدنى من هوية القطعة التي يجب تثبيتها وقت الاستيراد؟
+
+* gold item code
+* barcode
+* supplier reference
+* model / design code
+* description
+* serial-like identity
+* branch ownership
+
+احسم ما الذي يجب أن يوجد من البداية لكي لا نعيد تصميم الهوية لاحقًا.
+
+4. Validation Design
+   ما هي validations التي يجب أن تكون:
+
+* frontend pre-validation
+* server authoritative validation
+* import rejection conditions
+* warnings only
+
+احسم بوضوح ما الذي يجب رفضه فورًا، وما الذي يمكن قبوله مع warning.
+
+5. Purchase Invoice Import Boundary
+   احسم كيف يجب أن يُفصل Gold purchase import path عن Jewelry purchase import path.
+   أريد تحديدًا:
+
+* ما الذي يجب أن يكون Gold-only بالكامل
+* ما الذي يمكن إعادة استخدامه بشكل عام
+* ما الذي يجب منعه تمامًا من reuse
+
+6. Accounting Entry Design Boundary
+   بدون افتراضات محاسبية زائدة، احسم:
+
+* ما هو الحد الأدنى المحاسبي الذي يجب أن يخرج من Gold purchase import في Phase 1
+* وما الذي يجب تأجيله
+* وكيف يبقى القيد موصولًا بمسار ذهب مستقل
+
+7. Error Handling / Rollback Design
+   احسم كيف يجب أن يُصمم failure behavior في Gold import:
+
+* هل يكون atomic بالكامل
+* هل يحتاج import backup log
+* هل يحتاج row error log
+* ما الذي يجب أن يحدث عند فشل جزء من الملف
+* ما الذي يجب أن يُمنع تمامًا
+
+8. Final Technical Design Direction
+   أعطني تصميمًا فنيًا نهائيًا مختصرًا لمسار Gold import فقط، قابلًا للبناء لاحقًا بدون تخمين.
+
+Critical Rules
+
+* لا كود
+* لا SQL
+* لا migrations
+* لا implementation
+* لا guessing
+* أي شيء غير محسوم = NOT VERIFIED
+* لا تعيد فتح قرار الشاشة الحالية؛ هذا القرار تم حسمه
+* لا توسع التقرير إلى POS أو sales أو returns
+* التركيز فقط على Gold Purchase Excel Import flow
+
+Required Output Structure
+
+1. Executive Summary
+2. Gold Import Screen Scope
+3. Gold Excel Input Contract
+4. Gold Piece Identity Design
+5. Validation Design
+6. Purchase Invoice Import Boundary
+7. Accounting Entry Boundary
+8. Error Handling and Atomicity
+9. Final Technical Design Direction
+10. Readiness Verdict
+
+Tone
+أريد التقرير عملي، حاسم، ومناسب للانتقال بعده مباشرة إلى implementation prompt بدون تخمين.
