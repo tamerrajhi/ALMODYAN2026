@@ -1,0 +1,70 @@
+نفّذ Audit Verification فقط على تقرير البطء السابق، بدون أي تعديل على الكود أو قاعدة البيانات أو الإعدادات.
+
+المطلوب الآن ليس اقتراح حلول ولا Build mode، بل إثبات الأسباب بالأدلة.
+
+تحقّق تحديدًا من النقاط التالية:
+
+1. هل QueryClient بدون staleTime هو سبب مثبت فعلاً أم مجرد عامل محتمل؟
+
+   * حدّد ما إذا كان هناك repeated refetch عند التنقل بين الصفحات
+   * قدّم evidence من network behavior وليس استنتاج فقط
+
+2. هل Notification polling على /api/notifications-list يؤثر فعلاً على تجربة فتح الشاشات أم هو background noise فقط؟
+
+   * أثبت التكرار
+   * أثبت تأثيره الحقيقي أو عدمه
+   * حدّد هل هو global في كل الصفحات
+
+3. عند فتح الشاشات البطيئة، قدّم Network Waterfall واضح:
+
+   * عدد الطلبات
+   * ترتيبها
+   * أزمنة كل request
+   * هل يوجد duplicate requests
+   * هل يوجد sequential/waterfall behavior
+   * ما هو أبطأ request فعليًا
+
+4. افحص هل البطء من:
+
+   * network / API
+   * frontend rendering
+   * rerenders
+   * heavy components
+   * global layout fetches
+   * auth/permission/bootstrap guards
+   * bundle/client-side processing
+
+5. بالنسبة لـ /api/health/fingerprint:
+
+   * أثبت هل يتم استدعاؤه فعلًا على كل صفحة
+   * أثبت هل هو ثقيل فعلًا على DB أو مجرد request إضافي خفيف
+   * لا تكتب أنه “ثقيل” بدون evidence
+
+6. بالنسبة للـ dashboard:
+
+   * أعطني كل queries/endpoints التي تضرب عند الفتح
+   * أيها critical
+   * أيها يمكن أن يؤخر ظهور الشاشة
+   * هل يوجد over-fetching أو duplicated data loads
+
+7. بالنسبة لقاعدة البيانات:
+
+   * لا تفترض أن أي index ناقص هو سبب رئيسي إلا إذا وُجد EXPLAIN ANALYZE يثبت ذلك
+   * رتّب مشاكل DB حسب التأثير الحقيقي فقط
+
+مخرجات مطلوبة بصيغة صارمة:
+A) Root Causes Confirmed by Evidence
+B) Likely Contributors but Not Fully Proven
+C) Ruled-Out / Low-Impact Items
+D) Top 10 Slowest Requests/Operations with timings
+E) هل البطء سببه الأساسي frontend أم backend أم الاثنين
+F) Recommended Fix Order لاحقًا فقط كتوصية، بدون تنفيذ أي تعديل الآن
+
+قواعد إلزامية:
+
+* No code changes
+* No DB changes
+* No config changes
+* No guessing
+* أي نقطة بلا دليل واضح = NOT VERIFIED
+* فرّق بوضوح بين “محتمل” و “مثبت”
