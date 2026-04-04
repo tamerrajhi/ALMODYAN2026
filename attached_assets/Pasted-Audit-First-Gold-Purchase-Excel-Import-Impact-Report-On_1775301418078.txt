@@ -1,0 +1,187 @@
+Audit First — Gold Purchase Excel Import Impact Report Only
+
+Context
+لدينا نظام قائم داخل Replit يعمل حاليًا لمجال المجوهرات. نريد دراسة إضافة مسار جديد لرفع **قطع الذهب** من ملف Excel كفاتورة مشتريات، مع الحفاظ الكامل على النظام الحالي وعدم كسر أي جزء فيه.
+
+الفكرة المراد تدقيقها الآن فقط:
+استخدام **نفس شاشة رفع القطع الحالية** كمدخل موحد، لكن مع اختيار واضح:
+
+* Jewelry
+* Gold
+
+وبناءً على الاختيار:
+
+* يتم استخدام template مختلف
+* validation مختلف
+* preview مختلف
+* purchase invoice workflow مختلف
+* accounting path مختلف
+* save path مختلف
+
+لكن قبل أي تنفيذ، المطلوب الآن **Audit فقط** لتحديد هل هذا المسار مناسب فعلًا، وما الذي سيتغير بالضبط، وما المخاطر، وهل الأفضل:
+
+1. نفس شاشة الرفع الحالية + branching at entry only + separate backend path
+   أم
+2. شاشة رفع ذهب مستقلة بالكامل
+
+المطلوب الآن
+لا تنفذ أي كود.
+لا تعدل أي ملف.
+لا تنشئ schema.
+لا تضف routes.
+لا تبني UI.
+لا تعمل refactor.
+لا تعمل migrations.
+
+أريد فقط **Impact Audit Report** دقيق جدًا، مبني على الكود الفعلي الحالي، بدون أي تخمين.
+
+Goal
+تحديد بالضبط:
+
+* ما هي الشاشة/الشاشات الحالية المسؤولة عن رفع قطع المجوهرات من Excel
+* ما هو مسار البيانات الكامل الحالي من upload إلى purchase invoice إلى inventory إلى accounting
+* ما الذي سيتأثر لو أضفنا خيار Gold داخل نفس entry screen
+* هل هذا آمن أم لا
+* وما هو القرار الصحيح: reuse entry shell أم new gold upload screen
+
+Audit Questions to Answer
+أجب فقط على هذه الأسئلة، بالدليل من الكود الحالي:
+
+1. Current Import Flow Mapping
+   حدّد بدقة:
+
+* ما هي الصفحة الحالية أو الصفحات الحالية الخاصة برفع/import قطع المجوهرات من Excel
+* ما هي components المشاركة
+* ما هي hooks المشاركة
+* ما هي services / API routes / RPCs / DB paths المستخدمة
+* ما هو المسار الكامل من:
+  upload → parse → preview → validation → confirm import → purchase invoice creation → inventory save → accounting impact
+
+2. Reuse Feasibility of Current Entry Screen
+   افحص هل يمكن استخدام **نفس شاشة الرفع الحالية كـ entry shell فقط** بدون التأثير على مسار المجوهرات الحالي.
+   المطلوب:
+
+* ما الأجزاء المشتركة القابلة لإعادة الاستخدام بأمان
+* ما الأجزاء الخاصة بالمجوهرات ولا يجب لمسها
+* هل current screen مفصولة جيدًا بما يسمح بإضافة “item type selector” بأمان
+* أم أن الشاشة الحالية متشابكة جدًا مع jewelry-specific assumptions
+
+3. Jewelry-Specific Assumptions That Would Break Gold
+   استخرج كل الافتراضات الحالية داخل import flow التي تخص المجوهرات فقط، مثل:
+
+* fields
+* parser assumptions
+* unique_items assumptions
+* stockcode logic
+* invoice structure
+* accounting mapping
+* barcode generation assumptions
+* serial/item identity assumptions
+
+المطلوب:
+أي assumption من هذه لو استُخدم مع الذهب سيكسر correctness أو architecture، اذكره صراحة.
+
+4. Impact Surface Analysis
+   حدّد بالضبط ما الملفات/المناطق التي **قد** تحتاج تغييرًا لو اخترنا:
+   Option A: same upload entry screen + separate gold backend flow
+   وقارنها بـ:
+   Option B: separate gold upload screen
+
+أريد مقارنة دقيقة جدًا من حيث:
+
+* عدد الملفات المتوقع تأثرها
+* درجة المخاطرة على jewelry flow
+* احتمالية regression
+* maintainability
+* سرعة التنفيذ
+* cleanliness of architecture
+
+5. Purchase Invoice and Accounting Path Audit
+   افحص هل purchase invoice path الحالي للمجوهرات:
+
+* يمكن عزله بسهولة عن مسار ذهب جديد
+* أم أنه hardcoded بشكل يجعل reuse خطرًا
+
+وحدّد:
+
+* ما الذي يجب أن يبقى كما هو للمجوهرات
+* ما الذي يجب أن يكون gold-only path مستقل
+* هل accounting wiring الحالي يسمح بإضافة gold purchase path منفصل بدون contamination
+
+6. Final Decision
+   بناءً على الكود الفعلي فقط، احسم القرار:
+   هل الأفضل الآن:
+   A) Reuse current upload screen as unified entry shell only + separate gold import pipeline
+   أم
+   B) Build separate gold upload screen from day one
+
+لكن مهم جدًا:
+لا أريد decision عام أو نظري.
+أريد القرار بناءً على:
+
+* البنية الحالية الفعلية
+* أقل مخاطرة على النظام الحالي
+* أقل تشعب
+* أوضح فصل معماري
+* أسرع مسار آمن للتنفيذ
+
+Critical Rules
+
+* No code changes
+* No DB changes
+* No schema proposals
+* No implementation
+* No guessing
+* أي شيء غير مثبت من الكود = NOT VERIFIED
+* لا تفترض أن reuse جيد أو سيئ إلا إذا أثبتت ذلك من الملفات الحالية
+* لا تقترح “hybrid answer” بدون ترجيح واضح نهائي
+* المطلوب Audit Decision Report فقط
+
+Required Output Structure
+أخرج التقرير بهذه البنية بالضبط:
+
+1. Executive Summary
+
+* ملخص قصير
+* القرار النهائي الموصى به
+* لماذا
+
+2. Current Jewelry Excel Import Flow
+
+* pages/components/hooks/services/routes/RPCs involved
+* full data flow map
+
+3. Reusable vs Non-Reusable Parts
+
+* what can be reused safely
+* what must remain jewelry-only
+* what is too coupled
+
+4. Gold-Breaking Assumptions in Current Flow
+
+* list of current jewelry-specific assumptions that make direct reuse dangerous
+
+5. Impact Comparison
+
+* Option A: same entry screen + separate gold path
+* Option B: separate gold upload screen
+* compare risk / touched areas / regression risk / maintainability / speed
+
+6. Purchase Invoice and Accounting Isolation Audit
+
+* what can stay shared
+* what must be isolated for gold
+
+7. Final Decision
+
+* choose one option only
+* justify it from current code evidence only
+
+8. Change Surface Preview
+
+* list only the exact areas that would likely need changes later if the chosen option is approved
+* no implementation, just impact preview
+
+Tone
+أريد التقرير حاسم، مختصر نسبيًا، ومبني على evidence من الكود الحالي فقط.
+أي نقطة غير مثبتة = NOT VERIFIED.
