@@ -1,0 +1,239 @@
+Architecture Follow-up Decision Report — Gold Manufactured Pieces Foundations Only
+
+Context
+لدينا نظام ERP قائم حاليًا داخل Replit، وفيه Jewelry domain يعمل بالفعل. تم اتخاذ قرار معماري مبدئي بأن الاتجاه الصحيح هو:
+Shared Core + Separate Gold Domain inside the same system
+
+لكن هناك clarification مهم يجب اعتباره أساسًا لهذا التقرير:
+Gold business here is not bullion-first and not raw-weight trading only.
+النشاط المقصود هو بيع وشراء **قطع ذهب مصنّعة** (manufactured gold pieces)، شبيهة بقطع المجوهرات من حيث وجود موديلات/أوصاف/قطع فعلية، لكن مع منطق مختلف في التسعير والحسابات بسبب الاعتماد على:
+
+* gold weight
+* karat
+* gold daily price
+* stone value when applicable
+* making charges / workmanship
+* controlled price overrides
+
+كذلك:
+سعر الذهب في السيستم يجب أن **يتحدث تلقائيًا**، مع **إمكانية تعديل يدوي Manual Override** من مستخدم مخول، مع الحفاظ الكامل على auditability وserver authority.
+
+المطلوب الآن
+لا تنفذ أي كود.
+لا تنشئ جداول.
+لا تعدل schema.
+لا تبني routes.
+لا تبدأ implementation.
+
+أريد فقط Follow-up Decision Report احترافي يحسم Foundations النهائية لـ Gold Domain داخل نفس النظام، مع مراعاة أن Gold Domain هنا يتعامل مع **manufactured gold pieces** وليس افتراضًا مع bullion-only model.
+
+Goal
+إنتاج تقرير معماري/تشغيلي حاسم يحدد Foundations النهائية لـ Gold Domain داخل نفس النظام، بشكل يدعم:
+
+* enterprise-grade maintainability
+* performance safety
+* clean domain separation
+* minimal risk on current jewelry workflows
+* future scalability
+* clear implementation path
+
+Required Scope
+أريد التقرير أن يحسم فقط هذه 5 نقاط، ولا يخرج عنها:
+
+1. Branch Business-Line Model
+   احسم الشكل الصحيح لتمثيل نشاط الفرع:
+
+* هل branch يكون jewelry-only / gold-only / hybrid
+* ما هو التمثيل المعماري الأفضل لهذا داخل النظام
+* هل الأفضل field مباشر في branches
+* أم relational model مستقل
+* أم capabilities model
+* وما هو الاختيار الأفضل انتربرايزياً ولماذا
+
+حلل من زاوية:
+
+* maintainability
+* permissions
+* reporting
+* future expansion
+* query simplicity
+* avoiding bad schema decisions
+
+2. Gold Inventory Model
+   احسم الشكل الصحيح لمخزون الذهب داخل النظام مع مراعاة أن النشاط هنا **قطع ذهب مصنّعة** وليس فقط ذهب خام أو سبائك.
+
+يجب أن تحلل بوضوح:
+
+* هل النموذج الصحيح piece-oriented
+* أم lot/weight-oriented
+* أم hybrid model يجمع بين piece identity + authoritative weight/karat/value attributes
+* كيف نتعامل مع القطعة المصنّعة التي لها:
+
+  * item identity / model
+  * gross or net gold weight
+  * karat
+  * stone component عند الحاجة
+  * making/workmanship component
+* وهل يجب أن يبقى لكل قطعة identity مستقلة أم يكفي ledger وزني فقط
+
+المطلوب:
+أريد recommendation واضحة جدًا لنموذج Phase-1 inventory architecture للذهب المصنّع، وليس list عامة من الخيارات.
+
+حلل من زاوية:
+
+* الأداء
+* سهولة التدقيق
+* دقة الرصيد
+* suitability for manufactured pieces
+* compatibility with pricing
+* compatibility with sales / returns / exchange
+* compatibility with future reports
+
+3. Gold Pricing Authority Model
+   احسم من أين تأتي authority الخاصة بسعر الذهب المستخدم في العمليات، مع اعتبار أن الأسعار يجب أن:
+
+* تتحدث تلقائيًا في السيستم
+* ويمكن تعديلها يدويًا من مستخدم مخول
+* ولا يجوز أن تكون السلطة في frontend
+
+قارن بين:
+
+* manual fixed daily rate only
+* external live feed only
+* admin-approved pricing session only
+* hybrid model: auto-updated base rate + controlled manual override/approval
+
+المطلوب:
+اختيار model واحد موصى به لمرحلة Phase 1، مع توضيح:
+
+* source of truth
+* approval model
+* traceability
+* rollback / override history
+* effective time windows
+* branch/global applicability
+* offline/fallback behavior
+* how to avoid pricing chaos
+
+مهم جدًا:
+يجب أن تحسم كيف يبقى التسعير:
+
+* automatic by default
+* manually adjustable when needed
+* fully auditable
+* server-authoritative only
+
+4. Phase-1 Gold Transaction Scope
+   احسم ما الذي يجب أن يدخل فعلًا في Phase 1 من معاملات الذهب المصنّع، وما الذي يجب تأجيله حتى لا ينفجر scope.
+
+قيّم العناصر التالية وحدد لكل واحد:
+
+* Include in Phase 1
+* Defer
+* Optional but not core
+
+العناصر:
+
+* gold manufactured piece sale
+* gold purchase from supplier
+* customer buyback / old gold purchase
+* exchange old-for-new
+* transfer between branches
+* returns
+* daily pricing session approval
+* daily stock reconciliation
+* gold piece relabel / repricing event
+* stone-inclusive pricing handling
+* melt / refining
+* manual revaluation
+* gold vault / branch stock report
+
+المطلوب:
+أريد Phase-1 scope recommendation احترافي جدًا وواقعي جدًا، مناسب لبداية قوية بدون over-engineering.
+
+5. Accounting Boundary Decision
+   احسم الحدود المحاسبية الصحيحة للذهب داخل نفس النظام، مع مراعاة أن الذهب هنا **manufactured pieces** وليس مجرد raw metal trading.
+
+أريد منك أن تحسم:
+
+* هل الذهب يحتاج domain accounting boundary منفصل منطقيًا داخل نفس المحاسبة
+* أم مجرد امتداد بسيط للمجوهرات
+* ما الذي يجب أن يبقى shared داخل COA الحالي
+* ما الذي يجب أن يكون domain-specific
+* ما الذي لا يجب فرضه الآن قبل business/accounting confirmation
+
+مهم:
+لا تفرض نموذجًا محاسبيًا معقدًا بشكل مبكر بدون حاجة مؤكدة.
+لكن في نفس الوقت لا تختزل الذهب المصنّع إلى أنه “نفس المجوهرات تمامًا”.
+أريد boundary architecture متزنة وقابلة للتنفيذ.
+
+Critical Instructions
+
+* لا تنفذ أي كود
+* لا تقترح SQL implementation
+* لا تقترح migrations
+* لا تبدأ naming tables النهائية إلا إذا كان ذلك ضروريًا لتوضيح القرار فقط
+* لا تفترض أن كل business rules محسومة
+* لا تعطِ إجابة “depends” بدون ترجيح واضح
+* يجب أن يكون لديك recommendation نهائية لكل نقطة من النقاط الخمس
+* ركّز على what should be decided now before implementation
+* اعتبر أن الهدف هو حماية النظام الحالي من التشعب وكسر الأداء
+* اعتبر أن Jewelry workflows الحالية يجب ألا تتعرض لتغييرات invasive
+* اعتبر أن Gold Domain هنا closer to manufactured-piece retail operations than bullion trading
+* لا تبنِ القرار على افتراض raw-gold-only inventory unless you clearly reject it with reasoning
+
+Required Output Structure
+أخرج التقرير بهذه البنية بالضبط:
+
+1. Executive Summary
+
+* ملخص تنفيذي قصير
+* القرارات الخمسة النهائية الموصى بها
+
+2. Decision 1 — Branch Business-Line Model
+
+* options considered
+* recommended model
+* why
+* why alternatives are weaker
+
+3. Decision 2 — Gold Inventory Model for Manufactured Pieces
+
+* options considered
+* recommended phase-1 model
+* why
+* tradeoffs
+
+4. Decision 3 — Gold Pricing Authority Model
+
+* options considered
+* recommended phase-1 model
+* why
+* operational control implications
+
+5. Decision 4 — Phase-1 Transaction Scope
+
+* item-by-item classification
+* final phase-1 scope
+* what is deferred and why
+
+6. Decision 5 — Accounting Boundary
+
+* recommended accounting boundary
+* what remains shared
+* what becomes domain-specific
+* what must not be overcommitted yet
+
+7. Implementation Guardrails
+   ضع قائمة قصيرة جدًا من guardrails المعمارية التي يجب عدم خرقها لاحقًا أثناء التنفيذ
+
+8. Final Readiness Verdict
+
+* هل أصبح القرار المعماري جاهزًا للانتقال إلى technical design
+* وما الذي يظل business-confirmation only وليس architectural blocker
+
+Tone
+أريد التقرير حاسم، هندسي، عملي، ومناسب للاعتماد.
+لا أريد إطالة إنشائية.
+لا أريد كلام عام.
+أريد قرارات واضحة قابلة للبناء عليها في Replit monolith architecture.
