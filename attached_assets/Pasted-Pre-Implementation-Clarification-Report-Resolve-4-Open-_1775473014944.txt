@@ -1,0 +1,141 @@
+Pre-Implementation Clarification Report — Resolve 4 Open Gold Import Decisions Only
+
+Context
+لدينا الآن Technical Design Audit Report قوي لمسار:
+Gold Excel Purchase Import → Gold Purchase Invoice → Gold Inventory → Accounting Entry
+
+ولا نريد فتح أوديت جديد أو إعادة مناقشة architecture من البداية.
+
+لكن ما زالت هناك 4 نقاط تشغيلية/تجارية مفتوحة تمنع كتابة Implementation Prompt نهائي بدون تخمين:
+
+1. VAT on gold purchase invoices
+2. Import weight model: gross only أم net gold weight required
+3. Whether making charge must be captured during purchase import
+4. Final gold item code format
+
+المطلوب الآن
+لا تنفذ أي كود.
+لا تعدل schema.
+لا تبني UI.
+لا تعمل migrations.
+لا تبدأ implementation.
+
+أريد فقط Clarification Report قصير وحاسم يحدد القرار الموصى به لكل نقطة من الأربع نقاط المفتوحة، بناءً على:
+
+* المعمارية التي تم اعتمادها
+* السياق التشغيلي الحالي
+* أقل مخاطرة على Phase 1
+* أقل تعقيد
+* أعلى auditability
+* عدم كسر إمكانية التوسع لاحقًا
+
+Goal
+إغلاق القرارات الأربع المفتوحة فقط، حتى يصبح Gold Purchase Excel Import جاهزًا لبرومبت التنفيذ بدون تخمين.
+
+Questions to Resolve
+أجب فقط على هذه النقاط الأربع:
+
+1. VAT on Gold Purchase Import
+   احسم ما هو القرار الأكثر أمانًا لمرحلة Phase 1 داخل implementation prompt:
+
+* هل يجب أن يُبنى Gold purchase import على VAT configurable input؟
+* أم VAT = 0 مؤقتًا لحين confirmation؟
+* أم يجب اعتبار VAT decision blocker لا يجوز التنفيذ قبل حسمه؟
+
+المطلوب:
+قرار واضح جدًا من زاوية implementation safety.
+لا أريد حكم قانوني نهائي.
+أريد فقط قرارًا هندسيًا/تنفيذيًا: كيف لا نبني prompt تنفيذ على assumption قد يكسر accounting.
+
+2. Import Weight Model
+   لدينا حاليًا اقتراح استخدام WEIGHT_GROSS في ملف Excel.
+   لكن لأن تسعير القطعة لاحقًا قد يتأثر بالأحجار، احسم:
+
+* هل Phase 1 import يجب أن يعتمد gross weight فقط؟
+* أم يجب طلب NET_GOLD_WEIGHT من البداية؟
+* أم gross + optional stone weight كافٍ كبداية؟
+* وما هو الاختيار الأكثر أمانًا حتى لا نعيد تصميم النظام بعد ذلك؟
+
+المطلوب:
+Recommendation عملية جدًا مناسبة للبداية، مع أقل مخاطرة على pricing وpiece identity لاحقًا.
+
+3. Making Charge in Purchase Import
+   احسم:
+
+* هل يجب إدخال making charge ضمن ملف الشراء في Phase 1؟
+* أم تؤجَّل تمامًا؟
+* أم تكون optional field فقط؟
+* وما أثر كل خيار على simplicity / auditability / future pricing؟
+
+المطلوب:
+قرار واضح مناسب لمرحلة البداية، بدون over-engineering.
+
+4. Final Gold Item Code Format
+   احسم ما هو الشكل الأفضل لكود القطعة في Phase 1:
+
+* هل format مثل GLD-{KARAT}-{YYYYMM}-{SEQ} مناسب؟
+* أم يجب أن يكون أبسط؟
+* أم يجب أن يظل configurable؟
+* وما هو القرار الأفضل إذا أردنا:
+
+  * uniqueness
+  * readability
+  * branch isolation
+  * future barcode use
+  * no conflict with jewelry codes
+
+المطلوب:
+Recommendation نهائية قابلة للاستخدام لاحقًا في implementation prompt.
+
+Critical Rules
+
+* لا كود
+* لا SQL
+* لا implementation
+* لا إعادة فتح قرارات تم حسمها سابقًا
+* لا فتح scope جديد
+* لا إجابة رمادية
+* لا تقل "depends" بدون recommendation نهائية
+* أي نقطة تحتاج business confirmation فعلًا، صنّفها بوضوح:
+
+  * blocker
+  * non-blocker with safe default
+  * deferable
+
+Required Output Structure
+
+1. Executive Summary
+
+* القرار النهائي لكل نقطة من الأربع نقاط
+
+2. Decision 1 — VAT on Gold Purchase Import
+
+* recommended treatment for implementation prompt
+* blocker or not
+* why
+
+3. Decision 2 — Import Weight Model
+
+* recommended phase-1 model
+* why
+* what to avoid
+
+4. Decision 3 — Making Charge Handling
+
+* recommended phase-1 treatment
+* why
+* what is deferred
+
+5. Decision 4 — Gold Item Code Format
+
+* recommended format
+* why
+* future safety
+
+6. Final Implementation Readiness Verdict
+
+* هل أصبح Gold Purchase Import جاهزًا لبرومبت التنفيذ بعد هذه القرارات أم لا
+
+Tone
+أريد التقرير مختصر، حاسم، وموجه لغلق القرارات المفتوحة فقط.
+لا أريد إعادة شرح architecture.

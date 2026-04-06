@@ -1,0 +1,269 @@
+Implementation Prompt — Gold Purchase Excel Import Phase 1 Only
+
+Context
+تم حسم القرارات المعمارية والتصميمية التالية مسبقًا ويجب الالتزام بها بدون اجتهاد:
+
+* لا يتم تعديل ImportPage الحالية الخاصة بالمجوهرات
+* لا يتم reuse لمسار استيراد المجوهرات الحالي
+* سيتم بناء GoldImportPage مستقلة بالكامل
+* Gold purchase import path مستقل بالكامل عن Jewelry purchase import path
+* Gold branches = branches where branch_type = 'gold' فقط
+* Gold import uses:
+
+  * WEIGHT_GROSS mandatory
+  * STONE_WEIGHT optional
+  * g_weight_net computed server-side
+  * MAKING_CHARGE optional / nullable
+  * gold item code format = GLD-{SEQ8}
+* VAT on gold purchase import:
+
+  * vat_rate configurable input
+  * default = 0
+  * لا يُعتبر هذا حسمًا نهائيًا للسياسة الضريبية، لكنه safe default للتنفيذ الآن
+
+Scope
+نفّذ فقط Gold Purchase Excel Import Phase 1.
+لا تنفذ POS.
+لا تنفذ sales.
+لا تنفذ returns.
+لا تنفذ pricing sessions.
+لا تنفذ barcode printing.
+لا تنفذ batch detail features beyond minimum import result.
+لا توسّع خارج نطاق الاستيراد والشراء والمخزون والقيد الأساسي.
+
+Required Deliverables
+نفّذ فقط العناصر التالية:
+
+1. New Gold Import Page
+   أنشئ صفحة مستقلة جديدة:
+
+* `src/pages/gold/GoldImportPage.tsx`
+
+ويجب أن تحتوي فقط على:
+
+* Gold branch selector (gold branches only)
+* Supplier selector
+* Invoice date
+* Optional VAT input with default = 0
+* Excel upload
+* Gold template parsing
+* Validation summary
+* Preview table
+* Confirm import
+* Result summary after success
+
+ولا تضف features إضافية غير مطلوبة.
+
+2. App Routing
+   أضف route جديد فقط:
+
+* `/gold/import`
+
+بدون تعديل behavior أي route موجود.
+وبدون لمس ImportPage الحالية.
+
+3. Gold Excel Parsing
+   أنشئ parsing logic خاصة بالذهب فقط داخل الملف الجديد أو ملف helper جديد خاص بالذهب.
+
+Required Excel columns:
+
+* KARAT (required)
+* WEIGHT_GROSS (required)
+* UNIT_COST (required)
+
+Optional columns:
+
+* STONE_WEIGHT
+* MAKING_CHARGE
+* SUPP_REF
+* MODEL_CODE
+* DESCRIPTION
+* BARCODE
+* NOTES
+
+Behavior rules:
+
+* لا تتوقع TAG PRICE
+* لا تتوقع STOCKCODE
+* لا تستخدم jewelry KNOWN_COLUMNS
+* لا تستخدم jewelry parseFileRows()
+
+4. Frontend Validation
+   طبّق فقط pre-validation التالية:
+   Reject row if:
+
+* KARAT missing
+* WEIGHT_GROSS missing / <= 0 / invalid
+* UNIT_COST missing / <= 0 / invalid
+
+Warning only if:
+
+* STONE_WEIGHT missing
+* MAKING_CHARGE missing
+* DESCRIPTION missing
+* MODEL_CODE missing
+* BARCODE missing
+
+And:
+
+* if valid rows = 0 → prevent submit
+
+5. New RPC Allowlist Entries
+   أضف فقط إلى RPC allowlist ما يلزم لهذه الشريحة:
+
+* `gold_purchase_import_excel_atomic`
+* `gold_purchase_supp_inv_precheck`
+* `get_next_gold_item_codes_array`
+* `cleanup_gold_import_batch_atomic`
+* `gold_import_backup_log_create_atomic`
+* `gold_import_row_errors_create_atomic`
+
+ولا تغيّر أي RPC موجودة للمجوهرات.
+
+6. Gold Import API / RPC Path
+   نفّذ مسار gold import مستقل بالكامل.
+   الهدف الوظيفي:
+
+* precheck duplicate supplier invoice against gold purchase path
+* submit gold import atomically
+* generate gold item codes
+* create gold purchase invoice
+* create gold inventory items
+* create minimum accounting entry
+* return success payload واضح
+
+Important:
+لا تستخدم:
+
+* `unique_purchase_import_excel_atomic`
+* `unique_purchase_supp_inv_precheck`
+* `getNextItemCodes()`
+* أي jewelry-specific import logic
+
+7. Gold Item Identity
+   نفّذ generation مستقل لأكواد الذهب بصيغة:
+
+* `GLD-{SEQ8}`
+
+مثال:
+
+* GLD-00000142
+
+Requirements:
+
+* sequence مستقل عن المجوهرات
+* exact uniqueness
+* لا تضمّن karat أو month أو branch داخل الكود
+* barcode field:
+
+  * if provided in Excel use it
+  * else generate from gold item code safely
+
+8. Server-Side Weight Handling
+   داخل gold import path:
+
+* خزّن `g_weight_gross`
+* خزّن `stone_weight` default = 0 إذا غائبة
+* احسب `g_weight_net = g_weight_gross - stone_weight` في السيرفر فقط
+* امنع أي net weight calculation في frontend
+* ارفض أي صف لو net becomes <= 0
+
+9. Purchase Invoice Import Logic
+   نفّذ purchase import path خاص بالذهب فقط، ويجب أن ينتج على الأقل:
+
+* Gold purchase header
+* Gold imported item records
+* Gold purchase line records
+* Linkage واضح بين العناصر والفاتورة والدفعة/الاستيراد
+
+لا تلمس jewelry purchase tables.
+ولا تخلط بين gold وjewelry inventory.
+
+10. Minimum Accounting Entry
+    نفّذ الحد الأدنى فقط:
+
+* Dr. gold inventory account
+* Cr. supplier payable account
+
+مع:
+
+* `reference_type = 'gold_purchase_invoice'`
+
+واستخدم:
+
+* gold-specific account mapping where available
+* vat_rate from input with default = 0
+
+لكن:
+
+* لا تدخل making charge accounting split
+* لا تدخل revaluation
+* لا تدخل advanced tax logic
+* لا تفترض policy beyond safe default
+
+11. Error Handling and Atomicity
+    المسار كله يجب أن يكون atomic بالكامل:
+
+* no partial import
+* no partial items
+* no invoice without items
+* no items without JE
+* no JE without invoice linkage
+
+Required behavior:
+
+* precheck duplicate supplier invoice before submit
+* row-level validation errors surfaced clearly
+* backup log محفوظ
+* row error log محفوظ
+* cleanup path موجود عند الفشل
+* success response returns enough info for result summary
+
+12. Reuse Policy
+    مسموح فقط بإعادة استخدام:
+
+* generic supplier selector
+* generic branch hook
+* auth/session context
+* generic date/input UI patterns
+* XLSX library
+
+ممنوع تمامًا:
+
+* تعديل ImportPage الحالية
+* تعديل jewelry parser
+* تعديل jewelry import RPCs
+* تعديل `unique_items`
+* إدخال gold import داخل jewelry purchase flow
+* أي branching logic داخل jewelry import code
+
+Files and Change Discipline
+أريد أقل تغيير ممكن في الملفات الحالية.
+الهدف:
+
+* إضافات فقط حيث أمكن
+* عدم تعديل أي منطق مجوهرات قائم
+* عدم توسيع scope
+
+Expected Output
+بعد التنفيذ أريد تقريرًا بهذه الصيغة:
+
+1. Exact files changed
+2. New files created
+3. What was implemented exactly
+4. What remains NOT IMPLEMENTED by design
+5. Evidence أن jewelry import path لم يتأثر
+6. Evidence أن gold import path مستقل
+7. Evidence أن atomicity صحيحة
+8. Any assumptions made — must be explicitly listed
+9. Any unverified areas — must be marked NOT VERIFIED
+
+Critical Rules
+
+* No guessing
+* No scope expansion
+* No touching current jewelry flow except unavoidable route/allowlist additions
+* No implementation of sales/POS/returns
+* No hidden refactors
+* No architectural improvisation
+* Preserve current system behavior completely outside this new gold import path
