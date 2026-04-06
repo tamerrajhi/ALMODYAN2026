@@ -87,6 +87,7 @@ const getMenuSections = (t: any) => [
       { href: '/suppliers', label: t.menu.suppliers, icon: Truck },
       { href: '/import', label: t.menu.import || 'استيراد البيانات', icon: Upload },
       { href: '/imported-pieces', label: t.menu.importedPieces || 'قطع مستوردة للبيع', icon: Gem },
+      { href: '/gold/import', label: 'استيراد قطع الذهب', icon: Upload },
     ],
   },
   {

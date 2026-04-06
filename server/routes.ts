@@ -70,9 +70,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/branches", requireSession, async (req, res) => {
     try {
       let query = 'SELECT *, name AS branch_name, code AS branch_code FROM branches';
+      const conditions: string[] = [];
       const params: any[] = [];
       if (req.query.active === 'true') {
-        query += ' WHERE is_active = true';
+        conditions.push('is_active = true');
+      }
+      if (req.query.branch_type) {
+        params.push(req.query.branch_type);
+        conditions.push(`branch_type = $${params.length}`);
+      }
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
       }
       query += ' ORDER BY name';
       const result = await pool.query(query, params);
@@ -4370,6 +4378,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Settings & Config
     'app_settings_update_atomic',
     'gold_price_upsert_atomic',
+    // Gold Purchase Import
+    'gold_purchase_import_excel_atomic',
+    'gold_purchase_supp_inv_precheck',
+    'get_next_gold_item_codes_array',
+    'cleanup_gold_import_batch_atomic',
+    'gold_import_backup_log_create_atomic',
+    'gold_import_row_errors_create_atomic',
     // User Admin
     'user_set_primary_branch_atomic',
     // Lookups

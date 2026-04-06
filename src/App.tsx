@@ -129,6 +129,7 @@ const AccountingHealthCheckPage = lazy(() => import("./pages/accounting/Accounti
 const AccountingMonitoringPage = lazy(() => import("./pages/accounting/AccountingMonitoringPage"));
 
 // Vaults Module (lazy loaded)
+const GoldImportPage = lazy(() => import("./pages/gold/GoldImportPage"));
 const GoldPricesPage = lazy(() => import("./pages/gold/GoldPricesPage"));
 const GoldKaratsPage = lazy(() => import("./pages/gold/GoldKaratsPage"));
 const GoldScrapPage = lazy(() => import("./pages/gold/GoldScrapPage"));
@@ -355,6 +356,7 @@ const App = () => (
                   <Route path="/accounting/monitoring" element={<ModuleRoute moduleId="accounting"><AccountingMonitoringPage /></ModuleRoute>} />
                   
                   {/* Vaults Module Routes */}
+                  <Route path="/gold/import" element={<ModuleRoute moduleId="vaults"><GoldImportPage /></ModuleRoute>} />
                   <Route path="/gold/karats" element={<ModuleRoute moduleId="vaults"><GoldKaratsPage /></ModuleRoute>} />
                   <Route path="/gold/prices" element={<ModuleRoute moduleId="vaults"><GoldPricesPage /></ModuleRoute>} />
                   <Route path="/gold/scrap" element={<ModuleRoute moduleId="vaults"><GoldScrapPage /></ModuleRoute>} />
