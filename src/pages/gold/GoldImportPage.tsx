@@ -341,21 +341,28 @@ export default function GoldImportPage() {
         throw new Error(importError.message || 'فشل استيراد الملف');
       }
 
-      // Step 4: backup log (non-blocking)
+      // Strict guard: RPC must return identifiers — absence signals server failure
+      if (!importData?.batch_no || !importData?.invoice_number) {
+        throw new Error('استجابة غير متوقعة من السيرفر: لم يتم إرجاع رقم الدفعة أو رقم الفاتورة');
+      }
+
+      // Step 4: backup log (non-blocking, with observability logging)
       rpc('gold_import_backup_log_create_atomic', {
         p_client_request_id: clientRequestId,
         p_branch_id: branchId,
         p_supplier_id: supplierId,
         p_file_name: fileName,
         p_row_count: rows.length,
-        p_batch_id: importData?.batch_id ?? null,
-      }).catch(() => {});
+        p_batch_id: importData.batch_id,
+      }).catch((logErr: unknown) => {
+        console.warn('[GoldImport] backup log failed (non-critical):', logErr);
+      });
 
       setImportResult({
-        batch_no: importData?.batch_no ?? clientRequestId.slice(0, 8).toUpperCase(),
-        invoice_number: importData?.invoice_number ?? '-',
-        items_created: importData?.items_created ?? rows.length,
-        batch_id: importData?.batch_id,
+        batch_no: importData.batch_no,
+        invoice_number: importData.invoice_number,
+        items_created: importData.items_created,
+        batch_id: importData.batch_id,
       });
       setStep('result');
       toast.success('تم الاستيراد بنجاح');
@@ -365,10 +372,12 @@ export default function GoldImportPage() {
       setStep('preview');
       toast.error(msg);
 
-      // cleanup on failure
+      // cleanup on failure (non-blocking, with observability logging)
       rpc('cleanup_gold_import_batch_atomic', {
         p_client_request_id: clientRequestId,
-      }).catch(() => {});
+      }).catch((cleanupErr: unknown) => {
+        console.warn('[GoldImport] cleanup failed (non-critical):', cleanupErr);
+      });
     } finally {
       setIsImporting(false);
     }
