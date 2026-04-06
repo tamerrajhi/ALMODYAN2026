@@ -59,16 +59,29 @@ const ALL_GOLD_COLS = [...GOLD_REQUIRED_COLS, ...GOLD_OPTIONAL_COLS] as const;
 
 type GoldColKey = (typeof ALL_GOLD_COLS)[number];
 
+type CellValue = string | number | boolean | null;
+
 interface GoldRawRow {
   rowIndex: number;
-  raw: Record<string, any>;
-  data: Partial<Record<GoldColKey, any>>;
+  raw: Record<string, CellValue>;
+  data: Partial<Record<GoldColKey, CellValue>>;
 }
 
 interface GoldValidatedRow extends GoldRawRow {
   isValid: boolean;
   errors: string[];
   warnings: string[];
+}
+
+interface GoldPrecheckResponse {
+  is_duplicate: boolean;
+}
+
+interface GoldImportAtomicResponse {
+  batch_id: string;
+  batch_no: string;
+  invoice_number: string;
+  items_created: number;
 }
 
 // ── Parser ─────────────────────────────────────────────────────────────────
@@ -80,7 +93,7 @@ function normalizeHeader(h: string): string {
     .replace(/[^\w]/g, '_');
 }
 
-function parseGoldFileRows(sheetRows: any[][]): GoldRawRow[] {
+function parseGoldFileRows(sheetRows: CellValue[][]): GoldRawRow[] {
   if (!sheetRows || sheetRows.length < 2) return [];
 
   const headerRow = sheetRows[0].map((h) => normalizeHeader(String(h ?? '')));
@@ -88,12 +101,12 @@ function parseGoldFileRows(sheetRows: any[][]): GoldRawRow[] {
 
   return dataRows
     .map((row, idx) => {
-      const raw: Record<string, any> = {};
+      const raw: Record<string, CellValue> = {};
       headerRow.forEach((h, i) => {
-        raw[h] = row[i] ?? '';
+        raw[h] = row[i] ?? null;
       });
 
-      const data: Partial<Record<GoldColKey, any>> = {};
+      const data: Partial<Record<GoldColKey, CellValue>> = {};
       for (const col of ALL_GOLD_COLS) {
         const normalized = normalizeHeader(col);
         const val = raw[normalized];
@@ -234,7 +247,7 @@ export default function GoldImportPage() {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const sheetRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+        const sheetRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as CellValue[][];
         const raw = parseGoldFileRows(sheetRows);
         const validated = validateGoldRows(raw);
         setValidatedRows(validated);
@@ -284,7 +297,7 @@ export default function GoldImportPage() {
     try {
       // Step 1: precheck duplicate supplier invoice
       if (suppInv.trim()) {
-        const { data: precheckData, error: precheckError } = await rpc('gold_purchase_supp_inv_precheck', {
+        const { data: precheckData, error: precheckError } = await rpc<GoldPrecheckResponse>('gold_purchase_supp_inv_precheck', {
           p_supplier_id: supplierId,
           p_branch_id: branchId,
           p_supp_inv: suppInv.trim(),
@@ -292,7 +305,7 @@ export default function GoldImportPage() {
         if (precheckError) {
           throw new Error(precheckError.message || 'فشل التحقق من رقم فاتورة المورد');
         }
-        if (precheckData && (precheckData as any).is_duplicate) {
+        if (precheckData?.is_duplicate) {
           throw new Error(`رقم فاتورة المورد "${suppInv}" مسجّل مسبقاً`);
         }
       }
@@ -312,7 +325,7 @@ export default function GoldImportPage() {
       }));
 
       // Step 3: atomic import
-      const { data: importData, error: importError } = await rpc('gold_purchase_import_excel_atomic', {
+      const { data: importData, error: importError } = await rpc<GoldImportAtomicResponse>('gold_purchase_import_excel_atomic', {
         p_supplier_id: supplierId,
         p_branch_id: branchId,
         p_invoice_date: invoiceDate,
@@ -328,8 +341,6 @@ export default function GoldImportPage() {
         throw new Error(importError.message || 'فشل استيراد الملف');
       }
 
-      const result = importData as any;
-
       // Step 4: backup log (non-blocking)
       rpc('gold_import_backup_log_create_atomic', {
         p_client_request_id: clientRequestId,
@@ -337,19 +348,19 @@ export default function GoldImportPage() {
         p_supplier_id: supplierId,
         p_file_name: fileName,
         p_row_count: rows.length,
-        p_batch_id: result?.batch_id || null,
+        p_batch_id: importData?.batch_id ?? null,
       }).catch(() => {});
 
       setImportResult({
-        batch_no: result?.batch_no || clientRequestId.slice(0, 8).toUpperCase(),
-        invoice_number: result?.invoice_number || '-',
-        items_created: result?.items_created ?? rows.length,
-        batch_id: result?.batch_id,
+        batch_no: importData?.batch_no ?? clientRequestId.slice(0, 8).toUpperCase(),
+        invoice_number: importData?.invoice_number ?? '-',
+        items_created: importData?.items_created ?? rows.length,
+        batch_id: importData?.batch_id,
       });
       setStep('result');
       toast.success('تم الاستيراد بنجاح');
-    } catch (err: any) {
-      const msg = err?.message || 'حدث خطأ أثناء الاستيراد';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء الاستيراد';
       setImportError(msg);
       setStep('preview');
       toast.error(msg);
