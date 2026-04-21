@@ -55,6 +55,7 @@ import {
   BarChart3,
   Package,
   FileCheck,
+  Languages,
 } from 'lucide-react';
 
 interface MainLayoutProps {
@@ -219,7 +220,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
-  const { t, isRTL } = useLanguage();
+  const { t, language, setLanguage, isRTL } = useLanguage();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { isAdmin, isLoading: permissionsLoading, viewableScreenPaths } = useScreenPermissions();
@@ -254,11 +255,16 @@ export default function MainLayout({ children }: MainLayoutProps) {
   };
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+  const handleHeaderLanguageChange = (nextLanguage: 'ar' | 'en') => {
+    if (nextLanguage !== language) {
+      setLanguage(nextLanguage);
+    }
+  };
 
   const isLoadingState = permissionsLoading || modulesLoading;
 
   return (
-    <div className="flex w-screen h-screen overflow-hidden bg-background" dir="rtl">
+    <div className="flex w-screen h-screen overflow-hidden bg-background" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Mobile Overlay */}
       {isMobile && sidebarOpen && (
         <div 
@@ -322,9 +328,38 @@ export default function MainLayout({ children }: MainLayoutProps) {
                 {isAdmin ? t.header.admin : t.header.user}
               </span>
             </div>
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
               <DataBackendBadge />
               <NotificationBell />
+              <div
+                className="flex items-center gap-1 rounded-full border border-border bg-background/80 p-1"
+                aria-label={isRTL ? 'تغيير اللغة' : 'Change language'}
+                data-testid="control-header-language"
+              >
+                <Languages className="h-3.5 w-3.5 text-muted-foreground mx-1" aria-hidden="true" />
+                <Button
+                  type="button"
+                  variant={language === 'ar' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 rounded-full px-2 text-xs"
+                  onClick={() => handleHeaderLanguageChange('ar')}
+                  data-testid="button-header-language-ar"
+                  aria-pressed={language === 'ar'}
+                >
+                  عربي
+                </Button>
+                <Button
+                  type="button"
+                  variant={language === 'en' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 rounded-full px-2 text-xs"
+                  onClick={() => handleHeaderLanguageChange('en')}
+                  data-testid="button-header-language-en"
+                  aria-pressed={language === 'en'}
+                >
+                  EN
+                </Button>
+              </div>
               <div className="text-xs text-muted-foreground">
                 {new Date().toLocaleDateString(isRTL ? 'ar-SA' : 'en-US', { 
                   weekday: 'long', 

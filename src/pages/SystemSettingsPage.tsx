@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import MainLayout from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -19,6 +19,10 @@ export default function SystemSettingsPage() {
 
   const [resetOpen, setResetOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+
+  useEffect(() => {
+    setSelectedLanguage(language);
+  }, [language]);
 
   const handleLanguageChange = (value: 'ar' | 'en') => {
     setSelectedLanguage(value);
